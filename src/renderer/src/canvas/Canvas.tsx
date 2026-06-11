@@ -7,7 +7,9 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { Bot, GitCompareArrows, SquareDashed, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CardNode } from '@/cards/CardNode'
 import { DiffNode } from '@/diff/DiffNode'
 import { FrameNode } from '@/frames/FrameNode'
@@ -249,28 +251,80 @@ export function Canvas() {
       />
 
       <div
-        className="fixed left-24 top-3.5 z-30 flex items-center gap-3"
+        className="fixed left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-1 rounded-2xl border border-border/40 bg-background/55 p-1.5 shadow-lg shadow-black/10 backdrop-blur-xl"
         style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
       >
-        <Button onClick={() => void addCard('agent')}>+ New Agent</Button>
-        <Button variant="secondary" onClick={() => void addCard('shell')}>
-          + Terminal
-        </Button>
-        <Button variant="secondary" onClick={() => void addDiff()}>
-          + Diff
-        </Button>
-        <Button
-          variant={drawingFrame ? 'default' : 'secondary'}
-          onClick={() => setDrawingFrame((v) => !v)}
-        >
-          {drawingFrame ? 'drag to draw — esc to cancel' : '+ Frame'}
-        </Button>
-        {nodes.length === 0 && (
-          <span className="font-mono text-xs text-muted-foreground">
-            pick a folder — a real `claude` spawns in a tmux session
-          </span>
-        )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="New agent"
+                onClick={() => void addCard('agent')}
+              >
+                <Bot />
+              </Button>
+            }
+          />
+          <TooltipContent side="right">New agent</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="New terminal"
+                onClick={() => void addCard('shell')}
+              >
+                <SquareTerminal />
+              </Button>
+            }
+          />
+          <TooltipContent side="right">New terminal</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="New diff"
+                onClick={() => void addDiff()}
+              >
+                <GitCompareArrows />
+              </Button>
+            }
+          />
+          <TooltipContent side="right">New diff</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={drawingFrame ? 'default' : 'ghost'}
+                size="icon"
+                aria-label="New frame"
+                onClick={() => setDrawingFrame((v) => !v)}
+              >
+                <SquareDashed />
+              </Button>
+            }
+          />
+          <TooltipContent side="right">New frame</TooltipContent>
+        </Tooltip>
       </div>
+
+      {(drawingFrame || nodes.length === 0) && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-30 flex justify-center">
+          <span className="rounded-full border border-border/40 bg-background/55 px-3 py-1 font-mono text-xs text-muted-foreground backdrop-blur-xl">
+            {drawingFrame
+              ? 'drag to draw — esc to cancel'
+              : 'pick a folder — a real `claude` spawns in a tmux session'}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

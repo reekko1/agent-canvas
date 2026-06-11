@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
@@ -15,17 +16,21 @@ import {
 import '@xyflow/react/dist/style.css'
 import { Bot, GitCompareArrows, SquareDashed, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { AskToasts } from '@/cards/AskToasts'
 import { CardNode } from '@/cards/CardNode'
 import { DiffNode } from '@/diff/DiffNode'
 import { FrameNode } from '@/frames/FrameNode'
 import { FrameChips } from '@/frames/FrameChips'
 import { FrameDrawOverlay } from '@/frames/FrameDrawOverlay'
 import { frameMembers, nodeRect, type Rect } from '@/frames/geometry'
-import type { AskDecision, CardKind, WorkspaceItem } from '@shared/types'
+import type { CardKind, PermissionAskInfo, WorkspaceItem } from '@shared/types'
 import { CARD_GAP, CARD_H, CARD_W, DIFF_H, DIFF_W, MIN_FRAME_H, MIN_FRAME_W } from './layout'
 import type { CanvasNode } from './nodes'
+import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
 import { useCardMeta } from './useCardMeta'
+import { usePendingAsks } from './usePendingAsks'
 import { useWorkspace } from './useWorkspace'
 
 const nodeTypes = { card: CardNode, diff: DiffNode, frame: FrameNode }
@@ -36,17 +41,10 @@ const nodeTypes = { card: CardNode, diff: DiffNode, frame: FrameNode }
 /// composition.
 export function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
-  const { patchMeta, hydrateTodos } = useCardMeta(setNodes)
+  const { hydrateTodos } = useCardMeta(setNodes)
+  const { asks, decide, releaseCard } = usePendingAsks()
   const { getViewport, screenToFlowPosition, fitBounds, fitView } = useReactFlow()
   const [drawingFrame, setDrawingFrame] = useState(false)
-
-  const onDecide = useCallback(
-    (cardId: string, askId: string, decision: AskDecision) => {
-      window.canvas.decide(askId, decision)
-      patchMeta(cardId, (m) => ({ ...m, ask: null }))
-    },
-    [patchMeta],
-  )
 
   const onCloseCard = useCallback(
     (cardId: string) => {
@@ -78,9 +76,9 @@ export function Canvas() {
       width: size?.w ?? CARD_W,
       height: size?.h ?? CARD_H,
       dragHandle: '.card-drag',
-      data: { folder, kind, meta: { status: 'idle' }, onDecide, onClose: onCloseCard },
+      data: { folder, kind, meta: { status: 'idle' }, onClose: onCloseCard, onEngage: releaseCard },
     }),
-    [onDecide, onCloseCard],
+    [onCloseCard, releaseCard],
   )
 
   const makeDiff = useCallback(
@@ -136,6 +134,55 @@ export function Canvas() {
   )
 
   const { persist } = useWorkspace({ nodes, setNodes, restoreItem, hydrateTodos })
+
+  // The feed's subscription outlives renders; it reads canvas state through
+  // this ref instead of re-subscribing every time a node moves.
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+
+  const titleFor = useCallback((cardId: string) => {
+    const n = nodesRef.current.find((x) => x.id === cardId)
+    const folder = n && n.type === 'card' ? n.data.folder : undefined
+    return folder?.split('/').filter(Boolean).pop() ?? 'agent'
+  }, [])
+
+  const { notifications, setNotifications } = useActivityFeed(titleFor)
+
+  const flyTo = useCallback(
+    (cardId: string) => {
+      const node = nodesRef.current.find((x) => x.id === cardId)
+      if (!node) return // card closed since the row was written
+      const r = nodeRect(node)
+      void fitBounds({ x: r.x, y: r.y, width: r.w, height: r.h }, { duration: 600, padding: 0.12 })
+    },
+    [fitBounds],
+  )
+
+  /** Activity row click → fly to the card that spoke (the row's whole point). */
+  const flyToCard = useCallback(
+    (n: Notification) => flyTo((n as ActivityNotification).cardId),
+    [flyTo],
+  )
+
+  /** Toast context: who's asking, and what they're in the middle of. */
+  const askContextFor = useCallback((cardId: string) => {
+    const n = nodesRef.current.find((x) => x.id === cardId)
+    if (!n || n.type !== 'card') return { name: 'agent' }
+    return {
+      name: n.data.folder.split('/').filter(Boolean).pop() ?? 'agent',
+      task: n.data.meta.task ?? n.data.meta.detail,
+    }
+  }, [])
+
+  /** Toast body click: release the ask (the dialog falls through to the
+   *  card's terminal) and fly there to answer it natively. */
+  const flyToAsk = useCallback(
+    (ask: PermissionAskInfo) => {
+      decide(ask.askId, 'release')
+      flyTo(ask.cardId)
+    },
+    [decide, flyTo],
+  )
 
   /** Spawn point centered in the current view, cascading down-right while
    *  another item already sits exactly there so repeat spawns stay distinct. */
@@ -383,6 +430,21 @@ export function Canvas() {
           <TooltipContent side="right">New frame</TooltipContent>
         </Tooltip>
       </div>
+
+      {/* Activity center: the spine's feed-worthy rows under a bell. Sits in
+          the drag strip, so it carves itself out of the region. */}
+      <div
+        className="fixed right-3 top-3 z-30"
+        style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+      >
+        <NotificationPopover
+          notifications={notifications}
+          onNotificationsChange={(ns) => setNotifications(ns as ActivityNotification[])}
+          onNotificationClick={flyToCard}
+        />
+      </div>
+
+      <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
 
       {(drawingFrame || nodes.length === 0) && (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-30 flex justify-center">

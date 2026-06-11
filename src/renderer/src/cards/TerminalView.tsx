@@ -45,7 +45,7 @@ export function TerminalView({
   folder,
   kind,
   hidden,
-  holdsAsk,
+  onEngage,
 }: {
   cardId: string
   folder: string
@@ -54,7 +54,7 @@ export function TerminalView({
    *  display: layout holds the card's size and xterm keeps consuming the
    *  stream; only compositing stops. */
   hidden: boolean
-  holdsAsk: boolean
+  onEngage: () => void
 }) {
   const termRef = useRef<HTMLDivElement>(null)
 
@@ -155,11 +155,9 @@ export function TerminalView({
     <div
       className="nodrag nowheel h-full p-3"
       style={{ visibility: hidden ? 'hidden' : 'visible' }}
-      // Fly-in rule: while an ask is held the terminal shows no dialog, so
-      // engaging with the terminal releases it to the native dialog.
-      onMouseDown={() => {
-        if (holdsAsk) window.canvas.releaseAsks(cardId)
-      }}
+      // Fly-in rule: while an ask is held (toast up), the terminal shows no
+      // dialog — engaging the terminal releases it to the native dialog.
+      onMouseDown={onEngage}
     >
       <div ref={termRef} className="h-full w-full" />
     </div>

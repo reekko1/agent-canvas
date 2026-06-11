@@ -2,12 +2,11 @@ import { useStore, type NodeProps } from '@xyflow/react'
 import { STATUS_COLORS, type CardData } from './meta'
 import { TerminalView } from './TerminalView'
 import { PosterFace, posterCompensation } from './PosterFace'
-import { AskOverlay } from './AskOverlay'
 import { ResizeGrip } from './ResizeGrip'
 
 /// One agent on the canvas: status-tinted chrome around a live terminal,
-/// swapping to the poster face at far zoom, with the ask overlay and resize
-/// grip riding on top. Pure composition — each face owns its own behavior.
+/// swapping to the poster face at far zoom, with the resize grip riding on
+/// top. Pure composition — each face owns its own behavior.
 export function CardNode({ id, data }: NodeProps & { data: CardData }) {
   const { meta, folder, kind } = data
   const isShell = kind === 'shell'
@@ -53,7 +52,7 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
           folder={folder}
           kind={kind}
           hidden={compensation > 0}
-          holdsAsk={!!meta.ask}
+          onEngage={() => data.onEngage(id)}
         />
         {compensation > 0 && (
           <PosterFace meta={meta} folderName={folderName} compensation={compensation} />
@@ -61,10 +60,6 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
       </div>
 
       <ResizeGrip />
-
-      {meta.ask && (
-        <AskOverlay ask={meta.ask} onDecide={(askId, d) => data.onDecide(id, askId, d)} />
-      )}
     </div>
   )
 }

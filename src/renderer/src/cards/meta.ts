@@ -1,10 +1,4 @@
-import type {
-  AgentTodo,
-  CardEvent,
-  CardKind,
-  CardStatus,
-  PermissionAskInfo,
-} from '@shared/types'
+import type { AgentTodo, CardEvent, CardKind, CardStatus } from '@shared/types'
 
 // Status palette lives in index.css (:root tokens); loud = blocked/error.
 export const STATUS_COLORS: Record<CardStatus, string> = {
@@ -33,7 +27,6 @@ export interface CardMeta {
   permissionMode?: string
   subagents?: number
   todos?: AgentTodo[]
-  ask?: PermissionAskInfo | null
 }
 
 export interface CardData extends Record<string, unknown> {
@@ -42,8 +35,10 @@ export interface CardData extends Record<string, unknown> {
    *  spine never speaks about it, so its meta stays idle forever. */
   kind: CardKind
   meta: CardMeta
-  onDecide: (cardId: string, askId: string, decision: 'allow' | 'deny') => void
   onClose: (cardId: string) => void
+  /** Terminal engaged (mousedown) — releases any held asks to the native
+   *  dialog and clears their toasts. */
+  onEngage: (cardId: string) => void
 }
 
 /** Fold one spine event into a card's meta (pure — the canvas owns the state,
@@ -53,9 +48,6 @@ export function applyCardEvent(m: CardMeta, ev: CardEvent): CardMeta {
   if (ev.status) {
     if (ev.status !== meta.status) meta.statusSince = Date.now()
     meta.status = ev.status
-    // Any non-blocked status means the ask resolved CLI-side (answered,
-    // timed out, or released) — never leave a stale overlay up.
-    if (ev.status !== 'blocked') meta.ask = null
   }
   if (ev.detail) meta.detail = ev.detail
   if (ev.taskLabel) meta.task = ev.taskLabel

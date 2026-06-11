@@ -43,15 +43,11 @@ export function useCardMeta(setNodes: SetNodes) {
       patchMeta(cardId, (m) => applyCardEvent(m, ev))
       if (ev.sessionId) hydrateTodos(cardId, ev.sessionId)
     })
-    const offAsk = window.canvas.onAsk((ask) => {
-      patchMeta(ask.cardId, (m) => ({ ...m, ask }))
-    })
     const offExit = window.canvas.onPtyExit((cardId) => {
-      patchMeta(cardId, (m) => ({ ...m, status: 'idle', detail: 'terminal exited', ask: null }))
+      patchMeta(cardId, (m) => ({ ...m, status: 'idle', detail: 'terminal exited' }))
     })
     return () => {
       offEvent()
-      offAsk()
       offExit()
     }
   }, [patchMeta, hydrateTodos])

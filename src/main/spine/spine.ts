@@ -108,6 +108,13 @@ export class Spine {
     this.tmux.kill(`canvas-${cardId}`)
   }
 
+  /** Snap a card's session out of scrollback (tmux copy-mode), if it's in
+   *  it — the renderer awaits this before the first keystroke after a
+   *  wheel-scroll. */
+  leaveScrollback(cardId: string): Promise<void> {
+    return this.tmux.cancelCopyMode(`canvas-${cardId}`)
+  }
+
   /** The CLI's stored plan for a session — the re-hydration read. */
   todos(sessionId: string) {
     return this.adapter.currentTodos(sessionId)

@@ -44,18 +44,40 @@ export class Tmux {
     }
     // Minimal by intent: no status bar (the card chrome is the status bar),
     // no Esc delay (Esc is interrupt in the claude TUI), generous scrollback.
+    // Mouse on is what makes wheel-scroll work at all: tmux holds the
+    // history (xterm only ever sees tmux's alternate screen), and wheel-up
+    // over a non-mouse app enters copy-mode and scrolls it.
     const conf = `# Agent Canvas — governs only the '${this.socket}' socket; your ~/.tmux.conf is untouched.
 set -g status off
 set -s escape-time 0
 set -g default-terminal "xterm-256color"
 set -g history-limit 50000
 set -g focus-events on
+# Mouse is on for SCROLLBACK ONLY. Selection never reaches tmux: the
+# renderer strips mouse-tracking sequences before xterm sees them (so
+# drags select natively, like any normal terminal) and synthesizes wheel
+# reports itself — wheels are the only mouse events that ever arrive.
+# One line per report keeps trackpads smooth; -He hides the position
+# indicator and auto-exits at the bottom. Esc / q also exit; typing exits
+# via the renderer (it cancels copy-mode before delivering the keystroke).
+set -g mouse on
+bind -T root WheelUpPane if -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send -M } { copy-mode -He ; send -X scroll-up }
+bind -T copy-mode WheelUpPane send -X scroll-up
+bind -T copy-mode WheelDownPane send -X scroll-down
+bind -T copy-mode-vi WheelUpPane send -X scroll-up
+bind -T copy-mode-vi WheelDownPane send -X scroll-down
+bind -T copy-mode Escape send -X cancel
+bind -T copy-mode-vi Escape send -X cancel
 `
     try {
       mkdirSync(this.dir, { recursive: true })
       const p = join(this.dir, 'tmux.conf')
       writeFileSync(p, conf)
       this.confPath = p
+      // A server may already be running with older settings (sessions outlive
+      // the app) — re-source the conf so changes land without a fleet restart.
+      // No server → execFile errors → ignored.
+      execFile(this.binary, ['-L', this.socket, 'source-file', p], () => {})
       console.log(`[tmux] substrate ready (${this.binary})`)
     } catch (err) {
       console.error('[tmux] conf write failed — substrate off', err)
@@ -86,6 +108,22 @@ set -g focus-events on
         command,
       ],
     }
+  }
+
+  /** Leave copy-mode (scrollback) in a session, if it's in it. The renderer
+   *  calls this before delivering the first keystroke after a wheel-scroll,
+   *  so typing lands in the app, never in copy-mode. Resolves once the tmux
+   *  server has processed it — the caller may then write the keystroke.
+   *  Not in copy-mode → tmux errors → ignored. */
+  cancelCopyMode(session: string): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.binary) return resolve()
+      execFile(
+        this.binary,
+        ['-L', this.socket, 'send-keys', '-t', '=' + session, '-X', 'cancel'],
+        () => resolve(),
+      )
+    })
   }
 
   /** Kill a session — the ✕-delete path, the one place the canvas ends an

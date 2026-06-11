@@ -174,6 +174,9 @@ export interface CanvasApi {
   gitAction(folder: string, action: GitActionRequest): Promise<GitActionResult>
   onDiffSnapshot(cb: (diffId: string, snapshot: GitSnapshot) => void): () => void
   write(cardId: string, data: string): void
+  /** Exit tmux scrollback (copy-mode) if the card's session is in it —
+   *  awaited before the first keystroke after a wheel-scroll. */
+  leaveScrollback(cardId: string): Promise<void>
   resize(cardId: string, cols: number, rows: number): void
   decide(askId: string, decision: AskDecision): void
   /** Release every held ask for a card — the fly-in path: while held, the

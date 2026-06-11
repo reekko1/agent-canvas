@@ -121,6 +121,7 @@ ipcMain.handle('kill-card', (_e, cardId: string) => {
 })
 
 ipcMain.on('pty-write', (_e, cardId: string, data: string) => ptys.write(cardId, data))
+ipcMain.handle('leave-scrollback', (_e, cardId: string) => spine.leaveScrollback(cardId))
 ipcMain.on('pty-resize', (_e, cardId: string, cols: number, rows: number) =>
   ptys.resize(cardId, cols, rows),
 )

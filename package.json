@@ -8,7 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist": "Packaging/package.sh",
-    "postinstall": "electron-rebuild -f -w node-pty"
+    "postinstall": "patch-package && electron-rebuild -f -w node-pty"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
@@ -34,6 +34,7 @@
     "electron-builder": "^26.0.0",
     "electron-vite": "^3.0.0",
     "lucide-react": "^1.17.0",
+    "patch-package": "^8.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "shadcn": "^4.11.0",

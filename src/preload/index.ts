@@ -23,6 +23,7 @@ const api: CanvasApi = {
   loadWorkspace: () => ipcRenderer.invoke('load-workspace'),
   saveWorkspace: (snapshot) => ipcRenderer.send('save-workspace', snapshot),
   write: (cardId, data) => ipcRenderer.send('pty-write', cardId, data),
+  leaveScrollback: (cardId) => ipcRenderer.invoke('leave-scrollback', cardId),
   resize: (cardId, cols, rows) => ipcRenderer.send('pty-resize', cardId, cols, rows),
   decide: (askId, decision: AskDecision) => ipcRenderer.send('decide-ask', askId, decision),
   releaseAsks: (cardId) => ipcRenderer.send('release-asks', cardId),

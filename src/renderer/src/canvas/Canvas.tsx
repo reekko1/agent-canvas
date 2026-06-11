@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -240,7 +240,18 @@ export function Canvas() {
 
       {drawingFrame && <FrameDrawOverlay onCommit={finishFrameDraw} />}
 
-      <div className="fixed left-3.5 top-3.5 z-30 flex items-center gap-3">
+      {/* With titleBarStyle: hiddenInset there is no title bar — this strip is
+          how the window gets dragged. The toolbar below is no-drag, so its
+          buttons carve themselves out of the region. */}
+      <div
+        className="fixed inset-x-0 top-0 z-20 h-12"
+        style={{ WebkitAppRegion: 'drag' } as CSSProperties}
+      />
+
+      <div
+        className="fixed left-24 top-3.5 z-30 flex items-center gap-3"
+        style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+      >
         <Button onClick={() => void addCard('agent')}>+ New Agent</Button>
         <Button variant="secondary" onClick={() => void addCard('shell')}>
           + Terminal

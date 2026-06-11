@@ -24,6 +24,9 @@ function createWindow(): void {
     width: 1680,
     height: 1050,
     title: 'Agent Canvas',
+    // Content bleeds under the title bar; only the traffic lights remain.
+    // The renderer provides the drag strip (.app-drag in Canvas).
+    titleBarStyle: 'hiddenInset',
     backgroundColor: '#0f0f14',
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })

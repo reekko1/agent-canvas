@@ -88,7 +88,9 @@
    always-dark terminals, these follow the mode: paper ink by day.
    Status: cool+quiet calm, warm+bright loud. */
 :root {
-    --terminal-background: #f4f0e8;
+    /* == light --card (oklch 0.985 0.006 82) in hex — same treatment as
+       dark: the terminal matches the card body it sits in. */
+    --terminal-background: #fcfaf6;
     --terminal-foreground: #2d2c38;
     --terminal-cursor: #2d2c38;
     --terminal-selection: #dbdbf5;
@@ -102,7 +104,9 @@
 }
 
 .dark {
-    --terminal-background: #0c0b14;
+    /* == dark --card (oklch 0.245 0.022 290) in hex — the terminal sits
+       seamless inside the card's bluish plum-indigo chrome. */
+    --terminal-background: #201f2a;
     --terminal-foreground: #c3d5d6;
     --terminal-cursor: #c3d5d6;
     --terminal-selection: #35354e;

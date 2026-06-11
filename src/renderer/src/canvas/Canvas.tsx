@@ -137,22 +137,36 @@ export function Canvas() {
 
   const { persist } = useWorkspace({ nodes, setNodes, restoreItem, hydrateTodos })
 
-  /** Stagger new items in a loose grid below/right of existing ones. */
-  const nextPosition = (count: number) => ({
-    x: 120 + (count % 4) * (CARD_W + CARD_GAP),
-    y: 120 + Math.floor(count / 4) * (CARD_H + CARD_GAP),
-  })
+  /** Spawn point centered in the current view, cascading down-right while
+   *  another item already sits exactly there so repeat spawns stay distinct. */
+  const spawnPosition = useCallback(
+    (w: number, h: number, ns: CanvasNode[]) => {
+      const c = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+      const pos = { x: c.x - w / 2, y: c.y - h / 2 }
+      const taken = () =>
+        ns.some((n) => Math.abs(n.position.x - pos.x) < 1 && Math.abs(n.position.y - pos.y) < 1)
+      while (taken()) {
+        pos.x += CARD_GAP
+        pos.y += CARD_GAP
+      }
+      return pos
+    },
+    [screenToFlowPosition],
+  )
 
   async function addCard(kind: CardKind): Promise<void> {
     const r = await (kind === 'shell' ? window.canvas.newShell() : window.canvas.newCard())
     if (!r) return
-    setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, nextPosition(ns.length), undefined, kind)])
+    setNodes((ns) => [
+      ...ns,
+      makeCard(r.cardId, r.folder, spawnPosition(CARD_W, CARD_H, ns), undefined, kind),
+    ])
   }
 
   async function addDiff(): Promise<void> {
     const r = await window.canvas.newDiff()
     if (!r) return
-    setNodes((ns) => [...ns, makeDiff(r.diffId, r.folder, nextPosition(ns.length))])
+    setNodes((ns) => [...ns, makeDiff(r.diffId, r.folder, spawnPosition(DIFF_W, DIFF_H, ns))])
   }
 
   /** The draw gesture committed (screen coords) — convert to document space

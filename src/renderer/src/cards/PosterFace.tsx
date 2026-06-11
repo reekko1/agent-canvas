@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties } from 'react'
-import { STATUS_COLORS, type CardMeta } from './CardNode'
-import type { AgentTodo } from '../../shared/types'
+import { STATUS_COLORS, type CardMeta } from './meta'
+import type { AgentTodo } from '@shared/types'
 
 // Poster tunables (port of the Swift CanvasLayout poster constants).
 /** Below this canvas zoom an agent card shows its poster face. */

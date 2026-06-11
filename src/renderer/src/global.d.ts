@@ -1,4 +1,4 @@
-import type { CanvasApi } from '../../shared/types'
+import type { CanvasApi } from '@shared/types'
 
 declare global {
   interface Window {

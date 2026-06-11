@@ -11,7 +11,6 @@ import type { AskDecision, CardEvent, PermissionAskInfo } from '../../shared/typ
 // socket. The two canvases can run side by side until cutover, when this
 // becomes ~/.agentcanvas + 'agentcanvas' and inherits the production fleet.
 export const SPINE_DIR = join(homedir(), '.agentcanvas-web')
-const DIR = SPINE_DIR
 const SOCKET = 'agentcanvas-web'
 
 /// The spine's persistent identity — token + sink port — survives app restarts.
@@ -25,7 +24,7 @@ interface SpineConfig {
 
 function loadConfig(): SpineConfig {
   try {
-    const cfg = JSON.parse(readFileSync(join(DIR, 'spine.json'), 'utf8'))
+    const cfg = JSON.parse(readFileSync(join(SPINE_DIR, 'spine.json'), 'utf8'))
     if (typeof cfg.token === 'string' && cfg.token) return cfg
   } catch {
     // first run / unreadable → fresh identity
@@ -34,8 +33,8 @@ function loadConfig(): SpineConfig {
 }
 
 function saveConfig(cfg: SpineConfig): void {
-  mkdirSync(DIR, { recursive: true })
-  const file = join(DIR, 'spine.json')
+  mkdirSync(SPINE_DIR, { recursive: true })
+  const file = join(SPINE_DIR, 'spine.json')
   writeFileSync(file, JSON.stringify(cfg, null, 2))
   chmodSync(file, 0o600) // carries the sink token — same secrecy rules as hooks.json
 }
@@ -60,7 +59,7 @@ export class Spine {
   onAsk?: (ask: PermissionAskInfo) => void
 
   private adapter = new ClaudeAdapter()
-  private tmux = new Tmux(DIR, SOCKET)
+  private tmux = new Tmux(SPINE_DIR, SOCKET)
   private config = loadConfig()
   private sink = new HookSink(this.config.token)
   private asks = new Map<string, HeldAsk>()
@@ -74,7 +73,7 @@ export class Spine {
     this.sink.start(this.config.sinkPort, (port) => {
       this.config.sinkPort = port
       saveConfig(this.config)
-      this.adapter.installConfig(DIR, port, this.config.token)
+      this.adapter.installConfig(SPINE_DIR, port, this.config.token)
       console.log(`[spine] sink ready on 127.0.0.1:${port}`)
     })
   }

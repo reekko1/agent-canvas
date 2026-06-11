@@ -65,7 +65,7 @@ export function FrameChips({
         return (
           <div
             key={frame.id}
-            className="pointer-events-auto absolute flex cursor-grab select-none items-center gap-2 rounded-xl border bg-muted px-2.5 py-1.5 font-mono text-[13px] font-semibold shadow-lg active:cursor-grabbing"
+            className="pointer-events-auto absolute flex select-none items-center gap-2 rounded-xl border bg-muted px-2.5 py-1.5 font-mono text-[13px] font-semibold shadow-lg"
             style={{ left, top }}
             title="Drag to move · click to zoom to frame · double-click to rename · right-click to delete"
             onPointerDown={(e) => {

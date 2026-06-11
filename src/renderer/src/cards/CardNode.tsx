@@ -23,7 +23,7 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
       className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border-2 bg-card shadow-2xl"
       style={{ borderColor: color }}
     >
-      <div className="card-drag flex cursor-grab items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
+      <div className="card-drag flex items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
         {isShell ? (
           <span className="font-bold text-muted-foreground">SHELL</span>
         ) : (

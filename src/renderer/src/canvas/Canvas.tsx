@@ -6,13 +6,7 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
 } from 'react'
-import {
-  Background,
-  BackgroundVariant,
-  ReactFlow,
-  useNodesState,
-  useReactFlow,
-} from '@xyflow/react'
+import { ReactFlow, useNodesState, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Bot, GitCompareArrows, SquareDashed, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -26,12 +20,23 @@ import { FrameChips } from '@/frames/FrameChips'
 import { FrameDrawOverlay } from '@/frames/FrameDrawOverlay'
 import { frameMembers, nodeRect, type Rect } from '@/frames/geometry'
 import type { CardKind, PermissionAskInfo, WorkspaceItem } from '@shared/types'
-import { CARD_GAP, CARD_H, CARD_W, DIFF_H, DIFF_W, MIN_FRAME_H, MIN_FRAME_W } from './layout'
+import {
+  CARD_GAP,
+  CARD_H,
+  CARD_W,
+  DIFF_H,
+  DIFF_W,
+  MAX_ZOOM,
+  MIN_FRAME_H,
+  MIN_FRAME_W,
+} from './layout'
 import type { CanvasNode } from './nodes'
 import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
 import { useCardMeta } from './useCardMeta'
 import { usePendingAsks } from './usePendingAsks'
 import { useWorkspace } from './useWorkspace'
+import { useZoomLimits } from './useZoomLimits'
+import { VideoBackdrop } from './VideoBackdrop'
 
 const nodeTypes = { card: CardNode, diff: DiffNode, frame: FrameNode }
 
@@ -134,6 +139,7 @@ export function Canvas() {
   )
 
   const { persist } = useWorkspace({ nodes, setNodes, restoreItem, hydrateTodos })
+  const minZoom = useZoomLimits(nodes)
 
   // The feed's subscription outlives renders; it reads canvas state through
   // this ref instead of re-subscribing every time a node moves.
@@ -173,6 +179,21 @@ export function Canvas() {
       task: n.data.meta.task ?? n.data.meta.detail,
     }
   }, [])
+
+  /** Real bring-to-front: move the node to the end of the array (= DOM paint
+   *  order, = persisted order). Selection elevation alone is transient — a
+   *  deselected node falls back to array order, which is why depth felt
+   *  random. Frames stay out: they're backdrops pinned at zIndex -1. */
+  const raiseToTop = useCallback(
+    (nodeId: string) => {
+      setNodes((ns) => {
+        const i = ns.findIndex((n) => n.id === nodeId)
+        if (i === -1 || ns[i].type === 'frame' || i === ns.length - 1) return ns
+        return [...ns.slice(0, i), ...ns.slice(i + 1), ns[i]]
+      })
+    },
+    [setNodes],
+  )
 
   /** Toast body click: release the ask (the dialog falls through to the
    *  card's terminal) and fly there to answer it natively. */
@@ -332,21 +353,31 @@ export function Canvas() {
 
   return (
     <div className="relative h-screen w-screen" onDoubleClickCapture={onDoubleClickCapture}>
+      {/* Window-fixed studio wall behind the (transparent) flow pane —
+          replaces the dot grid; the canvas glides over it. */}
+      <VideoBackdrop />
+
       <ReactFlow
         nodes={nodes}
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
-        minZoom={0.08}
-        maxZoom={1.25}
+        minZoom={minZoom}
+        maxZoom={MAX_ZOOM}
+        // Figma-style navigation: two-finger scroll pans, pinch (ctrl/⌘+wheel)
+        // zooms, click-drag on the pane still pans. Terminals keep their own
+        // wheel (nowheel) for tmux scrollback.
+        panOnScroll
+        panOnScrollSpeed={1}
+        zoomOnPinch
         proOptions={{ hideAttribution: true }}
         onMoveEnd={persist}
+        onNodeClick={(_e, node) => raiseToTop(node.id)}
+        onNodeDragStart={(_e, node) => raiseToTop(node.id)}
         onNodeDrag={(_e, node) => {
           if (node.type !== 'frame') highlightFrames(node as CanvasNode)
         }}
         onNodeDragStop={() => highlightFrames(null)}
-      >
-        <Background variant={BackgroundVariant.Dots} color="var(--border)" gap={32} />
-      </ReactFlow>
+      />
 
       <FrameChips
         nodes={nodes}

@@ -20,3 +20,10 @@ export const MIN_FRAME_H = 200
 
 /** Gap between cards in the new-card placement grid. */
 export const CARD_GAP = 80
+
+/** Never zoom past 1:1 — card document units equal terminal native pixels,
+ *  so 1.0 is exactly crisp and anything above is upscale blur. */
+export const MAX_ZOOM = 1.0
+
+/** Breathing room added around content when computing the "fit all" bounds. */
+export const CONTENT_MARGIN = 120

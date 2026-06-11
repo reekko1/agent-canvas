@@ -127,7 +127,7 @@ export function DiffNode({ id, data }: NodeProps & { data: DiffData }) {
     <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border-2 border-border bg-card shadow-2xl">
       {/* Calm, neutral chrome — status colors belong to agent cards, not diffs.
           The trailing diffstat is the at-distance cue at god-view. */}
-      <div className="card-drag flex cursor-grab items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
+      <div className="card-drag flex items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
         <span className="font-bold">{folderName}</span>
         <span className="flex-1" />
         {snap && !snap.isRepo && <span className="text-muted-foreground">not a repo</span>}

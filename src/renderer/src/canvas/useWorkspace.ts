@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { CARD_H, CARD_W } from './layout'
+import { CARD_H, CARD_W, MAX_ZOOM } from './layout'
 import type { CanvasNode } from './nodes'
 import type { WorkspaceItem } from '@shared/types'
 
@@ -30,7 +30,11 @@ export function useWorkspace({
     void (async () => {
       const ws = await window.canvas.loadWorkspace()
       if (ws) {
-        if (ws.viewport) void setViewport(ws.viewport)
+        // Clamp the saved zoom into today's ceiling (older workspaces could
+        // save up to 1.25); the dynamic floor re-clamps once nodes land.
+        if (ws.viewport) {
+          void setViewport({ ...ws.viewport, zoom: Math.min(ws.viewport.zoom, MAX_ZOOM) })
+        }
         const items = ws.items.filter((i) => i.kind === 'frame' || i.folder)
         setNodes(items.map(restoreItem).filter((n): n is CanvasNode => n !== null))
         // Reattached sessions sit silent until their next hook event — pull

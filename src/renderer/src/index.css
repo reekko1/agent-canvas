@@ -241,6 +241,15 @@
     opacity: 1;
 }
 
+/* Cards behave like macOS windows: the cursor stays a plain arrow everywhere,
+   including the title bar and mid-drag. Overrides xyflow's wrapper-wide
+   grab/pointer/grabbing. */
+.react-flow__node.draggable,
+.react-flow__node.selectable,
+.react-flow__node.draggable.dragging {
+    cursor: default;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

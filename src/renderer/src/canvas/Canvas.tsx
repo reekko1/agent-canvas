@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -31,7 +37,7 @@ const nodeTypes = { card: CardNode, diff: DiffNode, frame: FrameNode }
 export function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   const { patchMeta, hydrateTodos } = useCardMeta(setNodes)
-  const { getViewport } = useReactFlow()
+  const { getViewport, screenToFlowPosition, fitBounds, fitView } = useReactFlow()
   const [drawingFrame, setDrawingFrame] = useState(false)
 
   const onDecide = useCallback(
@@ -215,8 +221,56 @@ export function Canvas() {
     [setNodes],
   )
 
+  /** Double-click fits the camera to what's under the pointer — same move as
+   *  clicking a frame's chip. Cards/diffs fit from their chrome only (drag
+   *  header or far-zoom poster face): the terminal owns double-click for word
+   *  selection, and buttons/overlays keep their own behavior. Frames are
+   *  pointer-transparent, so the pane catches the event and we hit-test by
+   *  geometry. Capture phase, because stopping propagation here is what keeps
+   *  d3's double-click zoom from also firing. Empty canvas (no frame under
+   *  the pointer) fits everything — the zoomed-out overview. */
+  const onDoubleClickCapture = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement
+      const fitTo = (n: CanvasNode) => {
+        e.stopPropagation()
+        const r = nodeRect(n)
+        void fitBounds(
+          { x: r.x, y: r.y, width: r.w, height: r.h },
+          { duration: 600, padding: 0.12 },
+        )
+      }
+
+      const nodeEl = target.closest<HTMLElement>('.react-flow__node')
+      if (nodeEl) {
+        if (target.closest('button') || !target.closest('.card-drag, .poster-face')) return
+        const node = nodes.find((n) => n.id === nodeEl.dataset.id)
+        if (node) fitTo(node)
+        return
+      }
+
+      if (!target.closest('.react-flow__pane')) return
+      const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const hit = nodes
+        .filter((n) => n.type === 'frame')
+        .map((n) => ({ n, r: nodeRect(n) }))
+        .filter(({ r }) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
+        .sort((a, b) => a.r.w * a.r.h - b.r.w * b.r.h)[0] // overlapping frames: most specific wins
+      if (hit) {
+        fitTo(hit.n)
+        return
+      }
+
+      // Truly empty canvas → fit everything (replaces d3's double-click zoom).
+      if (nodes.length === 0) return
+      e.stopPropagation()
+      void fitView({ duration: 600, padding: 0.12 })
+    },
+    [nodes, screenToFlowPosition, fitBounds, fitView],
+  )
+
   return (
-    <div className="relative h-screen w-screen">
+    <div className="relative h-screen w-screen" onDoubleClickCapture={onDoubleClickCapture}>
       <ReactFlow
         nodes={nodes}
         onNodesChange={onNodesChange}

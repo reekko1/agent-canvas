@@ -142,7 +142,7 @@ export function PosterFace({
   const rows = showsTodos ? checklistRows(meta.todos ?? [], rowBudget) : []
 
   return (
-    <div ref={ref} className="absolute inset-0 overflow-hidden bg-card">
+    <div ref={ref} className="poster-face absolute inset-0 overflow-hidden bg-card">
       <div
         className="flex flex-col gap-[14px]"
         style={{

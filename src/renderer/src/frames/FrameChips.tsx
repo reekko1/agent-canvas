@@ -49,9 +49,13 @@ export function FrameChips({
         if (screen.x + screen.w < 0 || screen.y + screen.h < 0) return null
         if (screen.x > window.innerWidth || screen.y > window.innerHeight) return null
 
+        // Top clamp clears the hiddenInset traffic lights AND the h-12 window
+        // drag strip (z-20, above this layer) — a chip pinned under either is
+        // hidden and/or unclickable.
         const pad = 8
+        const topPad = 48
         const left = Math.min(Math.max(screen.x + 12, pad), window.innerWidth - 160)
-        const top = Math.min(Math.max(screen.y + 12, pad), window.innerHeight - 44)
+        const top = Math.min(Math.max(screen.y + 12, topPad), window.innerHeight - 44)
 
         const members = frameMembers(frame, nodes)
         const loud = members.some(

@@ -3,21 +3,33 @@ import type { NodeProps } from '@xyflow/react'
 import { Terminal } from '@xterm/xterm'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
+import { Button } from '@/components/ui/button'
 import type { CardStatus, PermissionAskInfo } from '../../shared/types'
 
 const COLS = 100
 const ROWS = 28
 
-// Mirrors the Swift CardStatus palette role-for-role (loud = blocked/error).
+// Status palette lives in index.css (:root tokens); loud = blocked/error.
 export const STATUS_COLORS: Record<CardStatus, string> = {
-  idle: '#565f89',
-  running: '#7aa2f7',
-  waiting: '#e0af68',
-  done: '#9ece6a',
-  stalled: '#ff9e64',
-  blocked: '#f7768e',
-  error: '#db4b4b',
+  idle: 'var(--status-idle)',
+  running: 'var(--status-running)',
+  waiting: 'var(--status-waiting)',
+  done: 'var(--status-done)',
+  stalled: 'var(--status-stalled)',
+  blocked: 'var(--status-blocked)',
+  error: 'var(--status-error)',
 }
+
+// xterm renders to canvas, so it needs resolved values, not var() references.
+const cssVar = (name: string) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+
+const terminalTheme = () => ({
+  background: cssVar('--terminal-background'),
+  foreground: cssVar('--terminal-foreground'),
+  cursor: cssVar('--terminal-cursor'),
+  selectionBackground: cssVar('--terminal-selection'),
+})
 
 export interface CardMeta {
   status: CardStatus
@@ -47,7 +59,15 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
       fontSize: 12,
       fontFamily: 'Menlo, monospace',
       scrollback: 5000,
-      theme: { background: '#16161e', foreground: '#c0caf5' },
+      theme: terminalTheme(),
+    })
+    // Re-resolve the terminal palette when dark/light flips on <html>.
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = terminalTheme()
+    })
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
     })
     term.open(termRef.current!)
     try {
@@ -63,6 +83,7 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
     const input = term.onData((d) => window.canvas.write(id, d))
     window.canvas.resize(id, COLS, ROWS)
     return () => {
+      themeObserver.disconnect()
       offData()
       input.dispose()
       term.dispose()
@@ -73,57 +94,31 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
 
   return (
     <div
-      style={{
-        background: '#16161e',
-        border: `2px solid ${color}`,
-        borderRadius: 10,
-        overflow: 'hidden',
-        boxShadow: '0 10px 40px rgba(0,0,0,.55)',
-        position: 'relative',
-      }}
+      className="relative overflow-hidden rounded-2xl border-2 bg-card shadow-2xl"
+      style={{ borderColor: color }}
     >
-      <div
-        className="card-drag"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '7px 12px',
-          background: '#1f2030',
-          color: '#a9b1d6',
-          font: '12px Menlo',
-          cursor: 'grab',
-        }}
-      >
-        <span style={{ color, fontWeight: 700 }}>{meta.status.toUpperCase()}</span>
-        <span style={{ color: '#565f89' }}>{folderName}</span>
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div className="card-drag flex cursor-grab items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
+        <span className="font-bold" style={{ color }}>{meta.status.toUpperCase()}</span>
+        <span className="text-muted-foreground">{folderName}</span>
+        <span className="flex-1 truncate">
           {meta.task ?? meta.detail ?? ''}
         </span>
-        {meta.model && <span style={{ color: '#565f89' }}>{meta.model}</span>}
+        {meta.model && <span className="text-muted-foreground">{meta.model}</span>}
         {meta.permissionMode === 'bypassPermissions' && (
-          <span style={{ color: '#db4b4b', fontWeight: 700 }}>BYPASS</span>
+          <span className="font-bold text-status-error">BYPASS</span>
         )}
         <button
-          className="nodrag"
+          className="nodrag border-none bg-transparent font-mono text-sm text-muted-foreground hover:text-foreground"
           onClick={() => data.onClose(id)}
           title="Delete card (kills its tmux session)"
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#565f89',
-            cursor: 'pointer',
-            font: '14px Menlo',
-          }}
         >
           ✕
         </button>
       </div>
 
       <div
-        className="nodrag nowheel"
+        className="nodrag nowheel p-1.5"
         ref={termRef}
-        style={{ padding: 6 }}
         // Fly-in rule: while an ask is held the terminal shows no dialog, so
         // engaging with the terminal releases it to the native dialog.
         onMouseDown={() => {
@@ -132,45 +127,24 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
       />
 
       {meta.ask && (
-        <div
-          className="nodrag"
-          style={{
-            position: 'absolute',
-            left: 12,
-            right: 12,
-            bottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 14px',
-            background: 'rgba(31,32,48,.97)',
-            border: `1px solid ${STATUS_COLORS.blocked}`,
-            borderRadius: 8,
-            font: '12px Menlo',
-            color: '#c0caf5',
-          }}
-        >
-          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className="nodrag absolute inset-x-3 bottom-3 flex items-center gap-2.5 rounded-md border border-status-blocked bg-popover/95 px-3.5 py-2.5 font-mono text-xs text-popover-foreground">
+          <span className="flex-1 truncate">
             {meta.ask.detail}
           </span>
-          <button
+          <Button
+            size="sm"
+            className="bg-status-done text-terminal hover:bg-status-done/90"
             onClick={() => data.onDecide(id, meta.ask!.askId, 'allow')}
-            style={{
-              background: '#9ece6a', color: '#16161e', border: 'none', borderRadius: 6,
-              padding: '5px 14px', font: 'bold 12px Menlo', cursor: 'pointer',
-            }}
           >
             Allow
-          </button>
-          <button
+          </Button>
+          <Button
+            size="sm"
+            className="bg-status-blocked text-terminal hover:bg-status-blocked/90"
             onClick={() => data.onDecide(id, meta.ask!.askId, 'deny')}
-            style={{
-              background: '#f7768e', color: '#16161e', border: 'none', borderRadius: 6,
-              padding: '5px 14px', font: 'bold 12px Menlo', cursor: 'pointer',
-            }}
           >
             Deny
-          </button>
+          </Button>
         </div>
       )}
     </div>

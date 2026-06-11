@@ -4,8 +4,16 @@
     <meta charset="utf-8" />
     <title>Agent Canvas</title>
     <style>
-      html, body, #root { margin: 0; height: 100%; background: #0f0f14; overflow: hidden; }
+      html, body, #root { margin: 0; height: 100%; overflow: hidden; }
     </style>
+    <script>
+      // Follow the OS theme (Electron's Chromium tracks nativeTheme).
+      // Runs before first paint to avoid a wrong-theme flash.
+      const mq = matchMedia('(prefers-color-scheme: dark)')
+      const applyTheme = () => document.documentElement.classList.toggle('dark', mq.matches)
+      applyTheme()
+      mq.addEventListener('change', applyTheme)
+    </script>
   </head>
   <body>
     <div id="root"></div>

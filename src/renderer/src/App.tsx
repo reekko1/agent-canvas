@@ -9,6 +9,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { CardNode, type CardData, type CardMeta } from './CardNode'
+import { Button } from '@/components/ui/button'
 import type { AskDecision } from '../../shared/types'
 
 const nodeTypes = { card: CardNode }
@@ -90,7 +91,7 @@ function Canvas() {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh' }}>
+    <div className="h-screen w-screen">
       <ReactFlow
         nodes={nodes}
         onNodesChange={onNodesChange}
@@ -99,36 +100,13 @@ function Canvas() {
         maxZoom={1.25}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} color="#2a2b3a" gap={32} />
+        <Background variant={BackgroundVariant.Dots} color="var(--border)" gap={32} />
       </ReactFlow>
 
-      <div
-        style={{
-          position: 'fixed',
-          top: 14,
-          left: 14,
-          zIndex: 10,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
-        <button
-          onClick={() => void addCard()}
-          style={{
-            background: '#7aa2f7',
-            color: '#16161e',
-            border: 'none',
-            borderRadius: 8,
-            padding: '8px 16px',
-            font: 'bold 13px Menlo',
-            cursor: 'pointer',
-          }}
-        >
-          + New Agent
-        </button>
+      <div className="fixed left-3.5 top-3.5 z-10 flex items-center gap-3">
+        <Button onClick={() => void addCard()}>+ New Agent</Button>
         {nodes.length === 0 && (
-          <span style={{ color: '#565f89', font: '13px Menlo' }}>
+          <span className="font-mono text-xs text-muted-foreground">
             pick a folder — a real `claude` spawns in a tmux session
           </span>
         )}

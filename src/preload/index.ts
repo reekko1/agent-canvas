@@ -31,6 +31,11 @@ const api: CanvasApi = {
   onPtyExit: (cb) => subscribe('pty-exit', cb),
   onCardEvent: (cb) => subscribe('card-event', cb),
   onAsk: (cb) => subscribe('permission-ask', cb),
+  publishRemoteState: (state) => ipcRenderer.send('publish-remote-state', state),
+  checkRemoteReadiness: () => ipcRenderer.invoke('check-remote-readiness'),
+  checkAppReadiness: () => ipcRenderer.invoke('check-app-readiness'),
+  onAskDecided: (cb) => subscribe('ask-decided', cb),
+  openExternal: (url) => ipcRenderer.send('open-external', url),
 }
 
 contextBridge.exposeInMainWorld('canvas', api)

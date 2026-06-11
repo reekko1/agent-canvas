@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
@@ -6,7 +6,14 @@ import { PtyRegistry } from './ptys'
 import { WorkspaceStore } from './workspace'
 import { gitAction, gitFileDiff } from './git/git'
 import { DiffWatchers } from './git/watchers'
-import type { AskDecision, GitActionRequest, GitChange, WorkspaceSnapshot } from '../shared/types'
+import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
+import type {
+  AskDecision,
+  GitActionRequest,
+  GitChange,
+  RemoteState,
+  WorkspaceSnapshot,
+} from '../shared/types'
 
 let win: BrowserWindow | null = null
 const spine = new Spine()
@@ -129,3 +136,23 @@ ipcMain.on('decide-ask', (_e, askId: string, decision: AskDecision) =>
   spine.decide(askId, decision),
 )
 ipcMain.on('release-asks', (_e, cardId: string) => spine.releaseFor(cardId))
+
+// MARK: Remote panel — the renderer mirrors its attention state out, and
+// decisions made on the phone flow back through the same spine.decide as the
+// in-app toasts (then notify the renderer so the toast clears).
+ipcMain.on('publish-remote-state', (_e, state: RemoteState) => spine.remote.publish(state))
+ipcMain.handle('check-remote-readiness', () => checkRemoteReadiness(spine.remote.port))
+ipcMain.handle('check-app-readiness', async () => {
+  const report = await checkAppReadiness()
+  // tmux landed after launch (the gate's install path) → arm the substrate
+  // now so the first card spawns into a session, not a bare pty.
+  if (report.tmuxFound) spine.ensureTmuxPrepared()
+  return report
+})
+spine.remote.onDecide = (askId, allow) => {
+  spine.decide(askId, allow ? 'allow' : 'deny')
+  send('ask-decided', askId)
+}
+ipcMain.on('open-external', (_e, url: string) => {
+  if (typeof url === 'string' && url.startsWith('https://')) void shell.openExternal(url)
+})

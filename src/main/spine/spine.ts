@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { HookSink, type HookRequest } from './hookSink'
 import { ClaudeAdapter, shellQuote } from './claudeAdapter'
 import { Tmux } from './tmux'
+import { RemoteServer } from '../remote/remoteServer'
 import type { AskDecision, CardEvent, PermissionAskInfo } from '../../shared/types'
 
 // DELIBERATELY ISOLATED from the shipping Swift app: own config dir, own tmux
@@ -20,6 +21,9 @@ const SOCKET = 'agentcanvas-web'
 interface SpineConfig {
   token: string
   sinkPort?: number
+  /** The remote panel's port — persisted so a `tailscale serve` route set up
+   *  once keeps pointing at the right place across app restarts. */
+  remotePort?: number
 }
 
 function loadConfig(): SpineConfig {
@@ -58,6 +62,9 @@ export class Spine {
   onUpdate?: (cardId: string, event: CardEvent) => void
   onAsk?: (ask: PermissionAskInfo) => void
 
+  /** The remote supervision panel (loopback; exposed via Tailscale Serve). */
+  readonly remote = new RemoteServer()
+
   private adapter = new ClaudeAdapter()
   private tmux = new Tmux(SPINE_DIR, SOCKET)
   private config = loadConfig()
@@ -75,6 +82,13 @@ export class Spine {
       saveConfig(this.config)
       this.adapter.installConfig(SPINE_DIR, port, this.config.token)
       console.log(`[spine] sink ready on 127.0.0.1:${port}`)
+    })
+    this.remote.start(this.config.remotePort, (port) => {
+      this.config.remotePort = port
+      saveConfig(this.config)
+      console.log(
+        `[spine] remote panel on http://127.0.0.1:${port} — expose with: tailscale serve --bg localhost:${port}`,
+      )
     })
   }
 
@@ -99,6 +113,13 @@ export class Spine {
       cwd: folder,
       env,
     }
+  }
+
+  /** Re-probe the tmux substrate if it was missing at startup — the setup
+   *  gate installs it mid-session, and new cards should land in tmux without
+   *  an app restart. No-op once the binary is known. */
+  ensureTmuxPrepared(): void {
+    if (!this.tmux.binary) this.tmux.prepare()
   }
 
   /** End a card's tmux session (✕ delete). Killing only the terminal client

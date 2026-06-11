@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { ReactFlow, useNodesState, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Bot, GitCompareArrows, SquareDashed, SquareTerminal } from 'lucide-react'
+import { Bot, GitCompareArrows, Smartphone, SquareDashed, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -19,6 +19,7 @@ import { FrameNode } from '@/frames/FrameNode'
 import { FrameChips } from '@/frames/FrameChips'
 import { FrameDrawOverlay } from '@/frames/FrameDrawOverlay'
 import { frameMembers, nodeRect, type Rect } from '@/frames/geometry'
+import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
 import type { CardKind, PermissionAskInfo, WorkspaceItem } from '@shared/types'
 import {
   CARD_GAP,
@@ -34,6 +35,7 @@ import type { CanvasNode } from './nodes'
 import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
 import { useCardMeta } from './useCardMeta'
 import { usePendingAsks } from './usePendingAsks'
+import { useRemotePublish } from './useRemotePublish'
 import { useWorkspace } from './useWorkspace'
 import { useZoomLimits } from './useZoomLimits'
 import { VideoBackdrop } from './VideoBackdrop'
@@ -50,6 +52,7 @@ export function Canvas() {
   const { asks, decide, releaseCard } = usePendingAsks()
   const { getViewport, screenToFlowPosition, fitBounds, fitView } = useReactFlow()
   const [drawingFrame, setDrawingFrame] = useState(false)
+  const [remoteOpen, setRemoteOpen] = useState(false)
 
   const onCloseCard = useCallback(
     (cardId: string) => {
@@ -81,7 +84,13 @@ export function Canvas() {
       width: size?.w ?? CARD_W,
       height: size?.h ?? CARD_H,
       dragHandle: '.card-drag',
-      data: { folder, kind, meta: { status: 'idle' }, onClose: onCloseCard, onEngage: releaseCard },
+      data: {
+        folder,
+        kind,
+        meta: { status: 'idle', statusSince: Date.now() },
+        onClose: onCloseCard,
+        onEngage: releaseCard,
+      },
     }),
     [onCloseCard, releaseCard],
   )
@@ -153,6 +162,9 @@ export function Canvas() {
   }, [])
 
   const { notifications, setNotifications } = useActivityFeed(titleFor)
+
+  // Mirror cards + asks + feed to the phone panel.
+  useRemotePublish({ nodes, asks, notifications, titleFor })
 
   const flyTo = useCallback(
     (cardId: string) => {
@@ -460,7 +472,24 @@ export function Canvas() {
           />
           <TooltipContent side="right">New frame</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Remote access"
+                onClick={() => setRemoteOpen(true)}
+              >
+                <Smartphone />
+              </Button>
+            }
+          />
+          <TooltipContent side="right">Remote access</TooltipContent>
+        </Tooltip>
       </div>
+
+      <RemoteAccessDialog open={remoteOpen} onClose={() => setRemoteOpen(false)} />
 
       {/* Activity center: the spine's feed-worthy rows under a bell. Sits in
           the drag strip, so it carves itself out of the region. */}

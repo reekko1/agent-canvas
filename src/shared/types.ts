@@ -145,6 +145,63 @@ export interface WorkspaceSnapshot {
 /// (no hooks, no status — neutral chrome).
 export type CardKind = 'agent' | 'shell'
 
+// MARK: Remote panel (Tailscale)
+
+/// The JSON projection of the canvas's attention state — what the remote
+/// panel shows. The renderer publishes a fresh snapshot through the same
+/// funnel that feeds the in-app activity center, so the two can never
+/// disagree. (Port of the Swift RemoteState.)
+export interface RemoteState {
+  cards: {
+    id: string
+    name: string
+    status: CardStatus
+    loud: boolean
+    since: number // epoch seconds the status began
+    task?: string
+    model?: string
+    permissionMode?: string
+    subagents: number
+  }[]
+  approvals: {
+    id: string // askId
+    name: string
+    detail: string
+    created: number
+  }[]
+  feed: {
+    name: string
+    status: CardStatus
+    loud: boolean
+    message: string
+    date: number
+  }[]
+  needsYou: number
+}
+
+/// Are the canvas's substrate tools on this Mac? `claude` and `tmux` gate the
+/// app (nothing to supervise without the agent; sessions die with the app
+/// without tmux); `brew` only decides whether `brew install tmux` is a real
+/// offer. (Port of the Swift Readiness core.)
+export interface AppReadiness {
+  claudeFound: boolean
+  tmuxFound: boolean
+  brewFound: boolean
+}
+
+/// Is the remote panel reachable over the tailnet? (Port of the Swift
+/// Readiness, scoped to the tailscale chapter.)
+export interface RemoteReadiness {
+  /** The remote panel's bound loopback port (0 = not up yet). */
+  panelPort: number
+  /** The tailscale CLI exists on this Mac. */
+  tailscaleFound: boolean
+  /** `tailscale serve` is currently proxying the panel's port. */
+  tailscaleServing: boolean
+  /** The tailnet HTTPS URL serving the panel (undefined unless serving). */
+  tailnetURL?: string
+}
+
 export interface CanvasApi {
   newCard(): Promise<NewCardResult | null>
   newShell(): Promise<NewCardResult | null>
@@ -186,4 +243,15 @@ export interface CanvasApi {
   onPtyExit(cb: (cardId: string) => void): () => void
   onCardEvent(cb: (cardId: string, event: CardEvent) => void): () => void
   onAsk(cb: (ask: PermissionAskInfo) => void): () => void
+  // Remote panel
+  /** Mirror the attention state to the remote panel (fire-and-forget). */
+  publishRemoteState(state: RemoteState): void
+  /** Probe tailscale + serve status for the panel's port. */
+  checkRemoteReadiness(): Promise<RemoteReadiness>
+  /** Probe claude/tmux/brew — drives the blocking setup gate. */
+  checkAppReadiness(): Promise<AppReadiness>
+  /** An ask was answered from the remote panel — clear its toast. */
+  onAskDecided(cb: (askId: string) => void): () => void
+  /** Open an https URL in the system browser. */
+  openExternal(url: string): void
 }

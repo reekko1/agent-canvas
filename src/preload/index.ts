@@ -9,10 +9,17 @@ function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
 
 const api: CanvasApi = {
   newCard: () => ipcRenderer.invoke('new-card'),
-  ensureCard: (cardId, folder, cols, rows) =>
-    ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows),
+  newShell: () => ipcRenderer.invoke('new-shell'),
+  ensureCard: (cardId, folder, cols, rows, kind) =>
+    ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows, kind),
   killCard: (cardId) => ipcRenderer.invoke('kill-card', cardId),
   readTodos: (sessionId) => ipcRenderer.invoke('read-todos', sessionId),
+  newDiff: () => ipcRenderer.invoke('new-diff'),
+  watchDiff: (diffId, folder) => ipcRenderer.invoke('watch-diff', diffId, folder),
+  unwatchDiff: (diffId) => ipcRenderer.send('unwatch-diff', diffId),
+  readFileDiff: (folder, change) => ipcRenderer.invoke('file-diff', folder, change),
+  gitAction: (folder, action) => ipcRenderer.invoke('git-action', folder, action),
+  onDiffSnapshot: (cb) => subscribe('diff-snapshot', cb),
   loadWorkspace: () => ipcRenderer.invoke('load-workspace'),
   saveWorkspace: (snapshot) => ipcRenderer.send('save-workspace', snapshot),
   write: (cardId, data) => ipcRenderer.send('pty-write', cardId, data),

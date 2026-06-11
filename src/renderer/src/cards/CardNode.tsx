@@ -9,8 +9,10 @@ import { ResizeGrip } from './ResizeGrip'
 /// swapping to the poster face at far zoom, with the ask overlay and resize
 /// grip riding on top. Pure composition — each face owns its own behavior.
 export function CardNode({ id, data }: NodeProps & { data: CardData }) {
-  const { meta, folder } = data
-  const color = STATUS_COLORS[meta.status]
+  const { meta, folder, kind } = data
+  const isShell = kind === 'shell'
+  // A shell card has no agent to speak for it — calm, neutral chrome always.
+  const color = isShell ? 'var(--border)' : STATUS_COLORS[meta.status]
   const folderName = folder.split('/').filter(Boolean).pop() ?? folder
 
   // Far-zoom LOD: 0 = terminal; otherwise the poster's (quantized) zoom
@@ -23,9 +25,13 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
       style={{ borderColor: color }}
     >
       <div className="card-drag flex cursor-grab items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
-        <span className="font-bold" style={{ color }}>
-          {meta.status.toUpperCase()}
-        </span>
+        {isShell ? (
+          <span className="font-bold text-muted-foreground">SHELL</span>
+        ) : (
+          <span className="font-bold" style={{ color }}>
+            {meta.status.toUpperCase()}
+          </span>
+        )}
         <span className="text-muted-foreground">{folderName}</span>
         <span className="flex-1 truncate">{meta.task ?? meta.detail ?? ''}</span>
         {meta.model && <span className="text-muted-foreground">{meta.model}</span>}
@@ -45,6 +51,7 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
         <TerminalView
           cardId={id}
           folder={folder}
+          kind={kind}
           hidden={compensation > 0}
           holdsAsk={!!meta.ask}
         />

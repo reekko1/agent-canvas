@@ -80,19 +80,25 @@ export class Spine {
 
   /** How a card's process launches: the tmux client (`new-session -A` creates
    *  or reattaches), running `claude` under the user's login shell inside the
-   *  session so it resolves from their real PATH. No tmux → direct spawn
-   *  (dies with the app — the canvas never refuses to work). */
-  launch(cardId: string, folder: string): LaunchSpec {
+   *  session so it resolves from their real PATH — or, for a plain-shell
+   *  card, just the login shell itself (no agent, no hooks). No tmux →
+   *  direct spawn (dies with the app — the canvas never refuses to work). */
+  launch(cardId: string, folder: string, bareShell = false): LaunchSpec {
     const shell = process.env.SHELL ?? '/bin/zsh'
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       CANVAS_CARD_ID: cardId,
       TERM: 'xterm-256color',
     }
-    const inner = `${shell} -lc ${shellQuote(this.adapter.launchCommand())}`
+    const inner = bareShell ? `${shell} -l` : `${shell} -lc ${shellQuote(this.adapter.launchCommand())}`
     const client = this.tmux.clientCommand(`canvas-${cardId}`, inner, folder, cardId)
     if (client) return { file: client.file, args: client.args, cwd: folder, env }
-    return { file: shell, args: ['-lc', this.adapter.launchCommand()], cwd: folder, env }
+    return {
+      file: shell,
+      args: bareShell ? ['-l'] : ['-lc', this.adapter.launchCommand()],
+      cwd: folder,
+      env,
+    }
   }
 
   /** End a card's tmux session (✕ delete). Killing only the terminal client

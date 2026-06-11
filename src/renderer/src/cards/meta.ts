@@ -1,6 +1,7 @@
 import type {
   AgentTodo,
   CardEvent,
+  CardKind,
   CardStatus,
   PermissionAskInfo,
 } from '@shared/types'
@@ -37,6 +38,9 @@ export interface CardMeta {
 
 export interface CardData extends Record<string, unknown> {
   folder: string
+  /** 'agent' = watched claude session; 'shell' = bare $SHELL, no hooks — the
+   *  spine never speaks about it, so its meta stays idle forever. */
+  kind: CardKind
   meta: CardMeta
   onDecide: (cardId: string, askId: string, decision: 'allow' | 'deny') => void
   onClose: (cardId: string) => void

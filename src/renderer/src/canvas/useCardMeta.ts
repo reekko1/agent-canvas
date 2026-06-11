@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
-import type { Node } from '@xyflow/react'
-import { applyCardEvent, type CardData, type CardMeta } from '@/cards/meta'
+import { applyCardEvent, type CardMeta } from '@/cards/meta'
+import type { CanvasNode } from './nodes'
 
-type SetNodes = (updater: (ns: Node<CardData>[]) => Node<CardData>[]) => void
+type SetNodes = (updater: (ns: CanvasNode[]) => CanvasNode[]) => void
 
 /// The renderer's end of the spine: subscribes to card events, asks, and pty
 /// exits, folds them into each card's meta, and keys plan re-hydration off
@@ -12,7 +12,9 @@ export function useCardMeta(setNodes: SetNodes) {
     (cardId: string, patch: (meta: CardMeta) => CardMeta) => {
       setNodes((ns) =>
         ns.map((n) =>
-          n.id === cardId ? { ...n, data: { ...n.data, meta: patch(n.data.meta) } } : n,
+          n.type === 'card' && n.id === cardId
+            ? { ...n, data: { ...n.data, meta: patch(n.data.meta) } }
+            : n,
         ),
       )
     },

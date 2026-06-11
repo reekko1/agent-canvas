@@ -11,11 +11,13 @@ import { terminalTheme } from '@/lib/theme'
 export function TerminalView({
   cardId,
   folder,
+  kind,
   hidden,
   holdsAsk,
 }: {
   cardId: string
   folder: string
+  kind: 'agent' | 'shell'
   /** True while the poster covers the card (far zoom). visibility, not
    *  display: layout holds the card's size and xterm keeps consuming the
    *  stream; only compositing stops. */
@@ -62,7 +64,7 @@ export function TerminalView({
     const input = term.onData((d) => window.canvas.write(cardId, d))
     // Spawn (or reattach to) the agent only now that the terminal is
     // subscribed — no byte of output can outrun the listener.
-    void window.canvas.ensureCard(cardId, folder, term.cols, term.rows)
+    void window.canvas.ensureCard(cardId, folder, term.cols, term.rows, kind)
     return () => {
       refit.disconnect()
       themeObserver.disconnect()
@@ -71,7 +73,7 @@ export function TerminalView({
       input.dispose()
       term.dispose()
     }
-  }, [cardId, folder])
+  }, [cardId, folder, kind])
 
   return (
     <div

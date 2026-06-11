@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
 import { PtyRegistry } from './ptys'
@@ -38,6 +39,11 @@ app.whenReady().then(() => {
   spine.onAsk = (ask) => send('permission-ask', ask)
   spine.start()
   createWindow()
+  // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
+  // download in the background, notify, install on quit. Dev builds have no
+  // app-update.yml and ad-hoc builds can't verify signatures — stay dormant,
+  // like the Swift app's Sparkle updater without SUFeedURL.
+  if (app.isPackaged) autoUpdater.checkForUpdatesAndNotify().catch(() => {})
 })
 
 app.on('window-all-closed', () => app.quit())

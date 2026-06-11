@@ -13,6 +13,23 @@ npm install   # also rebuilds node-pty against Electron's ABI (postinstall)
 npm run dev   # launch
 ```
 
+## Package & release
+
+Same conventions as the Swift repo's `Packaging/` (see its `package.sh`):
+
+```sh
+npm run dist                                  # ad-hoc dmg+zip in dist/ (local use)
+CODESIGN_IDENTITY="Developer ID Application: …" \
+NOTARY_PROFILE=canvas-notary Packaging/package.sh   # signed + notarized + stapled
+Packaging/release.sh                          # GitHub release on reekko1/agent-canvas
+```
+
+The dmg is the first-install artifact; the zip is what `electron-updater`
+downloads (it reads `latest-mac.yml` from the latest GitHub release — the
+appcast equivalent). Updates only arm in packaged builds (`app.isPackaged`),
+and Squirrel.Mac refuses unsigned updates, so never release an ad-hoc build —
+`release.sh` enforces this. Never reuse a version; bump `package.json` first.
+
 ## Walking-skeleton status
 
 Works end to end: **New Agent → folder picker → real `claude` in a tmux
@@ -38,5 +55,5 @@ inherits the production fleet.
   ~14: Chromium caps WebGL contexts at ~16 (measured), beyond that xterm falls
   back to the slow DOM renderer
 - Fly-to / Tab-to-loud / fit-all, stall heartbeat (running-but-silent ≥5 min)
-- Diff object, activity feed, remote panel, onboarding, packaging/auto-update
+- Activity feed, remote panel, onboarding
 - shadcn/tailwind chrome (skeleton is inline styles)

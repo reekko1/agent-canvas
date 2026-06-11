@@ -1,0 +1,39 @@
+# Packaging config — invoked through Packaging/package.sh, which maps the same
+# env-var conventions as the Swift repo (Agents-Canvas/Packaging/package.sh):
+# CODESIGN_IDENTITY, NOTARY_PROFILE, VERSION.
+appId: com.rakan.agent-canvas # distinct from the Swift app's com.rakan.agentcanvas so both can coexist
+productName: Agent Canvas
+artifactName: AgentCanvas-${version}.${ext}
+directories:
+  output: dist
+  buildResources: Packaging
+# Renderer/main/preload are fully bundled into out/ by electron-vite; the only
+# runtime node_modules dependency is node-pty (electron-builder picks up
+# production deps automatically and unpacks the native .node from the asar).
+files:
+  - out/**
+# Embedded into the app as app-update.yml — where electron-updater looks for
+# latest-mac.yml; also makes the build emit dist/latest-mac.yml for release.sh.
+publish:
+  provider: github
+  owner: reekko1
+  repo: agent-canvas
+mac:
+  category: public.app-category.developer-tools
+  icon: Packaging/AppIcon.icns
+  minimumSystemVersion: '13.0'
+  hardenedRuntime: true # notarizes cleanly once a real identity is supplied; harmless under ad-hoc
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+dmg:
+  background: Packaging/dmg-background.tiff
+  window:
+    width: 600
+    height: 400
+  iconSize: 128
+  contents:
+    - { x: 150, y: 185, type: file }
+    - { x: 450, y: 185, type: link, path: /Applications }

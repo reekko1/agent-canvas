@@ -9,7 +9,11 @@ function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
 
 const api: CanvasApi = {
   newCard: () => ipcRenderer.invoke('new-card'),
+  ensureCard: (cardId, folder, cols, rows) =>
+    ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows),
   killCard: (cardId) => ipcRenderer.invoke('kill-card', cardId),
+  loadWorkspace: () => ipcRenderer.invoke('load-workspace'),
+  saveWorkspace: (snapshot) => ipcRenderer.send('save-workspace', snapshot),
   write: (cardId, data) => ipcRenderer.send('pty-write', cardId, data),
   resize: (cardId, cols, rows) => ipcRenderer.send('pty-resize', cardId, cols, rows),
   decide: (askId, decision: AskDecision) => ipcRenderer.send('decide-ask', askId, decision),

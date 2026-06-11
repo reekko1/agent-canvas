@@ -49,7 +49,7 @@ export interface CardData extends Record<string, unknown> {
 
 export function CardNode({ id, data }: NodeProps & { data: CardData }) {
   const termRef = useRef<HTMLDivElement>(null)
-  const { meta } = data
+  const { meta, folder } = data
   const color = STATUS_COLORS[meta.status]
 
   useEffect(() => {
@@ -82,13 +82,16 @@ export function CardNode({ id, data }: NodeProps & { data: CardData }) {
     })
     const input = term.onData((d) => window.canvas.write(id, d))
     window.canvas.resize(id, COLS, ROWS)
+    // Spawn (or reattach to) the agent only now that the terminal is
+    // subscribed — no byte of output can outrun the listener.
+    void window.canvas.ensureCard(id, folder, COLS, ROWS)
     return () => {
       themeObserver.disconnect()
       offData()
       input.dispose()
       term.dispose()
     }
-  }, [id])
+  }, [id, folder])
 
   const folderName = data.folder.split('/').filter(Boolean).pop() ?? data.folder
 

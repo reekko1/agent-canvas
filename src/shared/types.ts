@@ -41,9 +41,37 @@ export interface NewCardResult {
 
 export type AskDecision = 'allow' | 'deny' | 'release'
 
+/// Layout-only persistence (port of the Swift Workspace): on reopen, agents
+/// reattach to surviving tmux sessions or respawn fresh. Status is never
+/// persisted — a restored card is idle until real events say otherwise.
+export interface WorkspaceItem {
+  kind: 'card'
+  id: string
+  x: number
+  y: number
+  folder: string
+}
+
+export interface WorkspaceViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export interface WorkspaceSnapshot {
+  items: WorkspaceItem[]
+  viewport?: WorkspaceViewport
+}
+
 export interface CanvasApi {
   newCard(): Promise<NewCardResult | null>
+  /** Spawn the card's pty if it isn't running — called on CardNode mount, so
+   *  the terminal is always subscribed before the first byte arrives. tmux
+   *  `new-session -A` makes this the restore path too (reattach or create). */
+  ensureCard(cardId: string, folder: string, cols: number, rows: number): Promise<void>
   killCard(cardId: string): Promise<void>
+  loadWorkspace(): Promise<WorkspaceSnapshot | null>
+  saveWorkspace(snapshot: WorkspaceSnapshot): void
   write(cardId: string, data: string): void
   resize(cardId: string, cols: number, rows: number): void
   decide(askId: string, decision: AskDecision): void

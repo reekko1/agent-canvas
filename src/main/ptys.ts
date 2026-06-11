@@ -12,11 +12,15 @@ export interface PtyHandlers {
 export class PtyRegistry {
   private ptys = new Map<string, pty.IPty>()
 
-  spawn(cardId: string, spec: LaunchSpec, handlers: PtyHandlers): void {
+  has(cardId: string): boolean {
+    return this.ptys.has(cardId)
+  }
+
+  spawn(cardId: string, spec: LaunchSpec, handlers: PtyHandlers, cols = 80, rows = 24): void {
     const p = pty.spawn(spec.file, spec.args, {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols,
+      rows,
       cwd: spec.cwd,
       env: spec.env,
     })

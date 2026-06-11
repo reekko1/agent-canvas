@@ -10,7 +10,8 @@ import type { AskDecision, CardEvent, PermissionAskInfo } from '../../shared/typ
 // DELIBERATELY ISOLATED from the shipping Swift app: own config dir, own tmux
 // socket. The two canvases can run side by side until cutover, when this
 // becomes ~/.agentcanvas + 'agentcanvas' and inherits the production fleet.
-const DIR = join(homedir(), '.agentcanvas-web')
+export const SPINE_DIR = join(homedir(), '.agentcanvas-web')
+const DIR = SPINE_DIR
 const SOCKET = 'agentcanvas-web'
 
 /// The spine's persistent identity — token + sink port — survives app restarts.

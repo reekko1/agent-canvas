@@ -1,12 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
-import { Spine } from './spine/spine'
+import { Spine, SPINE_DIR } from './spine/spine'
 import { PtyRegistry } from './ptys'
-import type { AskDecision } from '../shared/types'
+import { WorkspaceStore } from './workspace'
+import type { AskDecision, WorkspaceSnapshot } from '../shared/types'
 
 let win: BrowserWindow | null = null
 const spine = new Spine()
 const ptys = new PtyRegistry()
+const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 let nextCard = 1
 
 function send(channel: string, ...args: unknown[]): void {
@@ -37,6 +39,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => app.quit())
 // Quitting only detaches tmux clients — the fleet keeps working by design.
+app.on('before-quit', () => workspace.flush())
 
 ipcMain.handle('new-card', async () => {
   if (!win) return null
@@ -47,12 +50,25 @@ ipcMain.handle('new-card', async () => {
   const folder = r.filePaths[0]
   if (r.canceled || !folder) return null
   const cardId = `card-${Date.now().toString(36)}-${nextCard++}`
-  ptys.spawn(cardId, spine.launch(cardId, folder), {
-    onData: (d) => send('pty-data', cardId, d),
-    onExit: () => send('pty-exit', cardId),
-  })
-  return { cardId, folder }
+  return { cardId, folder } // the pty spawns when the CardNode mounts (ensure-card)
 })
+
+ipcMain.handle('ensure-card', (_e, cardId: string, folder: string, cols: number, rows: number) => {
+  if (ptys.has(cardId)) return
+  ptys.spawn(
+    cardId,
+    spine.launch(cardId, folder),
+    {
+      onData: (d) => send('pty-data', cardId, d),
+      onExit: () => send('pty-exit', cardId),
+    },
+    cols,
+    rows,
+  )
+})
+
+ipcMain.handle('load-workspace', () => workspace.load())
+ipcMain.on('save-workspace', (_e, snapshot: WorkspaceSnapshot) => workspace.save(snapshot))
 
 ipcMain.handle('kill-card', (_e, cardId: string) => {
   ptys.kill(cardId)

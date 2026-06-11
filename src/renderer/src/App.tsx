@@ -1,10 +1,11 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
+  useReactFlow,
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -16,6 +17,8 @@ const nodeTypes = { card: CardNode }
 
 function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CardData>>([])
+  const { setViewport, getViewport } = useReactFlow()
+  const [hydrated, setHydrated] = useState(false)
 
   const patchMeta = useCallback(
     (cardId: string, patch: (meta: CardMeta) => CardMeta) => {
@@ -75,18 +78,67 @@ function Canvas() {
     }
   }, [patchMeta])
 
+  const makeNode = useCallback(
+    (cardId: string, folder: string, position: { x: number; y: number }): Node<CardData> => ({
+      id: cardId,
+      type: 'card',
+      position,
+      dragHandle: '.card-drag',
+      data: { folder, meta: { status: 'idle' }, onDecide, onClose },
+    }),
+    [onDecide, onClose],
+  )
+
+  // Restore the saved canvas once. Layout comes from disk; each agent
+  // reattaches (or respawns) via tmux when its CardNode mounts.
+  const restoredOnce = useRef(false)
+  useEffect(() => {
+    if (restoredOnce.current) return
+    restoredOnce.current = true
+    void (async () => {
+      const ws = await window.canvas.loadWorkspace()
+      if (ws) {
+        if (ws.viewport) void setViewport(ws.viewport)
+        setNodes(
+          ws.items
+            .filter((i) => i.kind === 'card' && i.folder)
+            .map((i) => makeNode(i.id, i.folder, { x: i.x, y: i.y })),
+        )
+      }
+      setHydrated(true)
+    })()
+  }, [makeNode, setNodes, setViewport])
+
+  const persist = useCallback(() => {
+    if (!hydrated) return // never let a blank pre-restore canvas clobber the file
+    window.canvas.saveWorkspace({
+      items: nodes.map((n) => ({
+        kind: 'card' as const,
+        id: n.id,
+        x: n.position.x,
+        y: n.position.y,
+        folder: n.data.folder,
+      })),
+      viewport: getViewport(),
+    })
+  }, [hydrated, nodes, getViewport])
+
+  // Debounced layout saves (drags stream position changes); pan/zoom ends
+  // save directly via onMoveEnd below.
+  useEffect(() => {
+    const t = setTimeout(persist, 300)
+    return () => clearTimeout(t)
+  }, [persist])
+
   async function addCard(): Promise<void> {
     const r = await window.canvas.newCard()
     if (!r) return
     setNodes((ns) => [
       ...ns,
-      {
-        id: r.cardId,
-        type: 'card',
-        position: { x: 120 + (ns.length % 4) * 880, y: 120 + Math.floor(ns.length / 4) * 560 },
-        dragHandle: '.card-drag',
-        data: { folder: r.folder, meta: { status: 'idle' }, onDecide, onClose },
-      },
+      makeNode(r.cardId, r.folder, {
+        x: 120 + (ns.length % 4) * 880,
+        y: 120 + Math.floor(ns.length / 4) * 560,
+      }),
     ])
   }
 
@@ -99,6 +151,7 @@ function Canvas() {
         minZoom={0.08}
         maxZoom={1.25}
         proOptions={{ hideAttribution: true }}
+        onMoveEnd={persist}
       >
         <Background variant={BackgroundVariant.Dots} color="var(--border)" gap={32} />
       </ReactFlow>

@@ -12,6 +12,7 @@ const api: CanvasApi = {
   ensureCard: (cardId, folder, cols, rows) =>
     ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows),
   killCard: (cardId) => ipcRenderer.invoke('kill-card', cardId),
+  readTodos: (sessionId) => ipcRenderer.invoke('read-todos', sessionId),
   loadWorkspace: () => ipcRenderer.invoke('load-workspace'),
   saveWorkspace: (snapshot) => ipcRenderer.send('save-workspace', snapshot),
   write: (cardId, data) => ipcRenderer.send('pty-write', cardId, data),

@@ -67,6 +67,7 @@ ipcMain.handle('ensure-card', (_e, cardId: string, folder: string, cols: number,
   )
 })
 
+ipcMain.handle('read-todos', (_e, sessionId: string) => spine.todos(sessionId))
 ipcMain.handle('load-workspace', () => workspace.load())
 ipcMain.on('save-workspace', (_e, snapshot: WorkspaceSnapshot) => workspace.save(snapshot))
 

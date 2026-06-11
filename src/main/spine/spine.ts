@@ -103,6 +103,11 @@ export class Spine {
     this.tmux.kill(`canvas-${cardId}`)
   }
 
+  /** The CLI's stored plan for a session — the re-hydration read. */
+  todos(sessionId: string) {
+    return this.adapter.currentTodos(sessionId)
+  }
+
   /** Answer a held permission ask. Exactly one decision wins; the rest no-op. */
   decide(askId: string, decision: AskDecision): void {
     const ask = this.asks.get(askId)

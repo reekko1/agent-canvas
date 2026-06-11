@@ -1,6 +1,7 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
-import type { CardEvent } from '../../shared/types'
+import type { AgentTodo, CardEvent, TodoChange } from '../../shared/types'
 
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
@@ -54,6 +55,47 @@ export class ClaudeAdapter {
     return name === 'PermissionRequest'
   }
 
+  /** Read the session's plan from the CLI's own task store:
+   *  `~/.claude/tasks/<session-id>/<taskId>.json`, one file per task with
+   *  `{id, subject, activeForm, status, …}` (empirically verified in the
+   *  Swift adapter). This is the ground truth that outlives both the app and
+   *  the hook stream — used to re-hydrate a reattached session's checklist. */
+  currentTodos(sessionId: string): AgentTodo[] | null {
+    if (!/^[\w.-]+$/.test(sessionId)) return null // ids are uuids; never a path
+    let files: string[]
+    try {
+      files = readdirSync(join(homedir(), '.claude/tasks', sessionId))
+    } catch {
+      return null // no store for this session (or none yet)
+    }
+    const todos: AgentTodo[] = []
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue
+      try {
+        const obj = JSON.parse(
+          readFileSync(join(homedir(), '.claude/tasks', sessionId, f), 'utf8'),
+        )
+        if (typeof obj?.id !== 'string' || typeof obj?.subject !== 'string') continue
+        const status = typeof obj.status === 'string' ? obj.status : 'pending'
+        if (status === 'deleted') continue
+        todos.push({
+          id: obj.id,
+          content: obj.subject,
+          status,
+          activeForm: typeof obj.activeForm === 'string' ? obj.activeForm : undefined,
+        })
+      } catch {
+        // unreadable task file — skip it, keep the rest of the plan
+      }
+    }
+    // An existing-but-empty dir reads as "no data", not "empty plan": the CLI
+    // creates the dir before the first task file lands, so a read in that
+    // window must not wipe todos already accumulated from deltas.
+    if (!todos.length) return null
+    // Task ids are a numeric sequence — creation order is the plan's order.
+    return todos.sort((a, b) => (parseInt(a.id, 10) || 0) - (parseInt(b.id, 10) || 0))
+  }
+
   permissionAllowBody(): string {
     return JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
@@ -75,7 +117,13 @@ export class ClaudeAdapter {
     let ev: CardEvent | null = null
     switch (name) {
       case 'SessionStart':
-        ev = { status: 'idle', detail: 'Session started', model: shortModel(p.model), resetSubagents: true }
+        ev = {
+          status: 'idle',
+          detail: 'Session started',
+          model: shortModel(p.model),
+          resetSubagents: true,
+          todoChange: { kind: 'clear' },
+        }
         break
 
       case 'UserPromptSubmit': {
@@ -91,7 +139,7 @@ export class ClaudeAdapter {
 
       case 'PreToolUse':
       case 'PostToolUse':
-        ev = { status: 'running', detail: toolDetail(p) }
+        ev = { status: 'running', detail: toolDetail(p), todoChange: todoChange(name, p) }
         break
 
       case 'PostToolUseFailure': {
@@ -189,7 +237,13 @@ export class ClaudeAdapter {
       }
 
       case 'SessionEnd':
-        ev = { status: 'idle', detail: 'Session ended', clearTask: true, resetSubagents: true }
+        ev = {
+          status: 'idle',
+          detail: 'Session ended',
+          clearTask: true,
+          resetSubagents: true,
+          todoChange: { kind: 'clear' },
+        }
         break
 
       default:
@@ -203,6 +257,67 @@ export class ClaudeAdapter {
     }
     return ev
   }
+}
+
+/** The plan-changing tools, mapped to TodoChange (port of the Swift
+ *  todoChange — field paths empirically verified there against real payloads):
+ *  - TaskCreate: `tool_input {subject, activeForm}`; the PostToolUse
+ *    `tool_response.task.id` carries the assigned id.
+ *  - TaskUpdate: `tool_input {taskId, status?, subject?, activeForm?}`
+ *    (status includes "deleted"); `tool_response.statusChange.to` confirms.
+ *  - TodoWrite (older CLIs): `tool_input.todos` replaces the plan wholesale. */
+function todoChange(name: string, p: Record<string, any>): TodoChange | undefined {
+  const input: Record<string, any> = p.tool_input ?? {}
+  const response: Record<string, any> = p.tool_response ?? {}
+  const isPost = name === 'PostToolUse'
+  switch (p.tool_name) {
+    case 'TodoWrite': {
+      if (!Array.isArray(input.todos)) return undefined
+      const todos: AgentTodo[] = (input.todos as any[]).flatMap((t, i) =>
+        typeof t?.content === 'string'
+          ? [
+              {
+                id: `todo-${i}`,
+                content: t.content,
+                status: typeof t.status === 'string' ? t.status : 'pending',
+                activeForm: typeof t.activeForm === 'string' ? t.activeForm : undefined,
+              },
+            ]
+          : [],
+      )
+      return todos.length ? { kind: 'replace', todos } : undefined
+    }
+    case 'TaskCreate': {
+      const id = response?.task?.id
+      if (!isPost || typeof input.subject !== 'string' || typeof id !== 'string') return undefined
+      return {
+        kind: 'add',
+        todo: {
+          id,
+          content: input.subject,
+          status: 'pending',
+          activeForm: typeof input.activeForm === 'string' ? input.activeForm : undefined,
+        },
+      }
+    }
+    case 'TaskUpdate': {
+      if (!isPost || typeof input.taskId !== 'string') return undefined
+      const confirmed = response?.statusChange?.to
+      return {
+        kind: 'update',
+        id: input.taskId,
+        status:
+          typeof confirmed === 'string'
+            ? confirmed
+            : typeof input.status === 'string'
+              ? input.status
+              : undefined,
+        content: typeof input.subject === 'string' ? input.subject : undefined,
+        activeForm: typeof input.activeForm === 'string' ? input.activeForm : undefined,
+      }
+    }
+  }
+  return undefined
 }
 
 /** "<Tool>: <salient argument>" — the triage line that distinguishes a

@@ -37,6 +37,11 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
     ARGS+=("-c.mac.notarize=true")
 fi
 
+# Wipe dist/ so artifacts from a previous (differently-versioned) build can't
+# linger and get mistaken for this run's output.
+echo "▸ cleaning dist/…"
+rm -rf dist
+
 echo "▸ building release…"
 npm run build
 

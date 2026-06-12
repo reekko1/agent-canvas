@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
 import { PtyRegistry } from './ptys'
 import { WorkspaceStore } from './workspace'
@@ -24,6 +25,47 @@ let nextItem = 1
 
 function send(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args)
+}
+
+// electron-updater swallows failures by default; a silent `.catch()` once hid a
+// broken update check for a whole release. Log every step to <logs>/updater.log
+// (~/Library/Logs/Agent Canvas/updater.log on macOS) so a stuck updater is
+// diagnosable from the field, and wire up the resolution path that actually
+// works in a packaged build.
+function setupUpdater(): void {
+  const logFile = join(app.getPath('logs'), 'updater.log')
+  const write = (level: string, msg: unknown): void => {
+    try {
+      mkdirSync(dirname(logFile), { recursive: true })
+      const line = typeof msg === 'string' ? msg : JSON.stringify(msg)
+      appendFileSync(logFile, `${new Date().toISOString()} [${level}] ${line}\n`)
+    } catch {
+      /* logging must never crash startup */
+    }
+  }
+  autoUpdater.logger = {
+    info: (m) => write('info', m),
+    warn: (m) => write('warn', m),
+    error: (m) => write('error', m),
+    debug: (m) => write('debug', m),
+  }
+  // Resolve the latest release via the GitHub Atom feed instead of the
+  // /releases/latest HTML endpoint. electron-updater's default
+  // (allowPrerelease=false) scrapes github.com/<owner>/<repo>/releases/latest
+  // expecting a JSON `tag_name`, but a packaged app carries a cookie-bearing
+  // session and GitHub then serves the full HTML release page instead — the
+  // tag is never found and the check dies with "No published versions on
+  // GitHub". The Atom feed path is cookie-insensitive and resolves reliably.
+  // We only ever publish stable releases (Packaging/release.sh never passes
+  // --prerelease), so this just means "use the feed" — it never pulls a real
+  // pre-release.
+  autoUpdater.allowPrerelease = true
+  autoUpdater.on('checking-for-update', () => write('info', 'checking for update'))
+  autoUpdater.on('update-available', (i) => write('info', `update available: ${i.version}`))
+  autoUpdater.on('update-not-available', () => write('info', 'no update available'))
+  autoUpdater.on('update-downloaded', (i) => write('info', `downloaded ${i.version}, will install on quit`))
+  autoUpdater.on('error', (e) => write('error', `update error: ${e?.message ?? e}`))
+  autoUpdater.checkForUpdatesAndNotify().catch((e) => write('error', `check failed: ${e?.message ?? e}`))
 }
 
 function createWindow(): void {
@@ -53,7 +95,7 @@ app.whenReady().then(() => {
   // download in the background, notify, install on quit. Dev builds have no
   // app-update.yml and ad-hoc builds can't verify signatures — stay dormant,
   // like the Swift app's Sparkle updater without SUFeedURL.
-  if (app.isPackaged) autoUpdater.checkForUpdatesAndNotify().catch(() => {})
+  if (app.isPackaged) setupUpdater()
 })
 
 app.on('window-all-closed', () => app.quit())

@@ -17,7 +17,11 @@ REPO="reekko1/agent-canvas"
 APP="dist/mac-arm64/Agent Canvas.app"
 [ -d "$APP" ] || { echo "✗ $APP not found — run Packaging/package.sh first" >&2; exit 1; }
 
-codesign -dv "$APP" 2>&1 | grep -q "Authority=Developer ID" || {
+# Capture first, then grep — piping codesign straight into `grep -q` lets grep
+# close the pipe early (SIGPIPE), which under `set -o pipefail` looks like a
+# codesign failure and falsely trips the ad-hoc guard.
+SIGN_INFO="$(codesign -dvvv "$APP" 2>&1)"
+grep -q "Authority=Developer ID" <<< "$SIGN_INFO" || {
     echo "✗ app is ad-hoc signed — repackage with CODESIGN_IDENTITY + NOTARY_PROFILE" >&2
     exit 1
 }

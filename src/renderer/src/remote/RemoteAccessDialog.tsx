@@ -84,7 +84,7 @@ export function RemoteAccessDialog({ open, onClose }: { open: boolean; onClose: 
             First, install Tailscale on this Mac and sign in. This step notices on its own.
           </p>
           <Button
-            variant="outline"
+            variant="tertiary"
             onClick={() => window.canvas.openExternal('https://tailscale.com/download')}
           >
             <ExternalLink data-icon="inline-start" />

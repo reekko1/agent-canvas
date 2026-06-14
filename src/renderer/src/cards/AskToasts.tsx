@@ -1,5 +1,4 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { Button } from '@/components/ui/button'
 import type { PermissionAskInfo } from '@shared/types'
 
 /** The agent context a toast carries above the permission line. */
@@ -11,7 +10,8 @@ export interface AskContext {
 /// Held permission asks as a toast stack rising from the bottom edge: who is
 /// asking, what they're working on, and the one decision they're waiting on.
 /// Allow/Deny answer from orbit; clicking the body flies to the card, which
-/// releases the ask to the CLI's native dialog in its terminal.
+/// releases the ask to the CLI's native dialog in its terminal. (Rendered inside
+/// the shared bottom overlay alongside QuestionToasts.)
 export function AskToasts({
   asks,
   contextFor,
@@ -24,9 +24,8 @@ export function AskToasts({
   onBodyClick: (ask: PermissionAskInfo) => void
 }) {
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex flex-col items-center gap-2">
-      <AnimatePresence>
-        {asks.map((ask) => {
+    <AnimatePresence>
+      {asks.map((ask) => {
           const ctx = contextFor(ask.cardId)
           return (
             <motion.div
@@ -53,31 +52,34 @@ export function AskToasts({
                 <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground/90">
                   {ask.detail}
                 </span>
-                <Button
-                  size="sm"
-                  className="bg-status-done text-terminal hover:bg-status-done/90"
+                {/* Plain buttons (not the design-system Button) so Allow/Deny
+                    keep their go/stop status colors — a permission gate's
+                    semantics. The shared Button paints its bg from a variant, so
+                    a bg-* class wouldn't show through. */}
+                <button
+                  type="button"
+                  className="h-7 shrink-0 rounded-lg bg-status-done px-3 text-[12px] font-medium text-terminal transition-colors hover:bg-status-done/90"
                   onClick={(e) => {
                     e.stopPropagation()
                     onDecide(ask.askId, 'allow')
                   }}
                 >
                   Allow
-                </Button>
-                <Button
-                  size="sm"
-                  className="bg-status-blocked text-terminal hover:bg-status-blocked/90"
+                </button>
+                <button
+                  type="button"
+                  className="h-7 shrink-0 rounded-lg bg-status-blocked px-3 text-[12px] font-medium text-terminal transition-colors hover:bg-status-blocked/90"
                   onClick={(e) => {
                     e.stopPropagation()
                     onDecide(ask.askId, 'deny')
                   }}
                 >
                   Deny
-                </Button>
+                </button>
               </div>
             </motion.div>
-          )
-        })}
-      </AnimatePresence>
-    </div>
+        )
+      })}
+    </AnimatePresence>
   )
 }

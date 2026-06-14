@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { AskDecision, CanvasApi } from '../shared/types'
+import type { AskDecision, CanvasApi, QuestionAnswers } from '../shared/types'
 
 function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
   const handler = (_e: IpcRendererEvent, ...args: any[]): void => cb(...args)
@@ -26,11 +26,14 @@ const api: CanvasApi = {
   leaveScrollback: (cardId) => ipcRenderer.invoke('leave-scrollback', cardId),
   resize: (cardId, cols, rows) => ipcRenderer.send('pty-resize', cardId, cols, rows),
   decide: (askId, decision: AskDecision) => ipcRenderer.send('decide-ask', askId, decision),
+  answerQuestion: (askId, answers: QuestionAnswers) =>
+    ipcRenderer.send('answer-question', askId, answers),
   releaseAsks: (cardId) => ipcRenderer.send('release-asks', cardId),
   onPtyData: (cb) => subscribe('pty-data', cb),
   onPtyExit: (cb) => subscribe('pty-exit', cb),
   onCardEvent: (cb) => subscribe('card-event', cb),
   onAsk: (cb) => subscribe('permission-ask', cb),
+  onQuestion: (cb) => subscribe('question-ask', cb),
   publishRemoteState: (state) => ipcRenderer.send('publish-remote-state', state),
   checkRemoteReadiness: () => ipcRenderer.invoke('check-remote-readiness'),
   checkAppReadiness: () => ipcRenderer.invoke('check-app-readiness'),

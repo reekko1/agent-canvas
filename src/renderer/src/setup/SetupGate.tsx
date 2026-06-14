@@ -96,7 +96,7 @@ export function SetupGate() {
                 there.
               </p>
               <Button
-                variant="outline"
+                variant="tertiary"
                 onClick={() => window.canvas.openExternal('https://brew.sh')}
               >
                 <ExternalLink data-icon="inline-start" />

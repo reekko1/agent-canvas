@@ -12,6 +12,7 @@ import type {
   AskDecision,
   GitActionRequest,
   GitChange,
+  QuestionAnswers,
   RemoteState,
   UpdateStatus,
   WorkspaceSnapshot,
@@ -134,6 +135,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   spine.onUpdate = (cardId, event) => send('card-event', cardId, event)
   spine.onAsk = (ask) => send('permission-ask', ask)
+  spine.onQuestion = (ask) => send('question-ask', ask)
   spine.start()
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
@@ -221,6 +223,9 @@ ipcMain.on('pty-resize', (_e, cardId: string, cols: number, rows: number) =>
 )
 ipcMain.on('decide-ask', (_e, askId: string, decision: AskDecision) =>
   spine.decide(askId, decision),
+)
+ipcMain.on('answer-question', (_e, askId: string, answers: QuestionAnswers) =>
+  spine.answerQuestion(askId, answers),
 )
 ipcMain.on('release-asks', (_e, cardId: string) => spine.releaseFor(cardId))
 

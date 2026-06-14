@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AskToasts } from '@/cards/AskToasts'
+import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
 import { DiffNode } from '@/diff/DiffNode'
@@ -21,7 +22,12 @@ import { FrameChips } from '@/frames/FrameChips'
 import { FrameDrawOverlay } from '@/frames/FrameDrawOverlay'
 import { frameMembers, nodeRect, type Rect } from '@/frames/geometry'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
-import type { CardKind, PermissionAskInfo, WorkspaceItem } from '@shared/types'
+import type {
+  CardKind,
+  PermissionAskInfo,
+  QuestionAskInfo,
+  WorkspaceItem,
+} from '@shared/types'
 import {
   CARD_GAP,
   CARD_H,
@@ -37,6 +43,7 @@ import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
 import { useAutoUpdate } from './useAutoUpdate'
 import { useCardMeta } from './useCardMeta'
 import { usePendingAsks } from './usePendingAsks'
+import { usePendingQuestions } from './usePendingQuestions'
 import { useRemotePublish } from './useRemotePublish'
 import { useWorkspace } from './useWorkspace'
 import { useZoomLimits } from './useZoomLimits'
@@ -52,6 +59,21 @@ export function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   const { hydrateTodos } = useCardMeta(setNodes)
   const { asks, decide, releaseCard } = usePendingAsks()
+  const {
+    questions,
+    answer: answerQuestion,
+    decline: declineQuestion,
+    releaseCard: releaseQuestionCard,
+  } = usePendingQuestions()
+  /** Engaging a card's terminal releases everything it holds — both permission
+   *  asks and questions fall through to the CLI's own dialogs. */
+  const engageCard = useCallback(
+    (cardId: string) => {
+      releaseCard(cardId)
+      releaseQuestionCard(cardId)
+    },
+    [releaseCard, releaseQuestionCard],
+  )
   const { update, dismiss: dismissUpdate, restart: restartForUpdate } = useAutoUpdate()
   const { getViewport, screenToFlowPosition, fitBounds, fitView } = useReactFlow()
   const [drawingFrame, setDrawingFrame] = useState(false)
@@ -92,10 +114,10 @@ export function Canvas() {
         kind,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
-        onEngage: releaseCard,
+        onEngage: engageCard,
       },
     }),
-    [onCloseCard, releaseCard],
+    [onCloseCard, engageCard],
   )
 
   const makeDiff = useCallback(
@@ -218,6 +240,16 @@ export function Canvas() {
       flyTo(ask.cardId)
     },
     [decide, flyTo],
+  )
+
+  /** Question header click: release it to the card's terminal picker and fly
+   *  there to answer natively. */
+  const flyToQuestion = useCallback(
+    (ask: QuestionAskInfo) => {
+      releaseQuestionCard(ask.cardId)
+      flyTo(ask.cardId)
+    },
+    [releaseQuestionCard, flyTo],
   )
 
   /** Spawn point centered in the current view, cascading down-right while
@@ -464,7 +496,7 @@ export function Canvas() {
           <TooltipTrigger
             render={
               <Button
-                variant={drawingFrame ? 'default' : 'ghost'}
+                variant={drawingFrame ? 'primary' : 'ghost'}
                 size="icon"
                 aria-label="New frame"
                 onClick={() => setDrawingFrame((v) => !v)}
@@ -507,7 +539,18 @@ export function Canvas() {
         />
       </div>
 
-      <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
+      {/* Shared bottom overlay: questions ride above permission asks. Always
+          mounted so AnimatePresence can play exit animations on the last item. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex flex-col items-center gap-2">
+        <QuestionToasts
+          questions={questions}
+          contextFor={askContextFor}
+          onAnswer={answerQuestion}
+          onDecline={declineQuestion}
+          onBodyClick={flyToQuestion}
+        />
+        <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
+      </div>
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
 

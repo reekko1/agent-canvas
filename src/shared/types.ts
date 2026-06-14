@@ -55,6 +55,37 @@ export interface PermissionAskInfo {
   detail: string
 }
 
+/// One choice the agent offers for a question. `description` explains the
+/// trade-off; absent on terse options.
+export interface QuestionOption {
+  label: string
+  description?: string
+}
+
+/// One question the agent is asking (AskUserQuestion). `header` is the short
+/// chip label ("Auth method"); `multiSelect` lets several options be chosen.
+export interface Question {
+  question: string
+  header?: string
+  options: QuestionOption[]
+  multiSelect?: boolean
+}
+
+/// An AskUserQuestion held open over the spine — fundamentally NOT a permission
+/// gate: the agent isn't asking to DO something you allow/deny, it's asking YOU
+/// to decide, and ships structured options. Answered by choosing (not allowing),
+/// which the CLI injects back via the tool's input. (See PermissionAskInfo for
+/// the gate-an-action counterpart.)
+export interface QuestionAskInfo {
+  askId: string
+  cardId: string
+  questions: Question[]
+}
+
+/// The chosen answer per question: question text → option label, multi-select
+/// labels comma-joined (the CLI's own format). Becomes `tool_input.answers`.
+export type QuestionAnswers = Record<string, string>
+
 export interface NewCardResult {
   cardId: string
   folder: string
@@ -247,6 +278,10 @@ export interface CanvasApi {
   leaveScrollback(cardId: string): Promise<void>
   resize(cardId: string, cols: number, rows: number): void
   decide(askId: string, decision: AskDecision): void
+  /** Answer a held AskUserQuestion with the chosen option(s) — the CLI injects
+   *  them into the tool input, so the agent proceeds without touching the
+   *  terminal. Declining is `decide(askId, 'deny')`. */
+  answerQuestion(askId: string, answers: QuestionAnswers): void
   /** Release every held ask for a card — the fly-in path: while held, the
    *  terminal shows no dialog, so focusing the terminal must release. */
   releaseAsks(cardId: string): void
@@ -254,6 +289,8 @@ export interface CanvasApi {
   onPtyExit(cb: (cardId: string) => void): () => void
   onCardEvent(cb: (cardId: string, event: CardEvent) => void): () => void
   onAsk(cb: (ask: PermissionAskInfo) => void): () => void
+  /** A held AskUserQuestion arrived — render the chooser. */
+  onQuestion(cb: (ask: QuestionAskInfo) => void): () => void
   // Remote panel
   /** Mirror the attention state to the remote panel (fire-and-forget). */
   publishRemoteState(state: RemoteState): void

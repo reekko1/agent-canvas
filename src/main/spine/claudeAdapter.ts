@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
-import type { AgentTodo, CardEvent, TodoChange } from '../../shared/types'
+import type { AgentTodo, CardEvent, Question, QuestionAnswers, TodoChange } from '../../shared/types'
 
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
@@ -53,6 +53,52 @@ export class ClaudeAdapter {
 
   isPermissionAsk(name: string): boolean {
     return name === 'PermissionRequest'
+  }
+
+  /** Is this held PermissionRequest actually an AskUserQuestion? The CLI models
+   *  AskUserQuestion as a permission (its checkPermissions returns "ask"), so it
+   *  arrives on the same channel — but it's a question to answer, not an action
+   *  to gate, and must be siphoned off before the generic permission path. */
+  isQuestionAsk(name: string, payload: Record<string, any>): boolean {
+    return name === 'PermissionRequest' && payload?.tool_name === 'AskUserQuestion'
+  }
+
+  /** The structured questions from an AskUserQuestion payload, defensively
+   *  parsed (the payload is external input). Empty array → fall through to the
+   *  terminal rather than show an empty chooser. */
+  parseQuestions(payload: Record<string, any>): Question[] {
+    const raw = payload?.tool_input?.questions
+    if (!Array.isArray(raw)) return []
+    const out: Question[] = []
+    for (const q of raw) {
+      if (typeof q?.question !== 'string' || !Array.isArray(q?.options)) continue
+      const options = q.options.flatMap((o: any) =>
+        typeof o?.label === 'string'
+          ? [{ label: o.label, description: typeof o.description === 'string' ? o.description : undefined }]
+          : [],
+      )
+      if (!options.length) continue
+      out.push({
+        question: q.question,
+        header: typeof q.header === 'string' ? q.header : undefined,
+        options,
+        multiSelect: q.multiSelect === true,
+      })
+    }
+    return out
+  }
+
+  /** Answer an AskUserQuestion: allow the tool, injecting the chosen answers
+   *  into its input via `updatedInput`. The tool's own `call` reads them, so the
+   *  agent proceeds as if the human had picked them in the terminal. (The whole
+   *  original input is spread back — `questions` must survive the round-trip.) */
+  questionAnswerBody(input: Record<string, any> | undefined, answers: QuestionAnswers): string {
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        decision: { behavior: 'allow', updatedInput: { ...(input ?? {}), answers } },
+      },
+    })
   }
 
   /** Read the session's plan from the CLI's own task store:
@@ -353,6 +399,11 @@ function toolDetail(p: Record<string, any>): string {
     case 'TaskCreate':
       arg = input.subject
       break
+    case 'AskUserQuestion': {
+      const q = Array.isArray(input.questions) ? input.questions[0] : undefined
+      arg = typeof q?.header === 'string' ? q.header : q?.question
+      break
+    }
     case 'TaskUpdate': {
       const status = typeof input.status === 'string' ? ` → ${input.status}` : ''
       arg = typeof input.taskId === 'string' ? `#${input.taskId}${status}` : undefined

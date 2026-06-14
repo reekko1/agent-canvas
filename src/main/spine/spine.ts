@@ -6,7 +6,13 @@ import { HookSink, type HookRequest } from './hookSink'
 import { ClaudeAdapter, shellQuote } from './claudeAdapter'
 import { Tmux } from './tmux'
 import { RemoteServer } from '../remote/remoteServer'
-import type { AskDecision, CardEvent, PermissionAskInfo } from '../../shared/types'
+import type {
+  AskDecision,
+  CardEvent,
+  PermissionAskInfo,
+  QuestionAnswers,
+  QuestionAskInfo,
+} from '../../shared/types'
 
 // DELIBERATELY ISOLATED from the shipping Swift app: own config dir, own tmux
 // socket. The two canvases can run side by side until cutover, when this
@@ -53,6 +59,9 @@ export interface LaunchSpec {
 interface HeldAsk {
   cardId: string
   respond: (body: string | null) => void
+  /** The original tool_input — present for question asks, whose answer body
+   *  must spread it back so `questions` survives the round-trip. */
+  input?: Record<string, any>
 }
 
 /// The attention spine: owns the sink, the adapter, and the tmux launch path;
@@ -61,6 +70,7 @@ interface HeldAsk {
 export class Spine {
   onUpdate?: (cardId: string, event: CardEvent) => void
   onAsk?: (ask: PermissionAskInfo) => void
+  onQuestion?: (ask: QuestionAskInfo) => void
 
   /** The remote supervision panel (loopback; exposed via Tailscale Serve). */
   readonly remote = new RemoteServer()
@@ -151,6 +161,16 @@ export class Spine {
     else ask.respond(null) // no decision → the native dialog falls through to the terminal
   }
 
+  /** Answer a held AskUserQuestion with the chosen options — allows the tool
+   *  with the answers injected into its input. Declining is `decide(_, 'deny')`,
+   *  which the CLI renders as "User declined to answer questions". */
+  answerQuestion(askId: string, answers: QuestionAnswers): void {
+    const ask = this.asks.get(askId)
+    if (!ask) return
+    this.asks.delete(askId)
+    ask.respond(this.adapter.questionAnswerBody(ask.input, answers))
+  }
+
   /** Release every held ask for a card — the fly-in path: while held, the
    *  terminal shows no dialog, so focusing the terminal must release. */
   releaseFor(cardId: string): void {
@@ -163,7 +183,26 @@ export class Spine {
   }
 
   private handle(req: HookRequest): void {
-    if (this.adapter.isPermissionAsk(req.event)) {
+    // AskUserQuestion rides the PermissionRequest channel but is a question, not
+    // a gate — siphon it off first so it gets the chooser, never an Allow/Deny.
+    if (this.adapter.isQuestionAsk(req.event, req.payload)) {
+      const event = this.adapter.event(req.event, req.payload)
+      if (event) this.onUpdate?.(req.cardId, event)
+      const questions = this.adapter.parseQuestions(req.payload)
+      const askId = `ask-${this.askSeq++}`
+      this.asks.set(askId, {
+        cardId: req.cardId,
+        respond: req.respond,
+        input: req.payload.tool_input as Record<string, any>,
+      })
+      // Nobody to render it (or nothing parseable) → fall through to the
+      // terminal's own picker rather than strand the agent.
+      if (this.onQuestion && questions.length) {
+        this.onQuestion({ askId, cardId: req.cardId, questions })
+      } else {
+        this.decide(askId, 'release')
+      }
+    } else if (this.adapter.isPermissionAsk(req.event)) {
       // Status first (the card goes loud), then hold the response open as the
       // decision channel. While held, the CLI's own dialog is deferred.
       const event = this.adapter.event(req.event, req.payload)

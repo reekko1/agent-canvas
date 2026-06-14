@@ -59,21 +59,10 @@ export function UpdateToast({
                   Restart to install — or keep working and it applies on next quit.
                 </p>
                 <div className="mt-2.5 flex justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={onDismiss}
-                  >
+                  <Button variant="ghost" onClick={onDismiss}>
                     Later
                   </Button>
-                  <Button
-                    size="sm"
-                    className="bg-status-done text-terminal hover:bg-status-done/90"
-                    onClick={onRestart}
-                  >
-                    Restart
-                  </Button>
+                  <Button onClick={onRestart}>Restart</Button>
                 </div>
               </>
             )}
@@ -88,12 +77,7 @@ export function UpdateToast({
                   Couldn&apos;t fetch the latest version. It&apos;ll retry next launch.
                 </p>
                 <div className="mt-2.5 flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={onDismiss}
-                  >
+                  <Button variant="ghost" onClick={onDismiss}>
                     Dismiss
                   </Button>
                 </div>

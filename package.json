@@ -1,6 +1,6 @@
 {
   "name": "agent-canvas",
-  "version": "1.1.0",
+  "version": "1.1.1-dev",
   "description": "Agent Canvas — infinite-canvas supervision for coding agent fleets",
   "main": "./out/main/index.js",
   "private": true,

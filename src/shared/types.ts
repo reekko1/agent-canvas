@@ -202,6 +202,17 @@ export interface RemoteReadiness {
   tailnetURL?: string
 }
 
+/** Auto-update lifecycle, surfaced to the in-app banner. `downloading` carries a
+ *  0–100 `percent`; `ready` means the new version is staged and a restart will
+ *  apply it; `error` means the check/download failed (it retries next launch). */
+export type UpdateState = 'downloading' | 'ready' | 'error'
+
+export interface UpdateStatus {
+  state: UpdateState
+  version?: string
+  percent?: number
+}
+
 export interface CanvasApi {
   newCard(): Promise<NewCardResult | null>
   newShell(): Promise<NewCardResult | null>
@@ -254,4 +265,8 @@ export interface CanvasApi {
   onAskDecided(cb: (askId: string) => void): () => void
   /** Open an https URL in the system browser. */
   openExternal(url: string): void
+  /** App self-update progress for the in-app banner (packaged builds only). */
+  onUpdateStatus(cb: (status: UpdateStatus) => void): () => void
+  /** Quit and install the staged update — the banner's "Restart" action. */
+  quitAndInstall(): void
 }

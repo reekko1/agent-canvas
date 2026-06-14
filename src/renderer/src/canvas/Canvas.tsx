@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AskToasts } from '@/cards/AskToasts'
+import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
 import { DiffNode } from '@/diff/DiffNode'
 import { FrameNode } from '@/frames/FrameNode'
@@ -33,6 +34,7 @@ import {
 } from './layout'
 import type { CanvasNode } from './nodes'
 import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
+import { useAutoUpdate } from './useAutoUpdate'
 import { useCardMeta } from './useCardMeta'
 import { usePendingAsks } from './usePendingAsks'
 import { useRemotePublish } from './useRemotePublish'
@@ -50,6 +52,7 @@ export function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   const { hydrateTodos } = useCardMeta(setNodes)
   const { asks, decide, releaseCard } = usePendingAsks()
+  const { update, dismiss: dismissUpdate, restart: restartForUpdate } = useAutoUpdate()
   const { getViewport, screenToFlowPosition, fitBounds, fitView } = useReactFlow()
   const [drawingFrame, setDrawingFrame] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
@@ -505,6 +508,8 @@ export function Canvas() {
       </div>
 
       <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
+
+      <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
 
       {(drawingFrame || nodes.length === 0) && (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-30 flex justify-center">

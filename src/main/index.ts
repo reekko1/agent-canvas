@@ -13,6 +13,7 @@ import type {
   GitActionRequest,
   GitChange,
   RemoteState,
+  UpdateStatus,
   WorkspaceSnapshot,
 } from '../shared/types'
 
@@ -60,11 +61,28 @@ function setupUpdater(): void {
   // --prerelease), so this just means "use the feed" — it never pulls a real
   // pre-release.
   autoUpdater.allowPrerelease = true
+  // Mirror the lifecycle into the renderer so the app shows a visible banner
+  // (download progress → "Restart to update"), not just the easy-to-miss macOS
+  // notification. quitAndInstall() applies the staged update on demand.
+  const status = (s: UpdateStatus): void => send('update-status', s)
   autoUpdater.on('checking-for-update', () => write('info', 'checking for update'))
-  autoUpdater.on('update-available', (i) => write('info', `update available: ${i.version}`))
+  autoUpdater.on('update-available', (i) => {
+    write('info', `update available: ${i.version}`)
+    status({ state: 'downloading', version: i.version, percent: 0 })
+  })
+  autoUpdater.on('download-progress', (p) =>
+    status({ state: 'downloading', percent: p.percent }),
+  )
   autoUpdater.on('update-not-available', () => write('info', 'no update available'))
-  autoUpdater.on('update-downloaded', (i) => write('info', `downloaded ${i.version}, will install on quit`))
-  autoUpdater.on('error', (e) => write('error', `update error: ${e?.message ?? e}`))
+  autoUpdater.on('update-downloaded', (i) => {
+    write('info', `downloaded ${i.version}, will install on quit`)
+    status({ state: 'ready', version: i.version })
+  })
+  autoUpdater.on('error', (e) => {
+    write('error', `update error: ${e?.message ?? e}`)
+    status({ state: 'error' })
+  })
+  ipcMain.on('quit-and-install', () => autoUpdater.quitAndInstall())
   autoUpdater.checkForUpdatesAndNotify().catch((e) => write('error', `check failed: ${e?.message ?? e}`))
 }
 

@@ -36,6 +36,8 @@ const api: CanvasApi = {
   checkAppReadiness: () => ipcRenderer.invoke('check-app-readiness'),
   onAskDecided: (cb) => subscribe('ask-decided', cb),
   openExternal: (url) => ipcRenderer.send('open-external', url),
+  onUpdateStatus: (cb) => subscribe('update-status', cb),
+  quitAndInstall: () => ipcRenderer.send('quit-and-install'),
 }
 
 contextBridge.exposeInMainWorld('canvas', api)

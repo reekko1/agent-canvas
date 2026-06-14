@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -65,6 +65,9 @@ function setupUpdater(): void {
   // (download progress → "Restart to update"), not just the easy-to-miss macOS
   // notification. quitAndInstall() applies the staged update on demand.
   const status = (s: UpdateStatus): void => send('update-status', s)
+  // Cleared once an update is staged (update-downloaded), so later polls can't
+  // re-surface a banner the user already dismissed.
+  let poll: ReturnType<typeof setInterval> | null = null
   autoUpdater.on('checking-for-update', () => write('info', 'checking for update'))
   autoUpdater.on('update-available', (i) => {
     write('info', `update available: ${i.version}`)
@@ -77,13 +80,37 @@ function setupUpdater(): void {
   autoUpdater.on('update-downloaded', (i) => {
     write('info', `downloaded ${i.version}, will install on quit`)
     status({ state: 'ready', version: i.version })
+    // The update is staged — stop polling so a later check can't re-emit the
+    // banner after the user dismissed it. Nudge once via the OS, since the
+    // in-app banner is invisible when the window is backgrounded or off-space.
+    if (poll) {
+      clearInterval(poll)
+      poll = null
+    }
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: 'Update ready',
+        body: `Agent Canvas ${i.version} is ready — restart to install.`,
+      })
+      n.on('click', () => {
+        win?.show()
+        win?.focus()
+      })
+      n.show()
+    }
   })
   autoUpdater.on('error', (e) => {
     write('error', `update error: ${e?.message ?? e}`)
     status({ state: 'error' })
   })
   ipcMain.on('quit-and-install', () => autoUpdater.quitAndInstall())
-  autoUpdater.checkForUpdatesAndNotify().catch((e) => write('error', `check failed: ${e?.message ?? e}`))
+  // Check at launch, then keep polling while the app runs — people leave it open
+  // for days, so a one-shot startup check would never surface a release. The
+  // poll stops once an update is staged (see update-downloaded above).
+  const check = (): void =>
+    void autoUpdater.checkForUpdates().catch((e) => write('error', `check failed: ${e?.message ?? e}`))
+  poll = setInterval(check, 6 * 60 * 60 * 1000)
+  check()
 }
 
 function createWindow(): void {

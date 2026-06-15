@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Minus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { diffLines, type DiffLine } from './diffText'
 import type { GitActionRequest, GitChange, GitFileStatus, GitSnapshot } from '@shared/types'
@@ -141,22 +142,32 @@ export function DiffNode({ id, data }: { id: string; data: DiffData }) {
             <span className="text-diff-del">−{snap.totalRemoved}</span>
           </span>
         )}
-        {data.onCollapse && (
-          <button
-            className="border-none bg-transparent font-mono text-sm text-muted-foreground hover:text-foreground"
-            onClick={data.onCollapse}
-            title="Collapse"
+        {/* Window controls: real Buttons give each its own hit target and
+            hover plate, fenced off from the diffstat by a divider so the
+            minimize and close never blur together. */}
+        <span className="mx-1 h-4 w-px bg-border" />
+        <span className="flex items-center gap-0.5">
+          {data.onCollapse && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={data.onCollapse}
+              title="Minimize"
+              aria-label="Minimize"
+            >
+              <Minus />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => data.onClose(id)}
+            title="Remove diff object (the repo is untouched)"
+            aria-label="Close"
           >
-            ⟩⟩
-          </button>
-        )}
-        <button
-          className="border-none bg-transparent font-mono text-sm text-muted-foreground hover:text-foreground"
-          onClick={() => data.onClose(id)}
-          title="Remove diff object (the repo is untouched)"
-        >
-          ✕
-        </button>
+            <X />
+          </Button>
+        </span>
       </div>
 
       <div className="flex min-h-0 flex-1 font-mono text-xs">

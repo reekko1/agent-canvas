@@ -60,10 +60,13 @@ export function PosterFace({
   meta,
   folderName,
   isShell,
+  running,
 }: {
   meta: CardMeta
   folderName: string
   isShell?: boolean
+  /** Shell cards only: the pane's foreground process (null = idle). */
+  running?: string | null
 }) {
   // Keep the "· 14m" attention-debt suffix current while the poster shows.
   const [, tick] = useReducer((n: number) => n + 1, 0)
@@ -78,7 +81,10 @@ export function PosterFace({
   // What a glance needs differs between mid-work, finished, and asking.
   let body: string | undefined
   let bodyColor = 'var(--muted-foreground)'
-  if (meta.status === 'done') {
+  if (isShell) {
+    body = running ?? 'idle'
+    bodyColor = running ? 'var(--card-foreground)' : 'var(--muted-foreground)'
+  } else if (meta.status === 'done') {
     body = meta.summary ?? 'Finished — waiting for you'
     bodyColor = 'var(--card-foreground)'
   } else if (meta.status === 'blocked' || meta.status === 'error') {

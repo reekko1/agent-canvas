@@ -135,6 +135,40 @@ bind -T copy-mode-vi Escape send -X cancel
     execFile(this.binary, ['-L', this.socket, 'kill-session', '-t', '=' + session], () => {})
   }
 
+  /** Run `display-message -p` against a session's active pane and return the
+   *  formatted result (trimmed), or null if the session is gone / tmux absent.
+   *  `=session:` exact-matches the session — no prefix bleed, the same guard
+   *  `kill` relies on — while the trailing colon makes display-message read it
+   *  as a session target and resolve the active pane; without it, `=name`
+   *  parses as a *window* name and matches nothing. */
+  private query(session: string, format: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      if (!this.binary) return resolve(null)
+      execFile(
+        this.binary,
+        ['-L', this.socket, 'display-message', '-p', '-t', `=${session}:`, format],
+        (err, stdout) => resolve(err ? null : stdout.trim() || null),
+      )
+    })
+  }
+
+  /** The command running in a session's pane — the shell card's "what's
+   *  running" title. tmux's `#{pane_current_command}` only gives the foreground
+   *  *process name* (`node` for `npm run dev`), so we go one better: take the
+   *  pane's shell pid + tty, then read the shell's foreground child off that
+   *  tty (see `foregroundCommand`) — that child's argv is the line the user
+   *  typed. Null when idle, the session is gone, or tmux/ps is unavailable.
+   *  Observe-only: two reads, never a mutation — honors the bare-shell card's
+   *  no-orchestration contract. */
+  async paneCommand(session: string): Promise<string | null> {
+    const info = await this.query(session, '#{pane_pid} #{pane_tty}')
+    if (!info) return null
+    const [pidStr, tty] = info.split(' ')
+    const shellPid = Number(pidStr)
+    if (!shellPid || !tty) return null
+    return foregroundCommand(tty, shellPid)
+  }
+
   /** Names of live sessions on the canvas socket (empty when no server runs). */
   liveSessions(): Promise<string[]> {
     return new Promise((resolve) => {
@@ -145,4 +179,34 @@ bind -T copy-mode-vi Escape send -X cancel
       })
     })
   }
+}
+
+/** Read a tty's process table and pick out the command the user ran in it.
+ *  Null if `ps` is unavailable or the shell sits idle at its prompt. */
+function foregroundCommand(tty: string, shellPid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'ps',
+      ['-t', tty.replace(/^\/dev\//, ''), '-o', 'pid=,ppid=,stat=,command='],
+      (err, stdout) => resolve(err ? null : foregroundChild(stdout, shellPid)),
+    )
+  })
+}
+
+/** Pure: pick the typed command out of `ps -o pid,ppid,stat,command` output.
+ *  The typed command is the shell's direct child that sits in the tty's
+ *  foreground process group (`+` in STAT) — e.g. `npm run dev`, whose own
+ *  `node`/`next-server` descendants hang off it but aren't children of the
+ *  shell. None → the shell itself is foreground, i.e. idle (returns null). A
+ *  pipeline (`a | b`) leaves several such children; the earliest-started
+ *  (lowest pid, the head of the pipe) is the one worth showing. */
+function foregroundChild(psOut: string, shellPid: number): string | null {
+  const kids = psOut
+    .split('\n')
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line))
+    .filter((m): m is RegExpExecArray => !!m)
+    .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), stat: m[3], command: m[4] }))
+    .filter((p) => p.ppid === shellPid && p.stat.includes('+'))
+    .sort((a, b) => a.pid - b.pid)
+  return kids[0]?.command ?? null
 }

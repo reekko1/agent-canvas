@@ -41,17 +41,17 @@ export function ProjectToolbar({
   return (
     <div
       ref={ref}
-      className="fixed left-1/2 top-2.5 z-40 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-border/40 bg-background/55 p-1 shadow-lg shadow-black/10 backdrop-blur-xl"
+      className="fixed left-1/2 top-2.5 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border/40 bg-background/55 p-1 shadow-lg shadow-black/10 backdrop-blur-xl"
       style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
     >
       <button
-        className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium hover:bg-accent"
+        className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium hover:bg-accent"
         onClick={() => setOpen((o) => !o)}
       >
         <span className="max-w-[220px] truncate">{active?.name ?? 'Default'}</span>
         <ChevronDown className="size-3.5 opacity-60" />
       </button>
-      <button className="rounded-xl p-1.5 hover:bg-accent" title="New canvas" onClick={create}>
+      <button className="rounded-full p-1.5 hover:bg-accent" title="New canvas" onClick={create}>
         <Plus className="size-4" />
       </button>
 

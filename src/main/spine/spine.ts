@@ -151,6 +151,11 @@ export class Spine {
     return this.adapter.currentTodos(sessionId)
   }
 
+  /** The foreground process in a card's pane — feeds the shell card's title. */
+  paneCommand(cardId: string): Promise<string | null> {
+    return this.tmux.paneCommand(`canvas-${cardId}`)
+  }
+
   /** Answer a held permission ask. Exactly one decision wins; the rest no-op. */
   decide(askId: string, decision: AskDecision): void {
     const ask = this.asks.get(askId)

@@ -311,6 +311,10 @@ export interface CanvasApi {
   saveWorkspace(snapshot: MultiProjectSnapshot): void
   /** The CLI's stored plan for a session (null = no store / none yet). */
   readTodos(sessionId: string): Promise<AgentTodo[] | null>
+  /** The foreground process in a shell card's pane (`zsh` idle, `node`/`vim`/…
+   *  while running) — polled for the shell card's title. Null when the
+   *  session is gone or tmux is unavailable. */
+  paneCommand(cardId: string): Promise<string | null>
   // Diff objects
   newDiff(): Promise<NewDiffResult | null>
   /** Start polling a folder's working tree; snapshots arrive on onDiffSnapshot. */

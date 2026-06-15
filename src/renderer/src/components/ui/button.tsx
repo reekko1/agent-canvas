@@ -27,6 +27,7 @@ const buttonVariants = cva(
         sm: "h-7 px-3 text-[12px] gap-1",
         md: "h-8 px-4 text-[13px] gap-1.5",
         lg: "h-9 px-5 text-[14px] gap-1.5",
+        "icon-xs": "h-6 w-6 p-0 [&_svg]:h-3 [&_svg]:w-3",
         "icon-sm": "h-8 w-8 p-0 [&_svg]:h-3.5 [&_svg]:w-3.5",
         icon: "h-9 w-9 p-0 [&_svg]:h-4 [&_svg]:w-4",
         "icon-lg": "h-10 w-10 p-0 [&_svg]:h-5 [&_svg]:w-5",
@@ -95,7 +96,8 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const Comp = asChild ? Slot : "button";
-    const isIconOnly = size === "icon" || size === "icon-sm" || size === "icon-lg";
+    const isIconOnly =
+      size === "icon-xs" || size === "icon" || size === "icon-sm" || size === "icon-lg";
     const iconSize = size === "sm" ? 14 : size === "lg" ? 20 : 16;
     const shape = useShape();
     const bgClass = active

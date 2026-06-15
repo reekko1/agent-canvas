@@ -365,7 +365,7 @@ export function Canvas() {
       />
 
       <div
-        className="fixed left-3 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-2xl border border-border/40 bg-background/55 p-1.5 shadow-lg shadow-black/10 backdrop-blur-xl"
+        className="fixed left-3 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-full border border-border/40 bg-background/55 p-1.5 shadow-lg shadow-black/10 backdrop-blur-xl"
         style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
       >
         <Tooltip>

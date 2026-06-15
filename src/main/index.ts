@@ -208,6 +208,7 @@ ipcMain.handle(
 )
 
 ipcMain.handle('read-todos', (_e, sessionId: string) => spine.todos(sessionId))
+ipcMain.handle('pane-command', (_e, cardId: string) => spine.paneCommand(cardId))
 ipcMain.handle('load-workspace', () => workspace.load())
 ipcMain.on('save-workspace', (_e, snapshot: MultiProjectSnapshot) => workspace.save(snapshot))
 

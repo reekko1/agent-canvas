@@ -6,20 +6,30 @@ import { TerminalView } from './TerminalView'
 import { PosterFace } from './PosterFace'
 import { ShellFace } from './ShellFace'
 
-/** How often the shell title re-reads the pane's running command (ms). */
+/** How often the shell title re-reads its pane (ms). */
 const POLL_MS = 1500
 
-/** Poll the command running in a shell card's pane (the "what's running"
- *  title) — the main process resolves it to the typed command or null when
- *  idle. Disabled for agent cards: the spine already speaks for those. */
-function useRunningCommand(cardId: string, enabled: boolean): string | null {
-  const [running, setRunning] = useState<string | null>(null)
+/** Poll a shell card's pane for its title bits — the command it's running and
+ *  the directory it's sitting in (which follows the user's `cd`s). The main
+ *  process resolves both off tmux; nulls mean idle / session gone. Disabled for
+ *  agent cards: the spine already speaks for those. */
+function useShellTitle(
+  cardId: string,
+  enabled: boolean,
+): { running: string | null; cwd: string | null } {
+  const [title, setTitle] = useState<{ running: string | null; cwd: string | null }>({
+    running: null,
+    cwd: null,
+  })
   useEffect(() => {
     if (!enabled) return
     let alive = true
     const tick = async (): Promise<void> => {
-      const cmd = await window.canvas.paneCommand(cardId)
-      if (alive) setRunning(cmd)
+      const [running, cwd] = await Promise.all([
+        window.canvas.paneCommand(cardId),
+        window.canvas.paneCwd(cardId),
+      ])
+      if (alive) setTitle({ running, cwd })
     }
     void tick()
     const t = setInterval(tick, POLL_MS)
@@ -28,7 +38,7 @@ function useRunningCommand(cardId: string, enabled: boolean): string | null {
       clearInterval(t)
     }
   }, [cardId, enabled])
-  return running
+  return title
 }
 
 /// One agent on the canvas: status-tinted chrome around a live terminal. As
@@ -49,8 +59,10 @@ export function CardNode({
   const isShell = kind === 'shell'
   // A shell card has no agent to speak for it — calm, neutral chrome always.
   const color = isShell ? 'var(--border)' : STATUS_COLORS[meta.status]
-  const folderName = folder.split('/').filter(Boolean).pop() ?? folder
-  const running = useRunningCommand(id, isShell)
+  const { running, cwd } = useShellTitle(id, isShell)
+  // Shells follow their pane's working directory as the user cd's around; agents
+  // (and a shell before its first poll) fall back to where the card was opened.
+  const folderName = ((isShell && cwd) || folder).split('/').filter(Boolean).pop() ?? folder
 
   return (
     <div

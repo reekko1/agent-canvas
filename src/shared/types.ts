@@ -315,6 +315,10 @@ export interface CanvasApi {
    *  while running) — polled for the shell card's title. Null when the
    *  session is gone or tmux is unavailable. */
   paneCommand(cardId: string): Promise<string | null>
+  /** A shell card's pane working directory, following the user's `cd`s — polled
+   *  for the shell card's title. Null when the session is gone or tmux is
+   *  unavailable. */
+  paneCwd(cardId: string): Promise<string | null>
   // Diff objects
   newDiff(): Promise<NewDiffResult | null>
   /** Start polling a folder's working tree; snapshots arrive on onDiffSnapshot. */

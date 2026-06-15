@@ -169,6 +169,13 @@ bind -T copy-mode-vi Escape send -X cancel
     return foregroundCommand(tty, shellPid)
   }
 
+  /** The pane's current working directory — follows the user's `cd`s, feeding
+   *  the shell card's title. tmux tracks this per pane (`#{pane_current_path}`),
+   *  so it's a single read. Null when the session is gone or tmux is absent. */
+  paneCwd(session: string): Promise<string | null> {
+    return this.query(session, '#{pane_current_path}')
+  }
+
   /** Names of live sessions on the canvas socket (empty when no server runs). */
   liveSessions(): Promise<string[]> {
     return new Promise((resolve) => {

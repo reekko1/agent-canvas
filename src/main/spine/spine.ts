@@ -156,6 +156,11 @@ export class Spine {
     return this.tmux.paneCommand(`canvas-${cardId}`)
   }
 
+  /** The card pane's current working directory — feeds the shell card's title. */
+  paneCwd(cardId: string): Promise<string | null> {
+    return this.tmux.paneCwd(`canvas-${cardId}`)
+  }
+
   /** Answer a held permission ask. Exactly one decision wins; the rest no-op. */
   decide(askId: string, decision: AskDecision): void {
     const ask = this.asks.get(askId)

@@ -6,8 +6,11 @@
 export const TOP_STRIP = 56
 /** Outer padding around the whole layout. */
 export const PAD = 12
-/** Left gutter so the floating left toolbar never covers card content. */
-export const LEFT_GUTTER = 64
+/** Left inset for the master card. Clears the floating left toolbar — pill's
+ *  right edge sits at ~62px (left-3 + p-1.5 + border + a 36px icon button) —
+ *  with roughly the same gap on the inside (~14px) as the toolbar has to the
+ *  window edge (~12px), so the toolbar reads as centered in its own channel. */
+export const LEFT_GUTTER = 76
 /** The stack column takes this fraction of the window width, clamped. */
 export const STACK_FRACTION = 0.3
 export const STACK_MIN = 320

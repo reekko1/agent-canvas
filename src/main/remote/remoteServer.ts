@@ -156,6 +156,7 @@ function render(st) {
     c.innerHTML = st.cards.map(function(k) {
       var cls = k.status === 'error' ? 'tile err' : (k.loud ? 'tile loud' : 'tile');
       var meta = [];
+      if (k.projectName) meta.push(esc(k.projectName));
       if (k.permissionMode === 'bypassPermissions') meta.push('<span class="bypass">BYPASS</span>');
       else if (k.permissionMode === 'dontAsk') meta.push('<span class="bypass">DON&#39;T-ASK</span>');
       if (k.subagents > 0) meta.push('&#10022;' + k.subagents);

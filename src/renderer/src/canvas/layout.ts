@@ -1,29 +1,53 @@
-// Shared geometry constants for the canvas (port of the Swift CanvasLayout).
-// Centralized so views and persistence agree on sizes without passing them.
+// Master-stack layout geometry (fixed viewport — no pan/zoom). The canvas
+// derives every card's rect from these + the window size + which card is the
+// master, so nothing about position is persisted.
 
-/** Default on-canvas size of a card. */
-export const CARD_W = 960
-export const CARD_H = 640
+/** Top strip reserved for the window-drag region and the toolbars. */
+export const TOP_STRIP = 56
+/** Outer padding around the whole layout. */
+export const PAD = 12
+/** Left gutter so the floating left toolbar never covers card content. */
+export const LEFT_GUTTER = 64
+/** The stack column takes this fraction of the window width, clamped. */
+export const STACK_FRACTION = 0.3
+export const STACK_MIN = 320
+export const STACK_MAX = 560
+/** Fixed height of a stacked (poster) card; the column scrolls past this. */
+export const STACK_CARD_H = 220
+/** Gap between stacked cards, and between master and the stack column. */
+export const GAP = 12
 
-/** Default on-canvas size of a diff object — a touch wider than a card for
- *  its two-pane split. */
-export const DIFF_W = 1100
-export const DIFF_H = 720
+export interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
-/** Smallest an item may be resized to — keeps a terminal or two-pane usable. */
-export const MIN_CARD_W = 360
-export const MIN_CARD_H = 240
+/** Width of the stack column for a given window width. */
+export function stackWidth(W: number): number {
+  return Math.round(Math.min(STACK_MAX, Math.max(STACK_MIN, W * STACK_FRACTION)))
+}
 
-/** Smallest a frame may be resized to. */
-export const MIN_FRAME_W = 260
-export const MIN_FRAME_H = 200
+/** The master slot rect — full content area when there's no stack, otherwise
+ *  the left region beside the stack column. */
+export function masterRect(W: number, H: number, hasStack: boolean): Rect {
+  const right = hasStack ? W - stackWidth(W) - GAP : W - PAD
+  return { x: LEFT_GUTTER, y: TOP_STRIP, w: right - LEFT_GUTTER, h: H - TOP_STRIP - PAD }
+}
 
-/** Gap between cards in the new-card placement grid. */
-export const CARD_GAP = 80
+/** The rect for the i-th stacked card (before scroll offset is applied). */
+export function stackSlot(W: number, i: number): Rect {
+  const sw = stackWidth(W)
+  return {
+    x: W - sw + PAD,
+    y: TOP_STRIP + i * (STACK_CARD_H + GAP),
+    w: sw - PAD - PAD,
+    h: STACK_CARD_H,
+  }
+}
 
-/** Never zoom past 1:1 — card document units equal terminal native pixels,
- *  so 1.0 is exactly crisp and anything above is upscale blur. */
-export const MAX_ZOOM = 1.0
-
-/** Breathing room added around content when computing the "fit all" bounds. */
-export const CONTENT_MARGIN = 120
+/** Total scrollable height of the stack column for `count` cards. */
+export function stackContentHeight(count: number): number {
+  return count * (STACK_CARD_H + GAP)
+}

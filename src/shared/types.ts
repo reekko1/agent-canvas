@@ -140,9 +140,9 @@ export interface NewDiffResult {
   folder: string
 }
 
-/// Layout-only persistence (port of the Swift Workspace): on reopen, agents
-/// reattach to surviving tmux sessions or respawn fresh. Status is never
-/// persisted — a restored card is idle until real events say otherwise.
+/// LEGACY layout persistence (pre-multi-project). Read ONLY by the migrator in
+/// WorkspaceStore — new code persists MultiProjectSnapshot. Kept so an existing
+/// single-canvas `workspace.json` upgrades losslessly on first launch.
 export interface WorkspaceItem {
   kind: 'card' | 'shell' | 'diff' | 'frame'
   id: string
@@ -167,6 +167,8 @@ export interface WorkspaceViewport {
   zoom: number
 }
 
+/** @deprecated The pre-multi-project on-disk shape. Migrated into a
+ *  MultiProjectSnapshot at load. */
 export interface WorkspaceSnapshot {
   items: WorkspaceItem[]
   viewport?: WorkspaceViewport
@@ -175,6 +177,50 @@ export interface WorkspaceSnapshot {
 /// What runs inside a card's terminal: a watched agent, or a bare `$SHELL`
 /// (no hooks, no status — neutral chrome).
 export type CardKind = 'agent' | 'shell'
+
+// MARK: Multi-project persistence
+//
+// Card identity is GLOBAL — one tmux session, one CardRecord — while layout is
+// per-project. Splitting the two is what stops a project losing track of a
+// card's folder from orphaning a live session: restore rebuilds nodes from the
+// `cards` registry, and projects only reference cards by id.
+
+/// The global, layout-independent record of one agent/shell card. (Diffs are
+/// NOT cards — they're a transient side sheet, never persisted.) This is what
+/// restore rebuilds nodes from.
+export interface CardRecord {
+  id: string
+  folder: string
+  kind: CardKind
+  /** Last-known CLI session — keys plan re-hydration across an app restart
+   *  (tmux). Stale ids are harmless. */
+  session?: string
+}
+
+/// One project's canvas. References cards by id only — it never owns their
+/// data, so moving a card between projects can't lose its folder/session.
+export interface Project {
+  id: string
+  name: string
+  /** Member card ids, in stack order (top of the column first). */
+  cardIds: string[]
+  /** The focused (master) card. Must be one of `cardIds` when set. */
+  focusedCardId?: string
+}
+
+/// The whole persisted workspace file — replaces WorkspaceSnapshot. Layout is
+/// derived (master-stack, fixed viewport), so nothing here carries geometry.
+export interface MultiProjectSnapshot {
+  /** Global card registry — card data lives HERE, not on projects. */
+  cards: CardRecord[]
+  projects: Project[]
+  activeProjectId: string
+}
+
+/** The durable project that always exists and can't be deleted; orphaned cards
+ *  (e.g. from a deleted project) land here. */
+export const DEFAULT_PROJECT_ID = 'proj-default'
+export const DEFAULT_PROJECT_NAME = 'Default'
 
 // MARK: Remote panel (Tailscale)
 
@@ -193,6 +239,9 @@ export interface RemoteState {
     model?: string
     permissionMode?: string
     subagents: number
+    /** Which canvas (project) this card belongs to — the panel stays global
+     *  across projects, tagging each card so the phone shows where work lives. */
+    projectName?: string
   }[]
   approvals: {
     id: string // askId
@@ -258,8 +307,8 @@ export interface CanvasApi {
     kind: CardKind,
   ): Promise<void>
   killCard(cardId: string): Promise<void>
-  loadWorkspace(): Promise<WorkspaceSnapshot | null>
-  saveWorkspace(snapshot: WorkspaceSnapshot): void
+  loadWorkspace(): Promise<MultiProjectSnapshot | null>
+  saveWorkspace(snapshot: MultiProjectSnapshot): void
   /** The CLI's stored plan for a session (null = no store / none yet). */
   readTodos(sessionId: string): Promise<AgentTodo[] | null>
   // Diff objects

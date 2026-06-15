@@ -39,6 +39,9 @@ export interface CardData extends Record<string, unknown> {
   /** Terminal engaged (mousedown) — releases any held asks to the native
    *  dialog and clears their toasts. */
   onEngage: (cardId: string) => void
+  /** Promote this card to the master slot — fired when its stacked poster is
+   *  clicked. No-op when it's already the master. */
+  onPromote: (cardId: string) => void
 }
 
 /** Fold one spine event into a card's meta (pure — the canvas owns the state,

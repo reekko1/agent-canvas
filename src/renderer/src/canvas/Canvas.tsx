@@ -4,11 +4,9 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
 } from 'react'
-import { ReactFlow, useNodesState, useReactFlow } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
-import { Bot, GitCompareArrows, Smartphone, SquareDashed, SquareTerminal } from 'lucide-react'
+import { Bot, GitCompareArrows, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -17,46 +15,69 @@ import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
 import { DiffNode } from '@/diff/DiffNode'
-import { FrameNode } from '@/frames/FrameNode'
-import { FrameChips } from '@/frames/FrameChips'
-import { FrameDrawOverlay } from '@/frames/FrameDrawOverlay'
-import { frameMembers, nodeRect, type Rect } from '@/frames/geometry'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
-import type {
-  CardKind,
-  PermissionAskInfo,
-  QuestionAskInfo,
-  WorkspaceItem,
-} from '@shared/types'
+import type { CardKind, CardRecord, PermissionAskInfo, QuestionAskInfo } from '@shared/types'
 import {
-  CARD_GAP,
-  CARD_H,
-  CARD_W,
-  DIFF_H,
-  DIFF_W,
-  MAX_ZOOM,
-  MIN_FRAME_H,
-  MIN_FRAME_W,
+  GAP,
+  PAD,
+  TOP_STRIP,
+  masterRect,
+  stackContentHeight,
+  stackSlot,
+  stackWidth,
+  type Rect,
 } from './layout'
 import type { CanvasNode } from './nodes'
+import { CardContextMenu } from './CardContextMenu'
+import { ProjectToolbar } from './ProjectToolbar'
 import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
 import { useAutoUpdate } from './useAutoUpdate'
 import { useCardMeta } from './useCardMeta'
 import { usePendingAsks } from './usePendingAsks'
 import { usePendingQuestions } from './usePendingQuestions'
+import { useProjects } from './useProjects'
 import { useRemotePublish } from './useRemotePublish'
 import { useWorkspace } from './useWorkspace'
-import { useZoomLimits } from './useZoomLimits'
 import { VideoBackdrop } from './VideoBackdrop'
 
-const nodeTypes = { card: CardNode, diff: DiffNode, frame: FrameNode }
+/** Off-screen parking rect for cards in inactive projects — kept mounted and
+ *  sized (so xterm/FitAddon stay valid) but `visibility:hidden`. */
+const PARKED: Rect = { x: -100000, y: 0, w: 800, h: 560 }
 
-/// The infinite canvas: cards, diff objects, and frames on a dot grid, a
-/// toolbar, and the wiring that turns spine events and disk state into nodes.
-/// Behavior lives in the hooks (useCardMeta, useWorkspace); this file is
-/// composition.
+/** Window size, tracked so the layout re-flows on resize. */
+function useWindowSize(): { w: number; h: number } {
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
+  useEffect(() => {
+    const on = (): void => setSize({ w: window.innerWidth, h: window.innerHeight })
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return size
+}
+
+/// The canvas: a fixed-viewport master-stack of agent cards, one project (a
+/// named canvas) shown at a time. Every card across every project stays mounted
+/// in one flat layer — switching projects only flips which are visible and how
+/// they're positioned — so a card keeps its xterm and scrollback alive through
+/// project switches, moves, and master↔stack promotion. Diffs open as a
+/// master-slot overlay.
 export function Canvas() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
+  const [nodes, setNodes] = useState<CanvasNode[]>([])
+  const [openDiff, setOpenDiff] = useState<{ id: string; folder: string } | null>(null)
+  const [diffCollapsed, setDiffCollapsed] = useState(false)
+  const [stackScroll, setStackScroll] = useState(0)
+  const [remoteOpen, setRemoteOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ cardId: string; x: number; y: number } | null>(
+    null,
+  )
+  const { w: winW, h: winH } = useWindowSize()
+
+  const makeProjectId = useCallback(
+    () => `proj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    [],
+  )
+  const proj = useProjects(makeProjectId)
+
   const { hydrateTodos } = useCardMeta(setNodes)
   const { asks, decide, releaseCard } = usePendingAsks()
   const {
@@ -65,6 +86,8 @@ export function Canvas() {
     decline: declineQuestion,
     releaseCard: releaseQuestionCard,
   } = usePendingQuestions()
+  const { update, dismiss: dismissUpdate, restart: restartForUpdate } = useAutoUpdate()
+
   /** Engaging a card's terminal releases everything it holds — both permission
    *  asks and questions fall through to the CLI's own dialogs. */
   const engageCard = useCallback(
@@ -74,109 +97,64 @@ export function Canvas() {
     },
     [releaseCard, releaseQuestionCard],
   )
-  const { update, dismiss: dismissUpdate, restart: restartForUpdate } = useAutoUpdate()
-  const { getViewport, screenToFlowPosition, fitBounds, fitView } = useReactFlow()
-  const [drawingFrame, setDrawingFrame] = useState(false)
-  const [remoteOpen, setRemoteOpen] = useState(false)
+
+  /** Bring a card to the master slot (switching to its project if needed). The
+   *  diff sheet is an independent overlay, so it stays put. */
+  const promoteCard = useCallback(
+    (cardId: string) => {
+      setStackScroll(0)
+      proj.promote(cardId)
+    },
+    [proj.promote],
+  )
 
   const onCloseCard = useCallback(
     (cardId: string) => {
       void window.canvas.killCard(cardId)
       setNodes((ns) => ns.filter((n) => n.id !== cardId))
+      proj.detachCard(cardId)
     },
-    [setNodes],
+    [proj.detachCard],
   )
 
-  const onCloseDiff = useCallback(
-    (diffId: string) => {
-      // The watcher stops on unmount; the repo itself is untouched.
-      setNodes((ns) => ns.filter((n) => n.id !== diffId))
-    },
-    [setNodes],
-  )
+  const closeDiff = useCallback(() => {
+    setOpenDiff(null)
+    setDiffCollapsed(false)
+  }, [])
 
   const makeCard = useCallback(
-    (
-      cardId: string,
-      folder: string,
-      position: { x: number; y: number },
-      size?: { w?: number; h?: number },
-      kind: CardKind = 'agent',
-    ): CanvasNode => ({
+    (cardId: string, folder: string, kind: CardKind): CanvasNode => ({
       id: cardId,
       type: 'card',
-      position,
-      width: size?.w ?? CARD_W,
-      height: size?.h ?? CARD_H,
-      dragHandle: '.card-drag',
       data: {
         folder,
         kind,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
         onEngage: engageCard,
+        onPromote: promoteCard,
       },
     }),
-    [onCloseCard, engageCard],
-  )
-
-  const makeDiff = useCallback(
-    (
-      diffId: string,
-      folder: string,
-      position: { x: number; y: number },
-      size?: { w?: number; h?: number },
-    ): CanvasNode => ({
-      id: diffId,
-      type: 'diff',
-      position,
-      width: size?.w ?? DIFF_W,
-      height: size?.h ?? DIFF_H,
-      dragHandle: '.card-drag',
-      data: { folder, onClose: onCloseDiff },
-    }),
-    [onCloseDiff],
-  )
-
-  const makeFrame = useCallback(
-    (
-      frameId: string,
-      name: string,
-      position: { x: number; y: number },
-      size?: { w?: number; h?: number },
-    ): CanvasNode => ({
-      id: frameId,
-      type: 'frame',
-      position,
-      width: Math.max(size?.w ?? MIN_FRAME_W, MIN_FRAME_W),
-      height: Math.max(size?.h ?? MIN_FRAME_H, MIN_FRAME_H),
-      zIndex: -1, // a backdrop behind the cards, never above them
-      draggable: false, // only the label chip moves a frame
-      selectable: false,
-      style: { pointerEvents: 'none' }, // the body passes pans through
-      data: { name, highlighted: false },
-    }),
-    [],
+    [onCloseCard, engageCard, promoteCard],
   )
 
   const restoreItem = useCallback(
-    (i: WorkspaceItem): CanvasNode | null => {
-      const pos = { x: i.x, y: i.y }
-      const size = { w: i.w, h: i.h }
-      if (i.kind === 'card' && i.folder) return makeCard(i.id, i.folder, pos, size, 'agent')
-      if (i.kind === 'shell' && i.folder) return makeCard(i.id, i.folder, pos, size, 'shell')
-      if (i.kind === 'diff' && i.folder) return makeDiff(i.id, i.folder, pos, size)
-      if (i.kind === 'frame') return makeFrame(i.id, i.title ?? 'Frame', pos, size)
-      return null // unknown kind from a future version — drop, don't crash
-    },
-    [makeCard, makeDiff, makeFrame],
+    (c: CardRecord): CanvasNode | null => (c.folder ? makeCard(c.id, c.folder, c.kind) : null),
+    [makeCard],
   )
 
-  const { persist } = useWorkspace({ nodes, setNodes, restoreItem, hydrateTodos })
-  const minZoom = useZoomLimits(nodes)
+  useWorkspace({
+    nodes,
+    setNodes,
+    restoreItem,
+    hydrateTodos,
+    projects: proj.projects,
+    activeProjectId: proj.activeProjectId,
+    onRestore: proj.restore,
+  })
 
   // The feed's subscription outlives renders; it reads canvas state through
-  // this ref instead of re-subscribing every time a node moves.
+  // this ref instead of re-subscribing every time the node list changes.
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
 
@@ -188,24 +166,9 @@ export function Canvas() {
 
   const { notifications, setNotifications } = useActivityFeed(titleFor)
 
-  // Mirror cards + asks + feed to the phone panel.
-  useRemotePublish({ nodes, asks, notifications, titleFor })
-
-  const flyTo = useCallback(
-    (cardId: string) => {
-      const node = nodesRef.current.find((x) => x.id === cardId)
-      if (!node) return // card closed since the row was written
-      const r = nodeRect(node)
-      void fitBounds({ x: r.x, y: r.y, width: r.w, height: r.h }, { duration: 600, padding: 0.12 })
-    },
-    [fitBounds],
-  )
-
-  /** Activity row click → fly to the card that spoke (the row's whole point). */
-  const flyToCard = useCallback(
-    (n: Notification) => flyTo((n as ActivityNotification).cardId),
-    [flyTo],
-  )
+  // Mirror cards + asks + feed to the phone panel — global across projects,
+  // each card tagged with its canvas name.
+  useRemotePublish({ nodes, asks, notifications, titleFor, projectNameFor: proj.projectNameForCard })
 
   /** Toast context: who's asking, and what they're in the middle of. */
   const askContextFor = useCallback((cardId: string) => {
@@ -217,234 +180,192 @@ export function Canvas() {
     }
   }, [])
 
-  /** Real bring-to-front: move the node to the end of the array (= DOM paint
-   *  order, = persisted order). Selection elevation alone is transient — a
-   *  deselected node falls back to array order, which is why depth felt
-   *  random. Frames stay out: they're backdrops pinned at zIndex -1. */
-  const raiseToTop = useCallback(
-    (nodeId: string) => {
-      setNodes((ns) => {
-        const i = ns.findIndex((n) => n.id === nodeId)
-        if (i === -1 || ns[i].type === 'frame' || i === ns.length - 1) return ns
-        return [...ns.slice(0, i), ...ns.slice(i + 1), ns[i]]
-      })
-    },
-    [setNodes],
+  /** Activity / ask / question click → promote that card to the main view
+   *  (switching canvas if it lives in another one). */
+  const flyToCard = useCallback(
+    (n: Notification) => promoteCard((n as ActivityNotification).cardId),
+    [promoteCard],
   )
-
-  /** Toast body click: release the ask (the dialog falls through to the
-   *  card's terminal) and fly there to answer it natively. */
   const flyToAsk = useCallback(
     (ask: PermissionAskInfo) => {
       decide(ask.askId, 'release')
-      flyTo(ask.cardId)
+      promoteCard(ask.cardId)
     },
-    [decide, flyTo],
+    [decide, promoteCard],
   )
-
-  /** Question header click: release it to the card's terminal picker and fly
-   *  there to answer natively. */
   const flyToQuestion = useCallback(
     (ask: QuestionAskInfo) => {
       releaseQuestionCard(ask.cardId)
-      flyTo(ask.cardId)
+      promoteCard(ask.cardId)
     },
-    [releaseQuestionCard, flyTo],
-  )
-
-  /** Spawn point centered in the current view, cascading down-right while
-   *  another item already sits exactly there so repeat spawns stay distinct. */
-  const spawnPosition = useCallback(
-    (w: number, h: number, ns: CanvasNode[]) => {
-      const c = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
-      const pos = { x: c.x - w / 2, y: c.y - h / 2 }
-      const taken = () =>
-        ns.some((n) => Math.abs(n.position.x - pos.x) < 1 && Math.abs(n.position.y - pos.y) < 1)
-      while (taken()) {
-        pos.x += CARD_GAP
-        pos.y += CARD_GAP
-      }
-      return pos
-    },
-    [screenToFlowPosition],
+    [releaseQuestionCard, promoteCard],
   )
 
   async function addCard(kind: CardKind): Promise<void> {
     const r = await (kind === 'shell' ? window.canvas.newShell() : window.canvas.newCard())
     if (!r) return
-    setNodes((ns) => [
-      ...ns,
-      makeCard(r.cardId, r.folder, spawnPosition(CARD_W, CARD_H, ns), undefined, kind),
-    ])
+    setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind)])
+    proj.attachCard(r.cardId) // joins the active canvas as its master
   }
 
   async function addDiff(): Promise<void> {
+    // Toggle the sheet if a diff is already open; otherwise pick a repo and open.
+    if (openDiff) {
+      setDiffCollapsed((c) => !c)
+      return
+    }
     const r = await window.canvas.newDiff()
     if (!r) return
-    setNodes((ns) => [...ns, makeDiff(r.diffId, r.folder, spawnPosition(DIFF_W, DIFF_H, ns))])
+    setOpenDiff({ id: r.diffId, folder: r.folder })
+    setDiffCollapsed(false)
   }
 
-  /** The draw gesture committed (screen coords) — convert to document space
-   *  and birth the frame behind whatever it encloses. */
-  const finishFrameDraw = useCallback(
-    (rect: Rect | null) => {
-      setDrawingFrame(false)
-      if (!rect) return
-      const { x: vx, y: vy, zoom } = getViewport()
-      const doc = {
-        x: (rect.x - vx) / zoom,
-        y: (rect.y - vy) / zoom,
-        w: rect.w / zoom,
-        h: rect.h / zoom,
-      }
-      const frameId = `frame-${Date.now().toString(36)}`
-      setNodes((ns) => {
-        const count = ns.filter((n) => n.type === 'frame').length
-        return [
-          ...ns,
-          makeFrame(frameId, `Frame ${count + 1}`, { x: doc.x, y: doc.y }, { w: doc.w, h: doc.h }),
-        ]
-      })
+  const switchProject = useCallback(
+    (id: string) => {
+      setStackScroll(0)
+      proj.switchProject(id)
     },
-    [getViewport, makeFrame, setNodes],
+    [proj.switchProject],
   )
 
-  // Esc disarms the frame tool.
-  useEffect(() => {
-    if (!drawingFrame) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDrawingFrame(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [drawingFrame])
+  // ---- Master-stack layout (active project only; others stay parked) ----
+  const active = proj.active
+  const activeSet = new Set(active.cardIds)
+  const cardNodes = nodes.flatMap((n) => (n.type === 'card' ? [n] : []))
+  const orderedActive = active.cardIds.flatMap((id) => {
+    const n = cardNodes.find((x) => x.id === id)
+    return n ? [n] : []
+  })
+  const masterCard =
+    orderedActive.find((n) => n.id === active.focusedCardId) ?? orderedActive[0] ?? null
+  const stackCards = orderedActive.filter((n) => n.id !== masterCard?.id)
+  const hasStack = stackCards.length > 0
+  const mRect = masterRect(winW, winH, hasStack)
+  // The diff side sheet overlays the right half — independent of the layout.
+  const sheetW = Math.min(900, Math.max(520, Math.round(winW * 0.5)))
 
-  // Light up frames while an item is dragged over them — the "drop here to
-  // join" cue. Membership itself is geometric, so the drop needs no handling.
-  const highlightFrames = useCallback(
-    (dragged: CanvasNode | null) => {
-      setNodes((ns) =>
-        ns.map((n) => {
-          if (n.type !== 'frame') return n
-          const over = !!dragged && frameMembers(n, dragged ? [dragged] : []).length > 0
-          return n.data.highlighted === over ? n : { ...n, data: { ...n.data, highlighted: over } }
-        }),
-      )
+  const maxScroll = Math.max(0, stackContentHeight(stackCards.length) - (winH - TOP_STRIP - PAD))
+  const scroll = Math.min(stackScroll, maxScroll)
+
+  const rectFor = (cardId: string): Rect => {
+    if (cardId === masterCard?.id) return mRect
+    const i = stackCards.findIndex((n) => n.id === cardId)
+    if (i < 0) return PARKED
+    const s = stackSlot(winW, i)
+    return { ...s, y: s.y - scroll }
+  }
+
+  const onStackWheel = useCallback(
+    (e: ReactWheelEvent<HTMLDivElement>) => {
+      if (!hasStack || maxScroll <= 0) return
+      // The diff sheet overlays the stack column — don't scroll the hidden
+      // stack behind it when the wheel is over the sheet.
+      if (openDiff && (e.target as HTMLElement).closest('[data-diff-sheet]')) return
+      if (e.clientX < winW - stackWidth(winW) - PAD) return // not over the stack column
+      setStackScroll((s) => Math.max(0, Math.min(maxScroll, s + e.deltaY)))
     },
-    [setNodes],
-  )
-
-  const renameFrame = useCallback(
-    (frameId: string, name: string) => {
-      setNodes((ns) =>
-        ns.map((n) =>
-          n.type === 'frame' && n.id === frameId ? { ...n, data: { ...n.data, name } } : n,
-        ),
-      )
-    },
-    [setNodes],
-  )
-
-  const deleteFrame = useCallback(
-    (frameId: string) => setNodes((ns) => ns.filter((n) => n.id !== frameId)),
-    [setNodes],
-  )
-
-  /** Double-click fits the camera to what's under the pointer — same move as
-   *  clicking a frame's chip. Cards/diffs fit from their chrome only (drag
-   *  header or far-zoom poster face): the terminal owns double-click for word
-   *  selection, and buttons/overlays keep their own behavior. Frames are
-   *  pointer-transparent, so the pane catches the event and we hit-test by
-   *  geometry. Capture phase, because stopping propagation here is what keeps
-   *  d3's double-click zoom from also firing. Empty canvas (no frame under
-   *  the pointer) fits everything — the zoomed-out overview. */
-  const onDoubleClickCapture = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>) => {
-      const target = e.target as HTMLElement
-      const fitTo = (n: CanvasNode) => {
-        e.stopPropagation()
-        const r = nodeRect(n)
-        void fitBounds(
-          { x: r.x, y: r.y, width: r.w, height: r.h },
-          { duration: 600, padding: 0.12 },
-        )
-      }
-
-      const nodeEl = target.closest<HTMLElement>('.react-flow__node')
-      if (nodeEl) {
-        if (target.closest('button') || !target.closest('.card-drag, .poster-face')) return
-        const node = nodes.find((n) => n.id === nodeEl.dataset.id)
-        if (node) fitTo(node)
-        return
-      }
-
-      if (!target.closest('.react-flow__pane')) return
-      const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const hit = nodes
-        .filter((n) => n.type === 'frame')
-        .map((n) => ({ n, r: nodeRect(n) }))
-        .filter(({ r }) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
-        .sort((a, b) => a.r.w * a.r.h - b.r.w * b.r.h)[0] // overlapping frames: most specific wins
-      if (hit) {
-        fitTo(hit.n)
-        return
-      }
-
-      // Truly empty canvas → fit everything (replaces d3's double-click zoom).
-      if (nodes.length === 0) return
-      e.stopPropagation()
-      void fitView({ duration: 600, padding: 0.12 })
-    },
-    [nodes, screenToFlowPosition, fitBounds, fitView],
+    [hasStack, maxScroll, winW, openDiff],
   )
 
   return (
-    <div className="relative h-screen w-screen" onDoubleClickCapture={onDoubleClickCapture}>
-      {/* Window-fixed studio wall behind the (transparent) flow pane —
-          replaces the dot grid; the canvas glides over it. */}
+    <div className="relative h-screen w-screen overflow-hidden" onWheel={onStackWheel}>
       <VideoBackdrop />
 
-      <ReactFlow
-        nodes={nodes}
-        onNodesChange={onNodesChange}
-        nodeTypes={nodeTypes}
-        minZoom={minZoom}
-        maxZoom={MAX_ZOOM}
-        // Figma-style navigation: two-finger scroll pans, pinch (ctrl/⌘+wheel)
-        // zooms, click-drag on the pane still pans. Terminals keep their own
-        // wheel (nowheel) for tmux scrollback.
-        panOnScroll
-        panOnScrollSpeed={1}
-        zoomOnPinch
-        proOptions={{ hideAttribution: true }}
-        onMoveEnd={persist}
-        onNodeClick={(_e, node) => raiseToTop(node.id)}
-        onNodeDragStart={(_e, node) => raiseToTop(node.id)}
-        onNodeDrag={(_e, node) => {
-          if (node.type !== 'frame') highlightFrames(node as CanvasNode)
-        }}
-        onNodeDragStop={() => highlightFrames(null)}
-      />
+      {/* One stable layer of every card across every project. The active
+          project's cards take the master/stack slots; the rest stay mounted but
+          parked off-screen and hidden — so no card's xterm ever unmounts. */}
+      {cardNodes.map((n) => {
+        const inActive = activeSet.has(n.id)
+        const isMaster = inActive && masterCard?.id === n.id
+        const r = inActive ? rectFor(n.id) : PARKED
+        return (
+          <div
+            key={n.id}
+            className="absolute left-0 top-0"
+            onContextMenu={
+              inActive
+                ? (e) => {
+                    e.preventDefault()
+                    setContextMenu({ cardId: n.id, x: e.clientX, y: e.clientY })
+                  }
+                : undefined
+            }
+            style={{
+              transform: `translate(${r.x}px, ${r.y}px)`,
+              width: r.w,
+              height: r.h,
+              transition:
+                proj.animate && inActive
+                  ? 'transform .25s ease, width .25s ease, height .25s ease'
+                  : 'none',
+              visibility: inActive ? 'visible' : 'hidden',
+              zIndex: isMaster ? 10 : 1,
+            }}
+          >
+            <CardNode id={n.id} data={n.data} stacked={!isMaster} />
+          </div>
+        )
+      })}
 
-      <FrameChips
-        nodes={nodes}
-        setNodes={setNodes}
-        onRename={renameFrame}
-        onDelete={deleteFrame}
-      />
-
-      {drawingFrame && <FrameDrawOverlay onCommit={finishFrameDraw} />}
+      {/* Diff side sheet: a right-edge drawer that slides over the canvas
+          without displacing the master-stack. Collapsing parks it off-screen
+          but keeps DiffNode mounted (watcher + selection survive), with an edge
+          tab to bring it back; closing tears it down. */}
+      {openDiff && (
+        <>
+          <div
+            data-diff-sheet
+            className="fixed overflow-hidden rounded-2xl"
+            style={{
+              top: TOP_STRIP,
+              bottom: PAD,
+              right: PAD,
+              width: sheetW,
+              zIndex: 35,
+              transform: diffCollapsed ? 'translateX(calc(100% + 24px))' : 'translateX(0)',
+              transition: 'transform .3s ease',
+            }}
+          >
+            <DiffNode
+              id={openDiff.id}
+              data={{
+                folder: openDiff.folder,
+                onClose: closeDiff,
+                onCollapse: () => setDiffCollapsed(true),
+              }}
+            />
+          </div>
+          {diffCollapsed && (
+            <button
+              className="fixed right-0 top-1/2 -translate-y-1/2 rounded-l-xl border border-r-0 border-border/40 bg-background/80 px-2 py-3 font-mono text-xs text-muted-foreground shadow-lg backdrop-blur-xl hover:text-foreground"
+              style={{ zIndex: 36, writingMode: 'vertical-rl' } as CSSProperties}
+              onClick={() => setDiffCollapsed(false)}
+              title="Show diff"
+            >
+              diff
+            </button>
+          )}
+        </>
+      )}
 
       {/* With titleBarStyle: hiddenInset there is no title bar — this strip is
-          how the window gets dragged. The toolbar below is no-drag, so its
-          buttons carve themselves out of the region. */}
+          how the window gets dragged. The toolbars below are no-drag. */}
       <div
-        className="fixed inset-x-0 top-0 z-20 h-12"
+        className="fixed inset-x-0 top-0 z-30 h-12"
         style={{ WebkitAppRegion: 'drag' } as CSSProperties}
       />
 
+      <ProjectToolbar
+        projects={proj.projects}
+        activeProjectId={proj.activeProjectId}
+        onSwitch={switchProject}
+        onCreate={proj.createProject}
+        onRename={proj.renameProject}
+        onDelete={proj.deleteProject}
+      />
+
       <div
-        className="fixed left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-1 rounded-2xl border border-border/40 bg-background/55 p-1.5 shadow-lg shadow-black/10 backdrop-blur-xl"
+        className="fixed left-3 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-2xl border border-border/40 bg-background/55 p-1.5 shadow-lg shadow-black/10 backdrop-blur-xl"
         style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
       >
         <Tooltip>
@@ -480,32 +401,12 @@ export function Canvas() {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="New diff"
-                onClick={() => void addDiff()}
-              >
+              <Button variant="ghost" size="icon" aria-label="New diff" onClick={() => void addDiff()}>
                 <GitCompareArrows />
               </Button>
             }
           />
           <TooltipContent side="right">New diff</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant={drawingFrame ? 'primary' : 'ghost'}
-                size="icon"
-                aria-label="New frame"
-                onClick={() => setDrawingFrame((v) => !v)}
-              >
-                <SquareDashed />
-              </Button>
-            }
-          />
-          <TooltipContent side="right">New frame</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger
@@ -526,10 +427,9 @@ export function Canvas() {
 
       <RemoteAccessDialog open={remoteOpen} onClose={() => setRemoteOpen(false)} />
 
-      {/* Activity center: the spine's feed-worthy rows under a bell. Sits in
-          the drag strip, so it carves itself out of the region. */}
+      {/* Activity center: the spine's feed-worthy rows under a bell. */}
       <div
-        className="fixed right-3 top-3 z-30"
+        className="fixed right-3 top-3 z-40"
         style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
       >
         <NotificationPopover
@@ -538,6 +438,19 @@ export function Canvas() {
           onNotificationClick={flyToCard}
         />
       </div>
+
+      {contextMenu && (
+        <CardContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          cardId={contextMenu.cardId}
+          currentProjectId={proj.projectIdForCard(contextMenu.cardId)}
+          projects={proj.projects}
+          onMove={proj.moveCard}
+          onClose={onCloseCard}
+          onDismiss={() => setContextMenu(null)}
+        />
+      )}
 
       {/* Shared bottom overlay: questions ride above permission asks. Always
           mounted so AnimatePresence can play exit animations on the last item. */}
@@ -554,12 +467,10 @@ export function Canvas() {
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
 
-      {(drawingFrame || nodes.length === 0) && (
-        <div className="pointer-events-none fixed inset-x-0 top-4 z-30 flex justify-center">
+      {orderedActive.length === 0 && (
+        <div className="pointer-events-none fixed inset-x-0 top-16 z-30 flex justify-center">
           <span className="rounded-full border border-border/40 bg-background/55 px-3 py-1 font-mono text-xs text-muted-foreground backdrop-blur-xl">
-            {drawingFrame
-              ? 'drag to draw — esc to cancel'
-              : 'pick a folder — a real `claude` spawns in a tmux session'}
+            pick a folder — a real `claude` spawns in a tmux session
           </span>
         </div>
       )}

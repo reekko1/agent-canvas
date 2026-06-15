@@ -235,40 +235,6 @@
     }
 }
 
-/* Card resize grip — a thick bracket hugging the card's rounded corner, just
-   inside the border ring and concentric with its radius (Swift
-   ResizeHandlesView parity). Revealed faint on card hover, full ink when the
-   grab zone (the NodeResizeControl sibling before it) is hovered — states
-   vary by opacity only, never hue. Pure chrome: hits pass through. */
-.resize-grip {
-    position: absolute;
-    right: 3px;
-    bottom: 3px;
-    width: 24px;
-    height: 24px;
-    border-right: 5px solid var(--muted-foreground);
-    border-bottom: 5px solid var(--muted-foreground);
-    border-bottom-right-radius: 13px;
-    opacity: 0;
-    transition: opacity 120ms;
-    pointer-events: none;
-}
-.react-flow__node:hover .resize-grip {
-    opacity: 0.3;
-}
-.react-flow__resize-control:hover + .resize-grip {
-    opacity: 1;
-}
-
-/* Cards behave like macOS windows: the cursor stays a plain arrow everywhere,
-   including the title bar and mid-drag. Overrides xyflow's wrapper-wide
-   grab/pointer/grabbing. */
-.react-flow__node.draggable,
-.react-flow__node.selectable,
-.react-flow__node.draggable.dragging {
-    cursor: default;
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;

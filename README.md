@@ -1,7 +1,7 @@
 # Agent Canvas (Electron rebuild)
 
-Infinite-canvas supervision for coding-agent fleets — the Electron + React +
-reactflow + xterm.js rebuild of the native Swift app at `~/Agents-Canvas`.
+Fixed-viewport, master-stack supervision for coding-agent fleets — the Electron
++ React + xterm.js rebuild of the native Swift app at `~/Agents-Canvas`.
 That repo's `CLAUDE.md` is the product spec of record; its behavior decisions
 (reattach-not-resume, ✕ kills the session, status never persisted, fly-in
 releases held permission asks) all apply here.
@@ -33,7 +33,7 @@ and Squirrel.Mac refuses unsigned updates, so never release an ad-hoc build —
 ## Walking-skeleton status
 
 Works end to end: **New Agent → folder picker → real `claude` in a tmux
-session → live terminal in a reactflow card → hook events drive card status →
+session → live terminal in the master card → hook events drive card status →
 PermissionRequest held with on-card Allow/Deny → clicking the terminal
 releases the ask to the native dialog.**
 
@@ -50,7 +50,7 @@ inherits the production fleet.
 - Reattach at launch (`liveSessions` exists in `tmux.ts`; card ids are
   timestamped so restarts never collide with — or silently attach to — old
   sessions, but nothing re-adopts them yet) and workspace persistence
-- Poster LOD + todo checklist (TaskCreate/TaskUpdate/TodoWrite mapping and the
+- Todo checklist (TaskCreate/TaskUpdate/TodoWrite mapping and the
   `~/.claude/tasks/<session-id>/` re-hydration) — budget live terminals to
   ~14: Chromium caps WebGL contexts at ~16 (measured), beyond that xterm falls
   back to the slow DOM renderer

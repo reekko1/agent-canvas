@@ -4,7 +4,7 @@ import backdropLight from '@/assets/backdrop-light.mp4'
 
 /// A full-bleed looping video backdrop behind the canvas. Unlike the old dot
 /// grid it is **fixed to the window** — it doesn't pan or zoom with the
-/// canvas; the cards and frames glide over it like a studio wall. It carries
+/// canvas; the cards glide over it like a studio wall. It carries
 /// a dark- and a light-theme clip and swaps on theme change (the same <html>
 /// class flip the terminals watch). Aspect-fill, muted, looped, and paused
 /// whenever the window is hidden so it costs nothing off-screen.
@@ -59,7 +59,7 @@ export function VideoBackdrop() {
         playsInline
         className="h-full w-full object-cover"
       />
-      {/* A subtle black scrim so the cards and frames read as a distinct
+      {/* A subtle black scrim so the cards read as a distinct
           layer above the footage (separation), and the video sits back. */}
       <div className="absolute inset-0 bg-black/28" />
     </div>

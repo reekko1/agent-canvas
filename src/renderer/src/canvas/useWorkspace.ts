@@ -1,76 +1,67 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useReactFlow } from '@xyflow/react'
-import { CARD_H, CARD_W, MAX_ZOOM } from './layout'
+import { useCallback, useEffect, useState } from 'react'
 import type { CanvasNode } from './nodes'
-import type { WorkspaceItem } from '@shared/types'
+import type { CardRecord, Project } from '@shared/types'
 
 /// Restore-once + debounced persist for the canvas (renderer end of the
-/// Workspace port). Layout only: agents reattach via tmux and diff watchers
-/// restart when their nodes mount; status is never persisted, so a glyph
-/// can't lie.
+/// Workspace port). Layout is derived (master-stack, fixed viewport), so this
+/// persists only the global card registry + the projects that order them and
+/// name a master. Status is never persisted, so a glyph can't lie.
 export function useWorkspace({
   nodes,
   setNodes,
   restoreItem,
   hydrateTodos,
+  projects,
+  activeProjectId,
+  onRestore,
 }: {
   nodes: CanvasNode[]
   setNodes: (ns: CanvasNode[]) => void
-  /** Build the node for one saved item (null = unknown kind — drop it). */
-  restoreItem: (item: WorkspaceItem) => CanvasNode | null
+  /** Build the node for one saved card (null = unusable record — drop it). */
+  restoreItem: (card: CardRecord) => CanvasNode | null
   hydrateTodos: (cardId: string, sessionId: string) => void
+  projects: Project[]
+  activeProjectId: string
+  /** Hand the restored projects + active id back to the canvas on load. */
+  onRestore: (projects: Project[], activeProjectId: string) => void
 }) {
-  const { setViewport, getViewport } = useReactFlow()
   const [hydrated, setHydrated] = useState(false)
 
-  const restoredOnce = useRef(false)
+  const [restoredOnce, setRestoredOnce] = useState(false)
   useEffect(() => {
-    if (restoredOnce.current) return
-    restoredOnce.current = true
+    if (restoredOnce) return
+    setRestoredOnce(true)
     void (async () => {
       const ws = await window.canvas.loadWorkspace()
       if (ws) {
-        // Clamp the saved zoom into today's ceiling (older workspaces could
-        // save up to 1.25); the dynamic floor re-clamps once nodes land.
-        if (ws.viewport) {
-          void setViewport({ ...ws.viewport, zoom: Math.min(ws.viewport.zoom, MAX_ZOOM) })
-        }
-        const items = ws.items.filter((i) => i.kind === 'frame' || i.folder)
-        setNodes(items.map(restoreItem).filter((n): n is CanvasNode => n !== null))
+        // setNodes BEFORE onRestore: in React 18 these async-callback updates
+        // aren't batched, so projects must not reference cards not yet mounted
+        // (else one render sees an empty active project).
+        setNodes(ws.cards.map(restoreItem).filter((n): n is CanvasNode => n !== null))
+        onRestore(ws.projects, ws.activeProjectId)
         // Reattached sessions sit silent until their next hook event — pull
         // their plan from the CLI's task store now, not on first activity.
-        for (const i of items) {
-          if (i.kind === 'card' && i.session) hydrateTodos(i.id, i.session)
+        for (const c of ws.cards) {
+          if (c.kind === 'agent' && c.session) hydrateTodos(c.id, c.session)
         }
       }
       setHydrated(true)
     })()
-  }, [restoreItem, setNodes, setViewport, hydrateTodos])
+  }, [restoredOnce, restoreItem, setNodes, hydrateTodos, onRestore])
 
   const persist = useCallback(() => {
     if (!hydrated) return // never let a blank pre-restore canvas clobber the file
-    const items: WorkspaceItem[] = nodes.map((n) => {
-      const base = {
-        id: n.id,
-        x: n.position.x,
-        y: n.position.y,
-        w: n.width ?? CARD_W,
-        h: n.height ?? CARD_H,
-      }
-      if (n.type === 'frame') return { kind: 'frame' as const, title: n.data.name, ...base }
-      if (n.type === 'diff') return { kind: 'diff' as const, folder: n.data.folder, ...base }
-      return {
-        kind: n.data.kind === 'shell' ? ('shell' as const) : ('card' as const),
-        folder: n.data.folder,
-        session: n.data.meta.sessionId,
-        ...base,
-      }
-    })
-    window.canvas.saveWorkspace({ items, viewport: getViewport() })
-  }, [hydrated, nodes, getViewport])
+    // Only agent/shell cards are persisted — diffs are a transient side sheet.
+    // Card data lives in the registry; projects order them and name a master.
+    const cards: CardRecord[] = nodes.flatMap((n) =>
+      n.type === 'card'
+        ? [{ id: n.id, folder: n.data.folder, kind: n.data.kind, session: n.data.meta.sessionId }]
+        : [],
+    )
+    window.canvas.saveWorkspace({ cards, projects, activeProjectId })
+  }, [hydrated, nodes, projects, activeProjectId])
 
-  // Debounced layout saves (drags stream position changes); pan/zoom ends
-  // save directly via the canvas's onMoveEnd → persist.
+  // Debounced saves (add/close/promote/move/switch all change the snapshot).
   useEffect(() => {
     const t = setTimeout(persist, 300)
     return () => clearTimeout(t)

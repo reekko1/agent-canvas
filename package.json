@@ -1,7 +1,7 @@
 {
   "name": "agent-canvas",
   "version": "1.1.1-dev",
-  "description": "Agent Canvas — infinite-canvas supervision for coding agent fleets",
+  "description": "Agent Canvas — master-stack supervision for coding agent fleets",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
@@ -33,7 +33,6 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
-    "@xyflow/react": "^12.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron": "^34.0.0",

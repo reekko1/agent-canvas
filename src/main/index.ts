@@ -12,10 +12,10 @@ import type {
   AskDecision,
   GitActionRequest,
   GitChange,
+  MultiProjectSnapshot,
   QuestionAnswers,
   RemoteState,
   UpdateStatus,
-  WorkspaceSnapshot,
 } from '../shared/types'
 
 let win: BrowserWindow | null = null
@@ -209,7 +209,7 @@ ipcMain.handle(
 
 ipcMain.handle('read-todos', (_e, sessionId: string) => spine.todos(sessionId))
 ipcMain.handle('load-workspace', () => workspace.load())
-ipcMain.on('save-workspace', (_e, snapshot: WorkspaceSnapshot) => workspace.save(snapshot))
+ipcMain.on('save-workspace', (_e, snapshot: MultiProjectSnapshot) => workspace.save(snapshot))
 
 ipcMain.handle('kill-card', (_e, cardId: string) => {
   ptys.kill(cardId)

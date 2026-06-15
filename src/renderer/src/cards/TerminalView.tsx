@@ -50,7 +50,7 @@ export function TerminalView({
   cardId: string
   folder: string
   kind: 'agent' | 'shell'
-  /** True while the poster covers the card (far zoom). visibility, not
+  /** True while the poster covers the card (stacked). visibility, not
    *  display: layout holds the card's size and xterm keeps consuming the
    *  stream; only compositing stops. */
   hidden: boolean
@@ -87,7 +87,21 @@ export function TerminalView({
     } catch {
       // DOM renderer fallback — fine for a handful of cards
     }
-    const refit = new ResizeObserver(() => fit.fit())
+    // Coalesce a burst of size changes — grip-resize today, the master-stack
+    // tiling animation later — into ONE fit once motion settles. A naive
+    // fit-per-callback runs ~60×/s during a continuous resize, and every fit's
+    // onResize SIGWINCHes the pty (tmux and the claude TUI both reflow), which
+    // thrashes the agent. A trailing debounce keeps resetting while the size is
+    // still moving, so the single fit lands after the animation/drag stops. The
+    // mount-time fit above stays immediate, so the pty spawns correctly sized.
+    let settle: ReturnType<typeof setTimeout> | undefined
+    const refit = new ResizeObserver(() => {
+      if (settle) clearTimeout(settle)
+      settle = setTimeout(() => {
+        settle = undefined
+        fit.fit()
+      }, 100)
+    })
     refit.observe(termRef.current!)
     const gridChange = term.onResize(({ cols, rows }) => window.canvas.resize(cardId, cols, rows))
     const stripMouseModes = makeMouseModeFilter()
@@ -142,6 +156,7 @@ export function TerminalView({
     // subscribed — no byte of output can outrun the listener.
     void window.canvas.ensureCard(cardId, folder, term.cols, term.rows, kind)
     return () => {
+      if (settle) clearTimeout(settle)
       refit.disconnect()
       themeObserver.disconnect()
       offData()
@@ -153,7 +168,7 @@ export function TerminalView({
 
   return (
     <div
-      className="nodrag nowheel h-full p-3"
+      className="h-full p-3"
       style={{ visibility: hidden ? 'hidden' : 'visible' }}
       // Fly-in rule: while an ask is held (toast up), the terminal shows no
       // dialog — engaging the terminal releases it to the native dialog.

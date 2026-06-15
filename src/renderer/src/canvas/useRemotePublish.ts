@@ -13,11 +13,15 @@ export function useRemotePublish({
   asks,
   notifications,
   titleFor,
+  projectNameFor,
 }: {
   nodes: CanvasNode[]
   asks: PendingAsk[]
   notifications: ActivityNotification[]
   titleFor: (cardId: string) => string
+  /** Which canvas a card belongs to — tags each remote card; the panel itself
+   *  stays global across every project. */
+  projectNameFor: (cardId: string) => string | undefined
 }) {
   const lastJSON = useRef('')
 
@@ -34,6 +38,7 @@ export function useRemotePublish({
         model: n.data.meta.model,
         permissionMode: n.data.meta.permissionMode,
         subagents: n.data.meta.subagents ?? 0,
+        projectName: projectNameFor(n.id),
       }))
     const approvals: RemoteState['approvals'] = asks.map((a) => ({
       id: a.askId,
@@ -58,5 +63,5 @@ export function useRemotePublish({
     if (json === lastJSON.current) return
     lastJSON.current = json
     window.canvas.publishRemoteState(state)
-  }, [nodes, asks, notifications, titleFor])
+  }, [nodes, asks, notifications, titleFor, projectNameFor])
 }

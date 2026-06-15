@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { NodeProps } from '@xyflow/react'
 import { Button } from '@/components/ui/button'
-import { ResizeGrip } from '@/cards/ResizeGrip'
 import { diffLines, type DiffLine } from './diffText'
 import type { GitActionRequest, GitChange, GitFileStatus, GitSnapshot } from '@shared/types'
 
 export interface DiffData extends Record<string, unknown> {
   folder: string
   onClose: (diffId: string) => void
+  /** Collapse the sheet off-screen without tearing down the watcher, so
+   *  reopening is instant and keeps the selected file. */
+  onCollapse?: () => void
 }
 
 // Swift GitFileStatus parity: untracked dots read as added; letters match
@@ -38,7 +39,7 @@ const LINE_CLASS: Record<DiffLine['kind'], string> = {
 /// its own floating canvas item — deliberately not bolted to a card. Observes
 /// via the main-process watcher; mutates only on explicit user actions, the
 /// one scoped exception to "observe, don't orchestrate".
-export function DiffNode({ id, data }: NodeProps & { data: DiffData }) {
+export function DiffNode({ id, data }: { id: string; data: DiffData }) {
   const { folder } = data
   const folderName = folder.split('/').filter(Boolean).pop() ?? folder
 
@@ -126,8 +127,8 @@ export function DiffNode({ id, data }: NodeProps & { data: DiffData }) {
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border-2 border-border bg-card shadow-2xl">
       {/* Calm, neutral chrome — status colors belong to agent cards, not diffs.
-          The trailing diffstat is the at-distance cue at god-view. */}
-      <div className="card-drag flex items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
+          The trailing diffstat shows the file-change summary. */}
+      <div className="flex items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
         <span className="font-bold">{folderName}</span>
         <span className="flex-1" />
         {snap && !snap.isRepo && <span className="text-muted-foreground">not a repo</span>}
@@ -140,8 +141,17 @@ export function DiffNode({ id, data }: NodeProps & { data: DiffData }) {
             <span className="text-diff-del">−{snap.totalRemoved}</span>
           </span>
         )}
+        {data.onCollapse && (
+          <button
+            className="border-none bg-transparent font-mono text-sm text-muted-foreground hover:text-foreground"
+            onClick={data.onCollapse}
+            title="Collapse"
+          >
+            ⟩⟩
+          </button>
+        )}
         <button
-          className="nodrag border-none bg-transparent font-mono text-sm text-muted-foreground hover:text-foreground"
+          className="border-none bg-transparent font-mono text-sm text-muted-foreground hover:text-foreground"
           onClick={() => data.onClose(id)}
           title="Remove diff object (the repo is untouched)"
         >
@@ -149,7 +159,7 @@ export function DiffNode({ id, data }: NodeProps & { data: DiffData }) {
         </button>
       </div>
 
-      <div className="nodrag nowheel flex min-h-0 flex-1 font-mono text-xs">
+      <div className="flex min-h-0 flex-1 font-mono text-xs">
         {/* Left column: commit box + grouped file list (VS Code shape). */}
         <div className="flex w-[34%] min-w-[200px] flex-col border-r">
           <div className="flex flex-col gap-1.5 border-b p-2">
@@ -238,8 +248,6 @@ export function DiffNode({ id, data }: NodeProps & { data: DiffData }) {
           )}
         </div>
       </div>
-
-      <ResizeGrip />
     </div>
   )
 }

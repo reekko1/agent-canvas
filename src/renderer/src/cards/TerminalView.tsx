@@ -45,6 +45,7 @@ export function TerminalView({
   folder,
   kind,
   hidden,
+  interactive,
   onEngage,
 }: {
   cardId: string
@@ -54,6 +55,10 @@ export function TerminalView({
    *  display: layout holds the card's size and xterm keeps consuming the
    *  stream; only compositing stops. */
   hidden: boolean
+  /** False while the card is compact/stacked: the terminal is inert so a drag
+   *  can't start an xterm selection instead of clicking through to promote.
+   *  Only the master (engaged) terminal takes the cursor. */
+  interactive: boolean
   onEngage: () => void
 }) {
   const termRef = useRef<HTMLDivElement>(null)
@@ -168,7 +173,7 @@ export function TerminalView({
 
   return (
     <div
-      className="h-full p-3"
+      className={`h-full p-3 ${interactive ? '' : 'pointer-events-none'}`}
       style={{ visibility: hidden ? 'hidden' : 'visible' }}
       // Fly-in rule: while an ask is held (toast up), the terminal shows no
       // dialog — engaging the terminal releases it to the native dialog.

@@ -4,6 +4,9 @@ import type { PermissionAskInfo } from '@shared/types'
 /** The agent context a toast carries above the permission line. */
 export interface AskContext {
   name: string
+  /** The card's canvas — shown as a chip so a toast from another canvas is
+   *  legible at a glance (clicking it switches there). */
+  project?: string
   task?: string
 }
 
@@ -42,6 +45,11 @@ export function AskToasts({
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-status-blocked" />
                 <span className="text-sm font-medium text-foreground">{ctx.name}</span>
+                {ctx.project && (
+                  <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {ctx.project}
+                  </span>
+                )}
                 {ctx.task && (
                   <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                     {ctx.task}

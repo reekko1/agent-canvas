@@ -107,6 +107,11 @@ function QuestionCard({
         <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary" />
         <span className="text-sm font-medium text-foreground">{ctx.name}</span>
         <span className="text-[10px] font-semibold uppercase tracking-wide text-primary">asks</span>
+        {ctx.project && (
+          <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            {ctx.project}
+          </span>
+        )}
         {ctx.task && (
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{ctx.task}</span>
         )}

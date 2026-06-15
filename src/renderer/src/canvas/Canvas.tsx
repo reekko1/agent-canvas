@@ -37,6 +37,7 @@ import { useCardMeta } from './useCardMeta'
 import { usePendingAsks } from './usePendingAsks'
 import { usePendingQuestions } from './usePendingQuestions'
 import { useProjects } from './useProjects'
+import { useProjectAttention } from './useProjectAttention'
 import { useRemotePublish } from './useRemotePublish'
 import { useWorkspace } from './useWorkspace'
 import { VideoBackdrop } from './VideoBackdrop'
@@ -175,21 +176,29 @@ export function Canvas() {
     return folder?.split('/').filter(Boolean).pop() ?? 'agent'
   }, [])
 
-  const { notifications, setNotifications } = useActivityFeed(titleFor)
+  const { notifications, setNotifications } = useActivityFeed(titleFor, proj.projectNameForCard)
+
+  // Per-canvas attention, rolled up from card meta + held asks/questions —
+  // drives the toolbar dots.
+  const attention = useProjectAttention({ projects: proj.projects, nodes, asks, questions })
 
   // Mirror cards + asks + feed to the phone panel — global across projects,
   // each card tagged with its canvas name.
   useRemotePublish({ nodes, asks, notifications, titleFor, projectNameFor: proj.projectNameForCard })
 
-  /** Toast context: who's asking, and what they're in the middle of. */
-  const askContextFor = useCallback((cardId: string) => {
-    const n = nodesRef.current.find((x) => x.id === cardId)
-    if (!n || n.type !== 'card') return { name: 'agent' }
-    return {
-      name: n.data.folder.split('/').filter(Boolean).pop() ?? 'agent',
-      task: n.data.meta.task ?? n.data.meta.detail,
-    }
-  }, [])
+  /** Toast context: who's asking, their canvas, and what they're mid-way on. */
+  const askContextFor = useCallback(
+    (cardId: string) => {
+      const n = nodesRef.current.find((x) => x.id === cardId)
+      if (!n || n.type !== 'card') return { name: 'agent' }
+      return {
+        name: n.data.folder.split('/').filter(Boolean).pop() ?? 'agent',
+        project: proj.projectNameForCard(cardId),
+        task: n.data.meta.task ?? n.data.meta.detail,
+      }
+    },
+    [proj.projectNameForCard],
+  )
 
   /** Activity / ask / question click → promote that card to the main view
    *  (switching canvas if it lives in another one). */
@@ -366,6 +375,7 @@ export function Canvas() {
       <ProjectToolbar
         projects={proj.projects}
         activeProjectId={proj.activeProjectId}
+        attention={attention}
         onSwitch={switchProject}
         onCreate={createProject}
         onRename={proj.renameProject}

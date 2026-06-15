@@ -10,6 +10,9 @@ export type Notification = {
   description: string
   timestamp: Date
   read: boolean
+  /** The canvas this row belongs to — shown as a chip so the feed reads
+   *  per-project. Absent for non-canvas notifications. */
+  project?: string
 }
 
 /** "now", "5m", "2h", then a date — activity rows are about recency. */
@@ -47,16 +50,21 @@ const NotificationItem = ({
     onClick={() => onClick(notification)}
   >
     <div className="flex justify-between items-start">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         {!notification.read && (
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
         )}
-        <h4 className={`text-sm font-medium ${textColor}`}>
+        <h4 className={`truncate text-sm font-medium ${textColor}`}>
           {notification.title}
         </h4>
+        {notification.project && (
+          <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            {notification.project}
+          </span>
+        )}
       </div>
 
-      <span className={`text-xs opacity-80 ${textColor}`}>
+      <span className={`shrink-0 text-xs opacity-80 ${textColor}`}>
         {timeAgo(notification.timestamp)}
       </span>
     </div>

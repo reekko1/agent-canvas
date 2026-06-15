@@ -50,15 +50,20 @@ function feedWorthy(previous: CardStatus, current: CardStatus): boolean {
 /// both listeners get every event) and keeps its own last-status shadow so
 /// transition detection never races the nodes' meta updates. The card always
 /// reflects every transition; the feed only gets the ones worth reading later.
-export function useActivityFeed(titleFor: (cardId: string) => string) {
+export function useActivityFeed(
+  titleFor: (cardId: string) => string,
+  projectNameFor: (cardId: string) => string | undefined,
+) {
   const [notifications, setNotifications] = useState<ActivityNotification[]>([])
   const lastStatus = useRef(new Map<string, CardStatus>())
   const seq = useRef(1)
 
-  // titleFor reads live canvas state through a ref at the call site — keep the
-  // subscription stable across renders rather than chasing its identity.
+  // titleFor/projectNameFor read live canvas state through a ref at the call
+  // site — keep the subscription stable rather than chasing their identity.
   const titleForRef = useRef(titleFor)
   titleForRef.current = titleFor
+  const projectNameForRef = useRef(projectNameFor)
+  projectNameForRef.current = projectNameFor
 
   useEffect(() => {
     return window.canvas.onCardEvent((cardId, ev) => {
@@ -74,6 +79,7 @@ export function useActivityFeed(titleFor: (cardId: string) => string) {
         cardId,
         status: current,
         title: titleForRef.current(cardId),
+        project: projectNameForRef.current(cardId),
         description: ev.detail ?? FALLBACK[current],
         timestamp: new Date(),
         read: !LOUD.has(current),

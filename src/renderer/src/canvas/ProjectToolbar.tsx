@@ -1,13 +1,30 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, Pencil, Plus, X } from 'lucide-react'
 import type { Project } from '@shared/types'
+import { attentionElsewhere, type AttentionLevel } from './useProjectAttention'
+
+/// A canvas's attention glyph: amber pulse when a card is stalled on you,
+/// faint hollow ring when one's done and waiting. Nothing when quiet — the
+/// fixed slot keeps names aligned across rows.
+function AttentionDot({ level }: { level: AttentionLevel }) {
+  return (
+    <span className="flex size-2 shrink-0 items-center justify-center">
+      {level === 'blocking' && (
+        <span className="size-2 animate-pulse rounded-full bg-status-blocked" />
+      )}
+      {level === 'done' && <span className="size-2 rounded-full border border-status-done/70" />}
+    </span>
+  )
+}
 
 /// Top toolbar: a dropdown that names the active canvas and switches between
 /// projects, plus a "+" to make a new one. Rename/delete live per-row in the
-/// dropdown. Mirrors the left toolbar's pill style.
+/// dropdown. Each row carries an attention dot; the collapsed pill lights up
+/// when a canvas you're NOT looking at needs you. Mirrors the left pill style.
 export function ProjectToolbar({
   projects,
   activeProjectId,
+  attention,
   onSwitch,
   onCreate,
   onRename,
@@ -15,11 +32,13 @@ export function ProjectToolbar({
 }: {
   projects: Project[]
   activeProjectId: string | null
+  attention: Record<string, AttentionLevel>
   onSwitch: (id: string) => void
   onCreate: () => void
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
 }) {
+  const elsewhere = attentionElsewhere(attention, activeProjectId)
   const [open, setOpen] = useState(false)
   // The canvas being renamed inline (Electron disables window.prompt()), plus
   // its working draft. null = nobody's editing.
@@ -59,7 +78,9 @@ export function ProjectToolbar({
       <button
         className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium hover:bg-accent"
         onClick={() => setOpen((o) => !o)}
+        title={elsewhere !== 'none' ? 'Another canvas needs you' : undefined}
       >
+        {elsewhere !== 'none' && <AttentionDot level={elsewhere} />}
         <span className="max-w-[220px] truncate">{active?.name ?? 'No canvas'}</span>
         <ChevronDown className="size-3.5 opacity-60" />
       </button>
@@ -72,10 +93,11 @@ export function ProjectToolbar({
           {projects.map((p) => (
             <div
               key={p.id}
-              className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm ${
+              className={`group flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm ${
                 p.id === activeProjectId ? 'bg-accent' : 'hover:bg-accent/60'
               }`}
             >
+              <AttentionDot level={attention[p.id] ?? 'none'} />
               {editingId === p.id ? (
                 <input
                   autoFocus

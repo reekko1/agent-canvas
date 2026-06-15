@@ -21,9 +21,9 @@ export function useWorkspace({
   restoreItem: (card: CardRecord) => CanvasNode | null
   hydrateTodos: (cardId: string, sessionId: string) => void
   projects: Project[]
-  activeProjectId: string
+  activeProjectId: string | null
   /** Hand the restored projects + active id back to the canvas on load. */
-  onRestore: (projects: Project[], activeProjectId: string) => void
+  onRestore: (projects: Project[], activeProjectId: string | null) => void
 }) {
   const [hydrated, setHydrated] = useState(false)
 

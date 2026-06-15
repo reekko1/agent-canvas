@@ -6,8 +6,9 @@ import {
   type CSSProperties,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
-import { Bot, GitCompareArrows, Smartphone, SquareTerminal } from 'lucide-react'
+import { Bot, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useIcon } from '@/lib/icon-context'
 import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AskToasts } from '@/cards/AskToasts'
@@ -56,21 +57,24 @@ function useWindowSize(): { w: number; h: number } {
 }
 
 /// The canvas: a fixed-viewport master-stack of agent cards, one project (a
-/// named canvas) shown at a time. Every card across every project stays mounted
-/// in one flat layer — switching projects only flips which are visible and how
-/// they're positioned — so a card keeps its xterm and scrollback alive through
-/// project switches, moves, and master↔stack promotion. Diffs open as a
-/// master-slot overlay.
+/// named canvas, pinned to a dir) shown at a time. Every card across every
+/// project stays mounted in one flat layer — switching projects only flips
+/// which are visible and how they're positioned — so a card keeps its xterm and
+/// scrollback alive through project switches and master↔stack promotion. Cards
+/// are born into a canvas and don't move between them. The diff is a built-in
+/// right-edge drawer watching the active canvas's dir.
 export function Canvas() {
   const [nodes, setNodes] = useState<CanvasNode[]>([])
-  const [openDiff, setOpenDiff] = useState<{ id: string; folder: string } | null>(null)
-  const [diffCollapsed, setDiffCollapsed] = useState(false)
+  // The diff drawer is built into every canvas that has a dir — it watches that
+  // folder, re-points on canvas switch, and starts collapsed behind an edge tab.
+  const [diffCollapsed, setDiffCollapsed] = useState(true)
   const [stackScroll, setStackScroll] = useState(0)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ cardId: string; x: number; y: number } | null>(
     null,
   )
   const { w: winW, h: winH } = useWindowSize()
+  const PlusIcon = useIcon('plus')
 
   const makeProjectId = useCallback(
     () => `proj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -117,10 +121,17 @@ export function Canvas() {
     [proj.detachCard],
   )
 
-  const closeDiff = useCallback(() => {
-    setOpenDiff(null)
-    setDiffCollapsed(false)
-  }, [])
+  // Deleting a canvas closes every card on it — kill the sessions, drop the
+  // nodes, then remove the project.
+  const deleteProject = useCallback(
+    (id: string) => {
+      const ids = proj.projects.find((p) => p.id === id)?.cardIds ?? []
+      ids.forEach((cardId) => void window.canvas.killCard(cardId))
+      setNodes((ns) => ns.filter((n) => !ids.includes(n.id)))
+      proj.deleteProject(id)
+    },
+    [proj.projects, proj.deleteProject],
+  )
 
   const makeCard = useCallback(
     (cardId: string, folder: string, kind: CardKind): CanvasNode => ({
@@ -202,23 +213,21 @@ export function Canvas() {
   )
 
   async function addCard(kind: CardKind): Promise<void> {
-    const r = await (kind === 'shell' ? window.canvas.newShell() : window.canvas.newCard())
+    // Cards spawn in the active canvas's dir — no canvas, nothing to add.
+    const dir = proj.active?.dir
+    if (!dir) return
+    const r = await (kind === 'shell' ? window.canvas.newShell(dir) : window.canvas.newCard(dir))
     if (!r) return
     setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind)])
     proj.attachCard(r.cardId) // joins the active canvas as its master
   }
 
-  async function addDiff(): Promise<void> {
-    // Toggle the sheet if a diff is already open; otherwise pick a repo and open.
-    if (openDiff) {
-      setDiffCollapsed((c) => !c)
-      return
-    }
-    const r = await window.canvas.newDiff()
-    if (!r) return
-    setOpenDiff({ id: r.diffId, folder: r.folder })
-    setDiffCollapsed(false)
-  }
+  const createProject = useCallback(async () => {
+    const dir = await window.canvas.pickFolder('Choose the folder for this canvas')
+    if (!dir) return // cancelled — don't create a dirless project
+    const name = dir.split('/').filter(Boolean).pop() || 'Canvas'
+    proj.createProject(name, dir)
+  }, [proj.createProject])
 
   const switchProject = useCallback(
     (id: string) => {
@@ -230,19 +239,22 @@ export function Canvas() {
 
   // ---- Master-stack layout (active project only; others stay parked) ----
   const active = proj.active
-  const activeSet = new Set(active.cardIds)
+  const activeSet = new Set(active?.cardIds ?? [])
   const cardNodes = nodes.flatMap((n) => (n.type === 'card' ? [n] : []))
-  const orderedActive = active.cardIds.flatMap((id) => {
+  const orderedActive = (active?.cardIds ?? []).flatMap((id) => {
     const n = cardNodes.find((x) => x.id === id)
     return n ? [n] : []
   })
   const masterCard =
-    orderedActive.find((n) => n.id === active.focusedCardId) ?? orderedActive[0] ?? null
+    orderedActive.find((n) => n.id === active?.focusedCardId) ?? orderedActive[0] ?? null
   const stackCards = orderedActive.filter((n) => n.id !== masterCard?.id)
   const hasStack = stackCards.length > 0
   const mRect = masterRect(winW, winH, hasStack)
   // The diff side sheet overlays the right half — independent of the layout.
   const sheetW = Math.min(900, Math.max(520, Math.round(winW * 0.5)))
+  // The active canvas's repo — the diff drawer watches it. Keyed by project id
+  // so switching canvases re-points the watcher. Null when there's no canvas.
+  const activeDir = active?.dir
 
   const maxScroll = Math.max(0, stackContentHeight(stackCards.length) - (winH - TOP_STRIP - PAD))
   const scroll = Math.min(stackScroll, maxScroll)
@@ -260,11 +272,11 @@ export function Canvas() {
       if (!hasStack || maxScroll <= 0) return
       // The diff sheet overlays the stack column — don't scroll the hidden
       // stack behind it when the wheel is over the sheet.
-      if (openDiff && (e.target as HTMLElement).closest('[data-diff-sheet]')) return
+      if (!diffCollapsed && (e.target as HTMLElement).closest('[data-diff-sheet]')) return
       if (e.clientX < winW - stackWidth(winW) - PAD) return // not over the stack column
       setStackScroll((s) => Math.max(0, Math.min(maxScroll, s + e.deltaY)))
     },
-    [hasStack, maxScroll, winW, openDiff],
+    [hasStack, maxScroll, winW, diffCollapsed],
   )
 
   return (
@@ -311,7 +323,7 @@ export function Canvas() {
           without displacing the master-stack. Collapsing parks it off-screen
           but keeps DiffNode mounted (watcher + selection survive), with an edge
           tab to bring it back; closing tears it down. */}
-      {openDiff && (
+      {activeDir && (
         <>
           <div
             data-diff-sheet
@@ -327,12 +339,8 @@ export function Canvas() {
             }}
           >
             <DiffNode
-              id={openDiff.id}
-              data={{
-                folder: openDiff.folder,
-                onClose: closeDiff,
-                onCollapse: () => setDiffCollapsed(true),
-              }}
+              id={`diff-${proj.activeProjectId}`}
+              data={{ folder: activeDir, onCollapse: () => setDiffCollapsed(true) }}
             />
           </div>
           {diffCollapsed && (
@@ -359,9 +367,9 @@ export function Canvas() {
         projects={proj.projects}
         activeProjectId={proj.activeProjectId}
         onSwitch={switchProject}
-        onCreate={proj.createProject}
+        onCreate={createProject}
         onRename={proj.renameProject}
-        onDelete={proj.deleteProject}
+        onDelete={deleteProject}
       />
 
       <div
@@ -375,6 +383,7 @@ export function Canvas() {
                 variant="ghost"
                 size="icon"
                 aria-label="New agent"
+                disabled={!active}
                 onClick={() => void addCard('agent')}
               >
                 <Bot />
@@ -390,6 +399,7 @@ export function Canvas() {
                 variant="ghost"
                 size="icon"
                 aria-label="New terminal"
+                disabled={!active}
                 onClick={() => void addCard('shell')}
               >
                 <SquareTerminal />
@@ -397,16 +407,6 @@ export function Canvas() {
             }
           />
           <TooltipContent side="right">New terminal</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button variant="ghost" size="icon" aria-label="New diff" onClick={() => void addDiff()}>
-                <GitCompareArrows />
-              </Button>
-            }
-          />
-          <TooltipContent side="right">New diff</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger
@@ -444,9 +444,6 @@ export function Canvas() {
           x={contextMenu.x}
           y={contextMenu.y}
           cardId={contextMenu.cardId}
-          currentProjectId={proj.projectIdForCard(contextMenu.cardId)}
-          projects={proj.projects}
-          onMove={proj.moveCard}
           onClose={onCloseCard}
           onDismiss={() => setContextMenu(null)}
         />
@@ -467,12 +464,27 @@ export function Canvas() {
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
 
-      {orderedActive.length === 0 && (
-        <div className="pointer-events-none fixed inset-x-0 top-16 z-30 flex justify-center">
-          <span className="rounded-full border border-border/40 bg-background/55 px-3 py-1 font-mono text-xs text-muted-foreground backdrop-blur-xl">
-            pick a folder — a real `claude` spawns in a tmux session
-          </span>
+      {!active ? (
+        <div className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4">
+          <div className="text-center">
+            <p className="font-mono text-sm text-foreground/80">No canvas yet</p>
+            <p className="mt-1 font-mono text-xs text-muted-foreground">
+              A canvas is a folder — every agent and terminal on it spawns there.
+            </p>
+          </div>
+          <Button leadingIcon={PlusIcon} onClick={() => void createProject()}>
+            New canvas
+          </Button>
         </div>
+      ) : (
+        orderedActive.length === 0 && (
+          <div className="pointer-events-none fixed inset-x-0 top-16 z-30 flex justify-center">
+            <span className="rounded-full border border-border/40 bg-background/55 px-3 py-1 font-mono text-xs text-muted-foreground backdrop-blur-xl">
+              empty canvas — add an agent or terminal, it spawns in{' '}
+              {active.dir.split('/').filter(Boolean).pop()}
+            </span>
+          </div>
+        )
       )}
     </div>
   )

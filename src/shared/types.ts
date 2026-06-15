@@ -135,45 +135,6 @@ export type GitActionRequest =
   | { kind: 'stageAll' | 'unstageAll' | 'discardAll' }
   | { kind: 'commit'; message: string }
 
-export interface NewDiffResult {
-  diffId: string
-  folder: string
-}
-
-/// LEGACY layout persistence (pre-multi-project). Read ONLY by the migrator in
-/// WorkspaceStore — new code persists MultiProjectSnapshot. Kept so an existing
-/// single-canvas `workspace.json` upgrades losslessly on first launch.
-export interface WorkspaceItem {
-  kind: 'card' | 'shell' | 'diff' | 'frame'
-  id: string
-  x: number
-  y: number
-  /** Item size — absent in pre-resize workspaces (loader falls back to the default). */
-  w?: number
-  h?: number
-  /** Working folder — cards/shells/diffs have one; frames don't. */
-  folder?: string
-  /** Display name — frames only (cards/diffs derive theirs from the folder). */
-  title?: string
-  /** The card's last-known CLI session — NOT a status: it keys plan
-   *  re-hydration from the CLI's task store when the session survives an app
-   *  restart (tmux). Stale ids are harmless. */
-  session?: string
-}
-
-export interface WorkspaceViewport {
-  x: number
-  y: number
-  zoom: number
-}
-
-/** @deprecated The pre-multi-project on-disk shape. Migrated into a
- *  MultiProjectSnapshot at load. */
-export interface WorkspaceSnapshot {
-  items: WorkspaceItem[]
-  viewport?: WorkspaceViewport
-}
-
 /// What runs inside a card's terminal: a watched agent, or a bare `$SHELL`
 /// (no hooks, no status — neutral chrome).
 export type CardKind = 'agent' | 'shell'
@@ -197,30 +158,28 @@ export interface CardRecord {
   session?: string
 }
 
-/// One project's canvas. References cards by id only — it never owns their
-/// data, so moving a card between projects can't lose its folder/session.
+/// One project's canvas: a named folder. References cards by id only — it never
+/// owns their data. A project = a dir; every card on it spawns in that dir.
 export interface Project {
   id: string
   name: string
+  /** The project's repo root — every card on the canvas spawns here. */
+  dir: string
   /** Member card ids, in stack order (top of the column first). */
   cardIds: string[]
   /** The focused (master) card. Must be one of `cardIds` when set. */
   focusedCardId?: string
 }
 
-/// The whole persisted workspace file — replaces WorkspaceSnapshot. Layout is
-/// derived (master-stack, fixed viewport), so nothing here carries geometry.
+/// The whole persisted workspace file. Layout is derived (master-stack, fixed
+/// viewport), so nothing here carries geometry. `activeProjectId` is null when
+/// there are no projects (the empty state).
 export interface MultiProjectSnapshot {
   /** Global card registry — card data lives HERE, not on projects. */
   cards: CardRecord[]
   projects: Project[]
-  activeProjectId: string
+  activeProjectId: string | null
 }
-
-/** The durable project that always exists and can't be deleted; orphaned cards
- *  (e.g. from a deleted project) land here. */
-export const DEFAULT_PROJECT_ID = 'proj-default'
-export const DEFAULT_PROJECT_NAME = 'Default'
 
 // MARK: Remote panel (Tailscale)
 
@@ -294,8 +253,11 @@ export interface UpdateStatus {
 }
 
 export interface CanvasApi {
-  newCard(): Promise<NewCardResult | null>
-  newShell(): Promise<NewCardResult | null>
+  /** `folder` (the active project's dir) skips the picker; omit it to prompt. */
+  newCard(folder?: string): Promise<NewCardResult | null>
+  newShell(folder?: string): Promise<NewCardResult | null>
+  /** Native folder picker — used when creating a project to set its dir. */
+  pickFolder(message: string): Promise<string | null>
   /** Spawn the card's pty if it isn't running — called on CardNode mount, so
    *  the terminal is always subscribed before the first byte arrives. tmux
    *  `new-session -A` makes this the restore path too (reattach or create). */
@@ -319,8 +281,7 @@ export interface CanvasApi {
    *  for the shell card's title. Null when the session is gone or tmux is
    *  unavailable. */
   paneCwd(cardId: string): Promise<string | null>
-  // Diff objects
-  newDiff(): Promise<NewDiffResult | null>
+  // Diff: built into every canvas with a dir, watching that folder.
   /** Start polling a folder's working tree; snapshots arrive on onDiffSnapshot. */
   watchDiff(diffId: string, folder: string): Promise<void>
   unwatchDiff(diffId: string): void

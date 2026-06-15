@@ -8,15 +8,15 @@ function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
 }
 
 const api: CanvasApi = {
-  newCard: () => ipcRenderer.invoke('new-card'),
-  newShell: () => ipcRenderer.invoke('new-shell'),
+  newCard: (folder) => ipcRenderer.invoke('new-card', folder),
+  newShell: (folder) => ipcRenderer.invoke('new-shell', folder),
+  pickFolder: (message) => ipcRenderer.invoke('pick-folder', message),
   ensureCard: (cardId, folder, cols, rows, kind) =>
     ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows, kind),
   killCard: (cardId) => ipcRenderer.invoke('kill-card', cardId),
   readTodos: (sessionId) => ipcRenderer.invoke('read-todos', sessionId),
   paneCommand: (cardId) => ipcRenderer.invoke('pane-command', cardId),
   paneCwd: (cardId) => ipcRenderer.invoke('pane-cwd', cardId),
-  newDiff: () => ipcRenderer.invoke('new-diff'),
   watchDiff: (diffId, folder) => ipcRenderer.invoke('watch-diff', diffId, folder),
   unwatchDiff: (diffId) => ipcRenderer.send('unwatch-diff', diffId),
   readFileDiff: (folder, change) => ipcRenderer.invoke('file-diff', folder, change),

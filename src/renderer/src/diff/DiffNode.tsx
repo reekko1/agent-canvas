@@ -6,7 +6,9 @@ import type { GitActionRequest, GitChange, GitFileStatus, GitSnapshot } from '@s
 
 export interface DiffData extends Record<string, unknown> {
   folder: string
-  onClose: (diffId: string) => void
+  /** Tears the diff down entirely. Omitted for the built-in per-canvas drawer,
+   *  which is never "closed" — only collapsed. */
+  onClose?: (diffId: string) => void
   /** Collapse the sheet off-screen without tearing down the watcher, so
    *  reopening is instant and keeps the selected file. */
   onCollapse?: () => void
@@ -158,15 +160,17 @@ export function DiffNode({ id, data }: { id: string; data: DiffData }) {
               <Minus />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => data.onClose(id)}
-            title="Remove diff object (the repo is untouched)"
-            aria-label="Close"
-          >
-            <X />
-          </Button>
+          {data.onClose && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => data.onClose?.(id)}
+              title="Remove diff object (the repo is untouched)"
+              aria-label="Close"
+            >
+              <X />
+            </Button>
+          )}
         </span>
       </div>
 

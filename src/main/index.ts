@@ -155,25 +155,22 @@ async function pickFolder(message: string): Promise<string | null> {
   return r.canceled ? null : (r.filePaths[0] ?? null)
 }
 
-ipcMain.handle('new-card', async () => {
-  const folder = await pickFolder('Choose the folder this agent works in')
-  if (!folder) return null
+ipcMain.handle('pick-folder', (_e, message: string) => pickFolder(message))
+
+// `folder` is the active project's dir when set — cards inherit it instead of
+// prompting. Default (no dir) falls back to the picker, one folder per card.
+ipcMain.handle('new-card', async (_e, folder?: string) => {
+  const dir = folder ?? (await pickFolder('Choose the folder this agent works in'))
+  if (!dir) return null
   const cardId = `card-${Date.now().toString(36)}-${nextItem++}`
-  return { cardId, folder } // the pty spawns when the CardNode mounts (ensure-card)
+  return { cardId, folder: dir } // the pty spawns when the CardNode mounts (ensure-card)
 })
 
-ipcMain.handle('new-shell', async () => {
-  const folder = await pickFolder('Choose the folder for this terminal')
-  if (!folder) return null
+ipcMain.handle('new-shell', async (_e, folder?: string) => {
+  const dir = folder ?? (await pickFolder('Choose the folder for this terminal'))
+  if (!dir) return null
   const cardId = `shell-${Date.now().toString(36)}-${nextItem++}`
-  return { cardId, folder }
-})
-
-ipcMain.handle('new-diff', async () => {
-  const folder = await pickFolder('Choose the repo to watch')
-  if (!folder) return null
-  const diffId = `diff-${Date.now().toString(36)}-${nextItem++}`
-  return { diffId, folder } // the watcher starts when the DiffNode mounts (watch-diff)
+  return { cardId, folder: dir }
 })
 
 ipcMain.handle('watch-diff', (_e, diffId: string, folder: string) =>

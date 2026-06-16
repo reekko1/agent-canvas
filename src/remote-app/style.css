@@ -232,3 +232,74 @@ h2 {
   padding: 5px 12px;
   font-size: 12px;
 }
+
+/* A card tile taps into its terminal. */
+.tile.tap {
+  cursor: pointer;
+}
+.tile.tap:active {
+  background: var(--bar);
+}
+.chev {
+  color: var(--muted);
+  margin-left: 4px;
+  flex: none;
+}
+
+/* Full-screen terminal overlay (xterm + an accessory key bar). */
+.term-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.term-bar .term-back {
+  border: none;
+  padding: 4px 6px;
+  color: var(--blocked);
+  font-size: 14px;
+}
+.term-bar .term-name {
+  font-weight: 650;
+  font-size: 14px;
+}
+.term-bar .term-state {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.term-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  overflow: hidden;
+}
+.term-keys {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+}
+.term-keys button {
+  flex: none;
+  min-width: 44px;
+  padding: 9px 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 14px;
+  background: var(--body);
+}
+.term-keys button:active {
+  background: var(--bar);
+}

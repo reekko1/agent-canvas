@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto'
 import { HookSink, type HookRequest } from './hookSink'
 import { ClaudeAdapter, shellQuote } from './claudeAdapter'
 import { Tmux } from './tmux'
-import { RemoteServer } from '../remote/remoteServer'
+import * as pty from 'node-pty'
+import { RemoteServer, type TermSession } from '../remote/remoteServer'
 import { PushService } from '../remote/push'
 import type {
   AskDecision,
@@ -95,6 +96,7 @@ export class Spine {
       console.log(`[spine] sink ready on 127.0.0.1:${port}`)
     })
     this.remote.push = new PushService(join(SPINE_DIR, 'push.json'))
+    this.remote.openTerminal = (cardId, cols, rows) => this.openTerminal(cardId, cols, rows)
     this.remote.start(this.config.remotePort, (port) => {
       this.config.remotePort = port
       saveConfig(this.config)
@@ -181,6 +183,31 @@ export class Spine {
     if (!ask) return
     this.asks.delete(askId)
     ask.respond(this.adapter.questionAnswerBody(ask.input, answers))
+  }
+
+  /** Attach a fresh tmux client to a card's session for the mobile terminal —
+   *  a second, live-mirrored view alongside the desktop (tmux is multi-client).
+   *  One pty per phone connection (not the card's primary pty); killing it just
+   *  detaches that client. Null when tmux is unavailable. */
+  openTerminal(cardId: string, cols: number, rows: number): TermSession | null {
+    const cmd = this.tmux.attachCommand(`canvas-${cardId}`)
+    if (!cmd) return null
+    const p = pty.spawn(cmd.file, cmd.args, {
+      name: 'xterm-256color',
+      cols: cols > 0 ? cols : 80,
+      rows: rows > 0 ? rows : 24,
+      cwd: SPINE_DIR,
+      env: process.env as Record<string, string>,
+    })
+    return {
+      onData: (cb) => p.onData(cb),
+      onExit: (cb) => p.onExit(() => cb()),
+      write: (d) => p.write(d),
+      resize: (c, r) => {
+        if (c > 0 && r > 0) p.resize(c, r)
+      },
+      kill: () => p.kill(),
+    }
   }
 
   /** Release every held ask for a card — the fly-in path: while held, the

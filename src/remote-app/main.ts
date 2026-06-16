@@ -1,5 +1,6 @@
 import './style.css'
 import type { RemoteState } from '@shared/types'
+import { openTerminal } from './term'
 
 /// The mobile panel: canvas-led triage. Polls /state every 2s and groups each
 /// canvas's questions / approvals / cards under it, loudest first. Answer a
@@ -60,10 +61,14 @@ function cardTile(k: RemoteState['cards'][number]): string {
   if (k.subagents > 0) meta.push('&#10022;' + k.subagents)
   if (k.model) meta.push(esc(k.model))
   if (k.task) meta.push(esc(k.task))
+  // Whole tile taps into the card's terminal (a live tmux mirror).
+  const word =
+    k.kind === 'shell' ? '<span class="word" style="color:var(--muted)">SHELL</span>' : wordEl(k.status)
   return (
-    `<div class="${cls}"><div class="row">${dot(k.status)}` +
-    `<span class="name">${esc(k.name)}</span>${wordEl(k.status)}` +
-    `<span class="age">${rel(k.since)}</span></div>` +
+    `<div class="${cls} tap" data-act="term" data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
+    `<div class="row">${dot(k.status)}` +
+    `<span class="name">${esc(k.name)}</span>${word}` +
+    `<span class="age">${rel(k.since)}</span><span class="chev">›</span></div>` +
     (meta.length ? `<div class="meta">${meta.join(' &middot; ')}</div>` : '') +
     `</div>`
   )
@@ -229,6 +234,9 @@ document.addEventListener('click', (e) => {
     case 'decline':
       delete sel[id]
       void post('decline', { id })
+      break
+    case 'term':
+      openTerminal(id, t.dataset.n ?? 'terminal')
       break
   }
 })

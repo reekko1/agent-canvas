@@ -1,8 +1,19 @@
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
+import { WebSocketServer, type WebSocket } from 'ws'
 import type { QuestionAnswers, RemoteState } from '../../shared/types'
 import type { PushService } from './push'
+
+/// One mobile terminal: a tmux client attached to a card's session, wrapped so
+/// the transport stays agnostic about node-pty.
+export interface TermSession {
+  onData(cb: (data: string) => void): void
+  onExit(cb: () => void): void
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  kill(): void
+}
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -42,6 +53,9 @@ export class RemoteServer {
   /** True when the desktop window is focused — we skip the phone push then,
    *  since you're already looking at the canvas. */
   isDesktopFocused?: () => boolean
+  /** Open a mobile terminal for a card (set by the spine) — a tmux client
+   *  attached to the card's live session. */
+  openTerminal?: (cardId: string, cols: number, rows: number) => TermSession | null
 
   port = 0
   private stateJSON = '{}'
@@ -56,6 +70,12 @@ export class RemoteServer {
 
   start(preferredPort: number | undefined, onReady: (port: number) => void): void {
     const server = http.createServer((req, res) => this.handle(req, res))
+    // WebSocket terminal: /term?card=<id>&cols=&rows= bridges to a tmux client.
+    const wss = new WebSocketServer({ noServer: true })
+    server.on('upgrade', (req, socket, head) => {
+      if ((req.url ?? '').split('?')[0] !== '/term') return socket.destroy()
+      wss.handleUpgrade(req, socket, head, (ws) => this.handleTerm(req, ws))
+    })
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE' && preferredPort) {
         console.log(`[remote] port ${preferredPort} taken — falling back to ephemeral`)
@@ -70,6 +90,31 @@ export class RemoteServer {
       onReady(this.port)
     })
     server.listen(preferredPort ?? 0, '127.0.0.1')
+  }
+
+  /** Bridge a terminal WebSocket to a tmux client. Server→client frames are raw
+   *  pty output; client→server frames are JSON: `{i}` input, `{r:[cols,rows]}`
+   *  resize. Closing the socket detaches the client (the session survives). */
+  private handleTerm(req: http.IncomingMessage, ws: WebSocket): void {
+    const q = new URLSearchParams((req.url ?? '').split('?')[1] ?? '')
+    const cardId = q.get('card') ?? ''
+    const sess = cardId ? this.openTerminal?.(cardId, Number(q.get('cols')), Number(q.get('rows'))) : null
+    if (!sess) {
+      ws.close()
+      return
+    }
+    sess.onData((d) => ws.readyState === ws.OPEN && ws.send(d))
+    sess.onExit(() => ws.close())
+    ws.on('message', (raw) => {
+      try {
+        const m = JSON.parse(raw.toString())
+        if (typeof m.i === 'string') sess.write(m.i)
+        else if (Array.isArray(m.r)) sess.resize(Number(m.r[0]), Number(m.r[1]))
+      } catch {
+        // ignore malformed frames
+      }
+    })
+    ws.on('close', () => sess.kill())
   }
 
   publish(state: RemoteState): void {

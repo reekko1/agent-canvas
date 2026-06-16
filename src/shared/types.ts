@@ -214,6 +214,8 @@ export interface RemoteState {
   cards: {
     id: string
     name: string
+    /** agent (watched) or shell (bare $SHELL) — both get a mobile terminal. */
+    kind: CardKind
     status: CardStatus
     loud: boolean
     since: number // epoch seconds the status began

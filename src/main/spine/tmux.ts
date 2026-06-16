@@ -115,6 +115,18 @@ bind -T copy-mode-vi Escape send -X cancel
     }
   }
 
+  /** A second client attaching to an EXISTING card session — the mobile
+   *  terminal. `attach-session` (not `new-session -A`) so a phone never
+   *  accidentally creates a session; tmux is multi-client, so this mirrors the
+   *  desktop live. Null when tmux is unavailable. */
+  attachCommand(session: string): { file: string; args: string[] } | null {
+    if (!this.binary || !this.confPath) return null
+    return {
+      file: this.binary,
+      args: ['-L', this.socket, '-f', this.confPath, 'attach-session', '-t', session],
+    }
+  }
+
   /** Leave copy-mode (scrollback) in a session, if it's in it. The renderer
    *  calls this before delivering the first keystroke after a wheel-scroll,
    *  so typing lands in the app, never in copy-mode. Resolves once the tmux

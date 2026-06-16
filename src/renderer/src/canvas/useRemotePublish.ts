@@ -49,12 +49,13 @@ export function useRemotePublish({
     }))
 
     const cards: RemoteState['cards'] = nodes
-      .flatMap((n) => (n.type === 'card' && n.data.kind === 'agent' ? [n] : []))
+      .flatMap((n) => (n.type === 'card' ? [n] : []))
       .map((n) => {
         const projectId = projectIdFor.get(n.id)
         return {
           id: n.id,
           name: titleFor(n.id),
+          kind: n.data.kind,
           status: n.data.meta.status,
           loud: n.data.meta.status === 'blocked' || n.data.meta.status === 'error',
           since: (n.data.meta.statusSince ?? 0) / 1000,

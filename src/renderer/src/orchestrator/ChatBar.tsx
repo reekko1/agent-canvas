@@ -33,8 +33,17 @@ export function OrchestratorChatBar(): React.JSX.Element {
   useEffect(
     () =>
       window.canvas.onOrchestratorEvent((e) => {
-        setLines((ls) => [...ls, { kind: e.kind, text: e.text, name: e.name }])
         if (e.kind === 'result' || e.kind === 'error') setBusy(false)
+        setLines((ls) => {
+          // The success `result` repeats the turn's final assistant text — it's
+          // only here to clear `busy`. Drop it as a line unless it carries
+          // something the assistant block didn't (e.g. a tool-only turn).
+          if (e.kind === 'result') {
+            const lastAssistant = [...ls].reverse().find((l) => l.kind === 'assistant')
+            if (!e.text.trim() || lastAssistant?.text.trim() === e.text.trim()) return ls
+          }
+          return [...ls, { kind: e.kind, text: e.text, name: e.name }]
+        })
       }),
     [],
   )

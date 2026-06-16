@@ -76,17 +76,36 @@ export class RemoteServer {
     }
     if (!fresh.length || !this.push || this.isDesktopFocused?.()) return
 
+    // Title = which canvas + what it wants; body = the actual ask (the tool
+    // call to approve, or the question text). The card title equals the canvas
+    // name under project=dir, so we lean on the canvas name and never repeat it.
     const names = new Map(state.canvases.map((c) => [c.id, c.name]))
-    const lead = fresh[0]
-    const canvas =
-      lead.kind === 'approval'
-        ? names.get(state.approvals.find((a) => a.id === lead.id)?.projectId ?? '')
-        : names.get(state.questions.find((q) => q.id === lead.id)?.projectId ?? '')
-    const body =
-      fresh.length > 1
-        ? `${fresh.length} agents need you`
-        : `${canvas ? canvas + ' · ' : ''}${lead.name} ${lead.kind === 'question' ? 'asks you' : 'needs approval'}`
-    void this.push.notify({ title: 'Agent Canvas', body })
+    const trunc = (s: string, n = 140): string => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+    const canvasOf = (it: { id: string; name: string; kind: 'approval' | 'question' }): string => {
+      const pid =
+        it.kind === 'approval'
+          ? state.approvals.find((a) => a.id === it.id)?.projectId
+          : state.questions.find((q) => q.id === it.id)?.projectId
+      return names.get(pid ?? '') ?? it.name
+    }
+
+    let title: string
+    let body: string
+    if (fresh.length > 1) {
+      const canvases = [...new Set(fresh.map(canvasOf))]
+      title = `${fresh.length} agents need you`
+      body = canvases.join(', ')
+    } else if (fresh[0].kind === 'approval') {
+      const a = state.approvals.find((x) => x.id === fresh[0].id)
+      title = `${canvasOf(fresh[0])} needs approval`
+      body = trunc(a?.detail || 'A tool call is waiting')
+    } else {
+      const q = state.questions.find((x) => x.id === fresh[0].id)
+      const first = q?.questions[0]
+      title = `${canvasOf(fresh[0])} asks`
+      body = trunc(first?.header || first?.question || 'Waiting on your choice')
+    }
+    void this.push.notify({ title, body })
   }
 
   /** Read a JSON POST body, then run `ok`. Malformed → 400. */

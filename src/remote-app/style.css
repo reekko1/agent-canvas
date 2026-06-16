@@ -235,16 +235,69 @@ h2 {
   font-size: 12px;
 }
 
-/* A card tile taps into its terminal. */
-.tile.tap {
+/* A card tile mirrors the desktop window bar: status-tinted chrome (border set
+   inline), a mono title with identity mark + folder + task + status HUD. Tap
+   opens the terminal. */
+.tile.card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
   cursor: pointer;
 }
-.tile.tap:active {
+.tile.card:active {
   background: var(--bar);
 }
-.chev {
+.card .mark {
   color: var(--muted);
-  margin-left: 4px;
+  font-weight: 700;
+  flex: none;
+}
+.card .cfolder {
+  color: var(--muted);
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card .ctask {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.card .ctask .idle {
+  color: var(--muted);
+}
+.card .cmodel {
+  color: var(--muted);
+  flex: none;
+}
+.card .cbypass {
+  color: var(--error);
+  font-weight: 700;
+  flex: none;
+}
+.card .hud {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  flex: none;
+}
+.card .hud .d {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.card .chev {
+  color: var(--muted);
   flex: none;
 }
 

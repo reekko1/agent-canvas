@@ -53,24 +53,36 @@ const dot = (status: string): string =>
 const wordEl = (status: string): string =>
   `<span class="word" style="color:${COLORS[status] || '#807e90'}">${esc(status).toUpperCase()}</span>`
 
+// A card tile mirrors the desktop "window bar": status-tinted chrome (a
+// status-colored border), a mono title with the >_ / bot identity mark, the
+// folder, the task, model, and a right-aligned status HUD. Tapping it opens the
+// card's terminal (a live tmux mirror). Shells stay neutral — no agent to
+// speak for them.
 function cardTile(k: RemoteState['cards'][number]): string {
-  const cls = k.status === 'error' ? 'tile err' : k.loud ? 'tile loud' : 'tile'
-  const meta: string[] = []
-  if (k.permissionMode === 'bypassPermissions') meta.push('<span class="bypass">BYPASS</span>')
-  else if (k.permissionMode === 'dontAsk') meta.push('<span class="bypass">DON&#39;T-ASK</span>')
-  if (k.subagents > 0) meta.push('&#10022;' + k.subagents)
-  if (k.model) meta.push(esc(k.model))
-  if (k.task) meta.push(esc(k.task))
-  // Whole tile taps into the card's terminal (a live tmux mirror).
-  const word =
-    k.kind === 'shell' ? '<span class="word" style="color:var(--muted)">SHELL</span>' : wordEl(k.status)
+  const shell = k.kind === 'shell'
+  const color = shell ? 'var(--border)' : COLORS[k.status] || '#807e90'
+  const glow = k.status === 'error' ? ' err' : k.loud ? ' loud' : ''
+  const right: string[] = []
+  if (k.model) right.push(`<span class="cmodel">${esc(k.model)}</span>`)
+  if (k.permissionMode === 'bypassPermissions') right.push('<span class="cbypass">BYPASS</span>')
+  else if (k.permissionMode === 'dontAsk') right.push('<span class="cbypass">DON&#39;T-ASK</span>')
+  if (!shell)
+    right.push(
+      `<span class="hud" style="color:${color}"><span class="d" style="background:${color}"></span>${esc(k.status).toUpperCase()}</span>`,
+    )
+  // Shells show their foreground command (idle when bare); agents show the task.
+  const activity = shell
+    ? k.running
+      ? esc(k.running)
+      : '<span class="idle">idle</span>'
+    : esc(k.task ?? '')
   return (
-    `<div class="${cls} tap" data-act="term" data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
-    `<div class="row">${dot(k.status)}` +
-    `<span class="name">${esc(k.name)}</span>${word}` +
-    `<span class="age">${rel(k.since)}</span><span class="chev">›</span></div>` +
-    (meta.length ? `<div class="meta">${meta.join(' &middot; ')}</div>` : '') +
-    `</div>`
+    `<div class="tile card${glow}" style="border-color:${color}" data-act="term" data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
+    `<span class="mark">${shell ? '&gt;_' : '&#10022;'}</span>` +
+    `<span class="cfolder">${esc(k.name)}</span>` +
+    `<span class="ctask">${activity}</span>` +
+    right.join('') +
+    `<span class="chev">›</span></div>`
   )
 }
 

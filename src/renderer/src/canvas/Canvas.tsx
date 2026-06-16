@@ -39,6 +39,7 @@ import { usePendingQuestions } from './usePendingQuestions'
 import { useProjects } from './useProjects'
 import { useProjectAttention } from './useProjectAttention'
 import { useCanvasGit } from './useCanvasGit'
+import { useShellCommands } from './useShellCommands'
 import { useRemotePublish } from './useRemotePublish'
 import { useWorkspace } from './useWorkspace'
 import { VideoBackdrop } from './VideoBackdrop'
@@ -184,6 +185,8 @@ export function Canvas() {
   const attention = useProjectAttention({ projects: proj.projects, nodes, asks, questions })
   // Per-canvas git identity (branch + dirty) for the toolbar.
   const git = useCanvasGit(proj.projects)
+  // Shell cards' foreground command (tmux pane) for the phone's list rows.
+  const shellCommands = useShellCommands(nodes)
 
   // Mirror canvases + cards + asks/questions + feed to the phone panel.
   useRemotePublish({
@@ -191,6 +194,7 @@ export function Canvas() {
     projects: proj.projects,
     attention,
     git,
+    shellCommands,
     asks,
     questions,
     notifications,

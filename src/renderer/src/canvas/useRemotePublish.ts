@@ -17,6 +17,7 @@ export function useRemotePublish({
   projects,
   attention,
   git,
+  shellCommands,
   asks,
   questions,
   notifications,
@@ -26,6 +27,7 @@ export function useRemotePublish({
   projects: Project[]
   attention: Record<string, AttentionLevel>
   git: Record<string, RepoIdentity>
+  shellCommands: Record<string, string>
   asks: PendingAsk[]
   questions: PendingQuestion[]
   notifications: ActivityNotification[]
@@ -60,6 +62,7 @@ export function useRemotePublish({
           loud: n.data.meta.status === 'blocked' || n.data.meta.status === 'error',
           since: (n.data.meta.statusSince ?? 0) / 1000,
           task: n.data.meta.task,
+          running: n.data.kind === 'shell' ? shellCommands[n.id] : undefined,
           model: n.data.meta.model,
           permissionMode: n.data.meta.permissionMode,
           subagents: n.data.meta.subagents ?? 0,
@@ -104,5 +107,5 @@ export function useRemotePublish({
     if (json === lastJSON.current) return
     lastJSON.current = json
     window.canvas.publishRemoteState(state)
-  }, [nodes, projects, attention, git, asks, questions, notifications, titleFor])
+  }, [nodes, projects, attention, git, shellCommands, asks, questions, notifications, titleFor])
 }

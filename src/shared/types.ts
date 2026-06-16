@@ -220,6 +220,9 @@ export interface RemoteState {
     loud: boolean
     since: number // epoch seconds the status began
     task?: string
+    /** A shell card's foreground command (tmux pane) — the desktop shows it on
+     *  the shell face; the phone shows it on the list row. */
+    running?: string
     model?: string
     permissionMode?: string
     subagents: number

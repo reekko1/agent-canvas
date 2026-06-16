@@ -34,10 +34,15 @@ export function usePendingQuestions() {
       if (ev.status && ev.status !== 'blocked') releaseCard(cardId)
     })
     const offExit = window.canvas.onPtyExit(releaseCard)
+    // Answered/declined from the phone — clear the desktop chooser too.
+    const offDecided = window.canvas.onQuestionDecided((askId) =>
+      setQuestions((qs) => qs.filter((q) => q.askId !== askId)),
+    )
     return () => {
       offQuestion()
       offEvent()
       offExit()
+      offDecided()
     }
   }, [releaseCard])
 

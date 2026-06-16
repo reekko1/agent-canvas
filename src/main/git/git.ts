@@ -7,6 +7,7 @@ import type {
   GitChange,
   GitFileStatus,
   GitSnapshot,
+  RepoIdentity,
 } from '../../shared/types'
 
 /// Shared `git` runner (port of the Swift Git enum). One place that knows how
@@ -65,6 +66,32 @@ export async function gitSnapshot(folder: string): Promise<GitSnapshot> {
     changes.push({ ...e, added, removed })
   }
   return { isRepo: true, changes, totalAdded, totalRemoved, signature }
+}
+
+/** Cheap branch + dirty-count read for the toolbar — one `git status`. Polled
+ *  for every canvas, so it stays a single porcelain call (no numstat). */
+export async function gitIdentity(folder: string): Promise<RepoIdentity> {
+  const r = await git(['status', '--porcelain=v2', '--branch'], folder)
+  if (r.code !== 0) return { isRepo: false, dirty: 0 }
+  let branch: string | undefined
+  let ahead: number | undefined
+  let behind: number | undefined
+  let dirty = 0
+  for (const line of r.out.split('\n')) {
+    if (!line) continue
+    if (line.startsWith('# branch.head ')) {
+      branch = line.slice('# branch.head '.length).trim()
+    } else if (line.startsWith('# branch.ab ')) {
+      const m = line.match(/\+(\d+)\s+-(\d+)/)
+      if (m) {
+        ahead = Number(m[1])
+        behind = Number(m[2])
+      }
+    } else if (!line.startsWith('#')) {
+      dirty++ // a changed/untracked entry
+    }
+  }
+  return { isRepo: true, branch, dirty, ahead, behind }
 }
 
 /** The unified diff for a single file. "" when nothing textual (e.g. binary). */

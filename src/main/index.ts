@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
 import { PtyRegistry } from './ptys'
 import { WorkspaceStore } from './workspace'
-import { gitAction, gitFileDiff } from './git/git'
+import { execFile } from 'node:child_process'
+import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import type {
@@ -187,6 +188,21 @@ ipcMain.handle('git-action', async (_e, folder: string, action: GitActionRequest
   return r
 })
 
+ipcMain.handle('repo-identity', (_e, folder: string) => gitIdentity(folder))
+ipcMain.handle('reveal-folder', (_e, folder: string) => shell.showItemInFolder(folder))
+
+/** Open a folder in the first GUI editor we can find. `open -a` isn't used —
+ *  it'd open Finder, not an editor — so this is best-effort over known CLIs. */
+function runEditor(cmd: string, folder: string): Promise<boolean> {
+  return new Promise((resolve) => execFile(cmd, [folder], (err) => resolve(!err)))
+}
+ipcMain.handle('open-in-editor', async (_e, folder: string) => {
+  for (const cmd of ['code', 'cursor']) {
+    if (await runEditor(cmd, folder)) return true
+  }
+  return false
+})
+
 ipcMain.handle(
   'ensure-card',
   (_e, cardId: string, folder: string, cols: number, rows: number, kind: 'agent' | 'shell') => {
@@ -243,6 +259,14 @@ ipcMain.handle('check-app-readiness', async () => {
 spine.remote.onDecide = (askId, allow) => {
   spine.decide(askId, allow ? 'allow' : 'deny')
   send('ask-decided', askId)
+}
+spine.remote.onAnswer = (askId, answers) => {
+  spine.answerQuestion(askId, answers)
+  send('question-decided', askId)
+}
+spine.remote.onDecline = (askId) => {
+  spine.decide(askId, 'deny')
+  send('question-decided', askId)
 }
 ipcMain.on('open-external', (_e, url: string) => {
   if (typeof url === 'string' && url.startsWith('https://')) void shell.openExternal(url)

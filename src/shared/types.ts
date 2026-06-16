@@ -121,6 +121,17 @@ export interface GitSnapshot {
   signature: string
 }
 
+/// A canvas's repo identity for the toolbar — branch + how dirty, polled for
+/// every canvas (not just the active one's diff). `dirty` is the changed-file
+/// count; `isRepo` false means the dir isn't a git repo.
+export interface RepoIdentity {
+  isRepo: boolean
+  branch?: string
+  dirty: number
+  ahead?: number
+  behind?: number
+}
+
 /// The result of a mutating git action — ok plus a human-readable message
 /// (the git stderr on failure) so the UI can surface it.
 export interface GitActionResult {
@@ -188,6 +199,18 @@ export interface MultiProjectSnapshot {
 /// funnel that feeds the in-app activity center, so the two can never
 /// disagree. (Port of the Swift RemoteState.)
 export interface RemoteState {
+  /** The canvases (projects), so the phone leads with "which repo needs me" —
+   *  cards/approvals/questions group under these by `projectId`. */
+  canvases: {
+    id: string
+    name: string
+    /** Rolled-up attention: a card stalled on you (`blocking`), one done and
+     *  waiting (`done`), or quiet (`none`). Mirrors the desktop toolbar. */
+    attention: 'none' | 'done' | 'blocking'
+    /** Changed-file count; branch name. Absent/0 for a non-repo dir. */
+    dirty: number
+    branch?: string
+  }[]
   cards: {
     id: string
     name: string
@@ -198,8 +221,8 @@ export interface RemoteState {
     model?: string
     permissionMode?: string
     subagents: number
-    /** Which canvas (project) this card belongs to — the panel stays global
-     *  across projects, tagging each card so the phone shows where work lives. */
+    /** Which canvas (project) this card belongs to. */
+    projectId?: string
     projectName?: string
   }[]
   approvals: {
@@ -207,6 +230,15 @@ export interface RemoteState {
     name: string
     detail: string
     created: number
+    projectId?: string
+  }[]
+  /** Held AskUserQuestion asks — the phone can answer these (tap options), not
+   *  just allow/deny. */
+  questions: {
+    id: string // askId
+    name: string
+    projectId?: string
+    questions: Question[]
   }[]
   feed: {
     name: string
@@ -290,6 +322,12 @@ export interface CanvasApi {
   /** Run a repo mutation; on success the folder's watchers re-poll immediately. */
   gitAction(folder: string, action: GitActionRequest): Promise<GitActionResult>
   onDiffSnapshot(cb: (diffId: string, snapshot: GitSnapshot) => void): () => void
+  /** A canvas's branch + dirty count — polled for every canvas's dir. */
+  repoIdentity(folder: string): Promise<RepoIdentity>
+  /** Reveal a canvas's folder in the OS file manager. */
+  revealFolder(folder: string): Promise<void>
+  /** Open a canvas's folder in a GUI editor (code/cursor); false if none found. */
+  openInEditor(folder: string): Promise<boolean>
   write(cardId: string, data: string): void
   /** Exit tmux scrollback (copy-mode) if the card's session is in it —
    *  awaited before the first keystroke after a wheel-scroll. */
@@ -318,6 +356,8 @@ export interface CanvasApi {
   checkAppReadiness(): Promise<AppReadiness>
   /** An ask was answered from the remote panel — clear its toast. */
   onAskDecided(cb: (askId: string) => void): () => void
+  /** A held question was answered/declined from the phone — clear its chooser. */
+  onQuestionDecided(cb: (askId: string) => void): () => void
   /** Open an https URL in the system browser. */
   openExternal(url: string): void
   /** App self-update progress for the in-app banner (packaged builds only). */

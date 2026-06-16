@@ -38,6 +38,7 @@ import { usePendingAsks } from './usePendingAsks'
 import { usePendingQuestions } from './usePendingQuestions'
 import { useProjects } from './useProjects'
 import { useProjectAttention } from './useProjectAttention'
+import { useCanvasGit } from './useCanvasGit'
 import { useRemotePublish } from './useRemotePublish'
 import { useWorkspace } from './useWorkspace'
 import { VideoBackdrop } from './VideoBackdrop'
@@ -181,10 +182,20 @@ export function Canvas() {
   // Per-canvas attention, rolled up from card meta + held asks/questions —
   // drives the toolbar dots.
   const attention = useProjectAttention({ projects: proj.projects, nodes, asks, questions })
+  // Per-canvas git identity (branch + dirty) for the toolbar.
+  const git = useCanvasGit(proj.projects)
 
-  // Mirror cards + asks + feed to the phone panel — global across projects,
-  // each card tagged with its canvas name.
-  useRemotePublish({ nodes, asks, notifications, titleFor, projectNameFor: proj.projectNameForCard })
+  // Mirror canvases + cards + asks/questions + feed to the phone panel.
+  useRemotePublish({
+    nodes,
+    projects: proj.projects,
+    attention,
+    git,
+    asks,
+    questions,
+    notifications,
+    titleFor,
+  })
 
   /** Toast context: who's asking, their canvas, and what they're mid-way on. */
   const askContextFor = useCallback(
@@ -376,6 +387,7 @@ export function Canvas() {
         projects={proj.projects}
         activeProjectId={proj.activeProjectId}
         attention={attention}
+        git={git}
         onSwitch={switchProject}
         onCreate={createProject}
         onRename={proj.renameProject}

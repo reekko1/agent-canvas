@@ -5,6 +5,7 @@ import type { ActivityNotification } from './useActivityFeed'
 import type { PendingAsk } from './usePendingAsks'
 import type { PendingQuestion } from './usePendingQuestions'
 import type { AttentionLevel } from './useProjectAttention'
+import type { ShellTitle } from './useShellTitles'
 
 /// Mirror the attention state to the remote panel. Riding the same renderer
 /// state as the in-app surfaces (cards' meta, the toast asks/questions, the
@@ -17,7 +18,7 @@ export function useRemotePublish({
   projects,
   attention,
   git,
-  shellCommands,
+  shellTitles,
   asks,
   questions,
   notifications,
@@ -27,7 +28,7 @@ export function useRemotePublish({
   projects: Project[]
   attention: Record<string, AttentionLevel>
   git: Record<string, RepoIdentity>
-  shellCommands: Record<string, string>
+  shellTitles: Record<string, ShellTitle>
   asks: PendingAsk[]
   questions: PendingQuestion[]
   notifications: ActivityNotification[]
@@ -54,15 +55,23 @@ export function useRemotePublish({
       .flatMap((n) => (n.type === 'card' ? [n] : []))
       .map((n) => {
         const projectId = projectIdFor.get(n.id)
+        const shell = n.data.kind === 'shell'
+        const title = shellTitles[n.id]
+        // Shell titles follow the pane's cwd (the user's cd's), like the
+        // desktop; agents keep the static open folder.
+        const name =
+          shell && title?.cwd
+            ? (title.cwd.split('/').filter(Boolean).pop() ?? titleFor(n.id))
+            : titleFor(n.id)
         return {
           id: n.id,
-          name: titleFor(n.id),
+          name,
           kind: n.data.kind,
           status: n.data.meta.status,
           loud: n.data.meta.status === 'blocked' || n.data.meta.status === 'error',
           since: (n.data.meta.statusSince ?? 0) / 1000,
           task: n.data.meta.task,
-          running: n.data.kind === 'shell' ? shellCommands[n.id] : undefined,
+          running: shell ? title?.running : undefined,
           model: n.data.meta.model,
           permissionMode: n.data.meta.permissionMode,
           subagents: n.data.meta.subagents ?? 0,
@@ -107,5 +116,5 @@ export function useRemotePublish({
     if (json === lastJSON.current) return
     lastJSON.current = json
     window.canvas.publishRemoteState(state)
-  }, [nodes, projects, attention, git, shellCommands, asks, questions, notifications, titleFor])
+  }, [nodes, projects, attention, git, shellTitles, asks, questions, notifications, titleFor])
 }

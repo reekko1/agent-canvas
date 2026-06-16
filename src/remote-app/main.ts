@@ -27,6 +27,13 @@ const COLORS: Record<string, string> = {
 }
 const RANK: Record<string, number> = { blocking: 2, done: 1, none: 0 }
 
+// The desktop's agent identity is lucide's Bot icon; inline it here (vanilla,
+// no lucide), inheriting the mark's color via currentColor.
+const BOT_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>' +
+  '<path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>'
+
 // In-flight question selections, preserved across the 2s refresh: askId →
 // questionText → chosen labels.
 const sel: Record<string, Record<string, string[]>> = {}
@@ -78,7 +85,7 @@ function cardTile(k: RemoteState['cards'][number]): string {
     : esc(k.task ?? '')
   return (
     `<div class="tile card${glow}" style="border-color:${color}" data-act="term" data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
-    `<span class="mark">${shell ? '&gt;_' : '&#10022;'}</span>` +
+    `<span class="mark">${shell ? '&gt;_' : BOT_SVG}</span>` +
     `<span class="cfolder">${esc(k.name)}</span>` +
     `<span class="ctask">${activity}</span>` +
     right.join('') +

@@ -251,9 +251,15 @@ h2 {
   background: var(--bar);
 }
 .card .mark {
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
   font-weight: 700;
   flex: none;
+}
+.card .mark svg {
+  width: 14px;
+  height: 14px;
 }
 .card .cfolder {
   color: var(--muted);

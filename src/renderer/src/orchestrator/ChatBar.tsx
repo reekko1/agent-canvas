@@ -74,8 +74,10 @@ export function OrchestratorChatBar({
   }
 
   return (
+    // A flex child of the shared bottom overlay (which stacks the agent toasts
+    // above it) — not fixed, so nothing overlaps the input.
     <div
-      className="fixed bottom-4 left-1/2 z-40 w-[640px] max-w-[calc(100vw-2rem)] -translate-x-1/2"
+      className="pointer-events-auto w-[640px] max-w-[calc(100vw-2rem)]"
       style={{ WebkitAppRegion: 'no-drag' }}
     >
       <OrchestratorConfirmToast confirm={confirm} onDecide={onConfirmDecide} />

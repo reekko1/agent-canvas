@@ -685,9 +685,10 @@ export function Canvas() {
         </div>
       )}
 
-      {/* Shared bottom overlay: questions ride above permission asks. Always
-          mounted so AnimatePresence can play exit animations on the last item. */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex flex-col items-center gap-2">
+      {/* Shared bottom-center column: questions and permission asks stack above
+          the chat bar (never behind it). Always mounted so AnimatePresence can
+          play exit animations on the last item. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2">
         <QuestionToasts
           questions={questions}
           contextFor={askContextFor}
@@ -696,17 +697,16 @@ export function Canvas() {
           onBodyClick={flyToQuestion}
         />
         <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
+        <OrchestratorChatBar
+          confirm={orchConfirm}
+          onConfirmDecide={(allow) => {
+            if (orchConfirm) window.canvas.orchestratorResult(orchConfirm.id, { allow })
+            setOrchConfirm(null)
+          }}
+        />
       </div>
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
-
-      <OrchestratorChatBar
-        confirm={orchConfirm}
-        onConfirmDecide={(allow) => {
-          if (orchConfirm) window.canvas.orchestratorResult(orchConfirm.id, { allow })
-          setOrchConfirm(null)
-        }}
-      />
 
       {!active ? (
         <div className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4">

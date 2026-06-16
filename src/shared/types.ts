@@ -314,7 +314,7 @@ export interface OrchestratorEvent {
 /** A command the orchestrator (main) asks the renderer to execute, by id. */
 export interface OrchestratorCommand {
   id: number
-  cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'confirm'
+  cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'killCard' | 'confirm'
   payload: Record<string, unknown>
 }
 

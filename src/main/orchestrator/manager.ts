@@ -160,7 +160,7 @@ export class Orchestrator {
   }
 
   private dispatch(
-    cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'confirm',
+    cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'killCard' | 'confirm',
     payload: Record<string, unknown>,
     timeoutMs = 30_000,
   ): Promise<OrchestratorCommandResult> {
@@ -240,6 +240,13 @@ export class Orchestrator {
     renameAgent: async (cardId, name) => {
       const r = await this.dispatch('renameAgent', { cardId, name })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? 'renamed' : 'failed') }
+    },
+
+    killCard: async (cardId) => {
+      const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      const r = await this.dispatch('killCard', { cardId })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? `closed ${card.name}` : 'failed') }
     },
   }
 

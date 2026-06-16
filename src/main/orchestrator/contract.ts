@@ -62,4 +62,6 @@ export interface CommandBus {
   getAgentReply(cardId: string): Promise<{ ok: boolean; reply?: string; message: string }>
   /** Rename an agent card. */
   renameAgent(cardId: string, name: string): Promise<ActionResult>
+  /** Close a card — ends its session and removes it from the canvas. */
+  killCard(cardId: string): Promise<ActionResult>
 }

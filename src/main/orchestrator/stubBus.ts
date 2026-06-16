@@ -84,5 +84,12 @@ export function makeStubBus(): CommandBus {
       card.name = clean
       return { ok: true, message: `renamed to ${clean}` }
     },
+
+    async killCard(cardId: string): Promise<ActionResult> {
+      const i = world.cards.findIndex((c) => c.id === cardId)
+      if (i < 0) return { ok: false, message: `no card with id ${cardId}` }
+      const [card] = world.cards.splice(i, 1)
+      return { ok: true, message: `closed ${card.name} (${cardId})` }
+    },
   }
 }

@@ -111,9 +111,23 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
+  const killCard = tool(
+    'kill_card',
+    "Close a card — permanently ends its agent or shell session and removes it from the canvas. This is destructive and cannot be undone; only use it when the user clearly asks to close, stop, or remove a specific card. Use a card id from list_world.",
+    { cardId: z.string().describe('Card id from list_world') },
+    async (args) => {
+      try {
+        const r = await bus.killCard(args.cardId)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`kill_card failed: ${errText(e)}`)
+      }
+    },
+  )
+
   return createSdkMcpServer({
     name: 'canvas',
     version: '0.1.0',
-    tools: [listWorld, focusCanvas, spawnAgent, sendToAgent, getAgentReply, renameAgent],
+    tools: [listWorld, focusCanvas, spawnAgent, sendToAgent, getAgentReply, renameAgent, killCard],
   })
 }

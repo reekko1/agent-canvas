@@ -327,6 +327,8 @@ export function Canvas() {
         return { title: `Message ${titleFor(String(input.cardId))}`, detail: clip(str(input.message)) }
       case 'rename_agent':
         return { title: 'Rename agent', detail: `${titleFor(String(input.cardId))} → ${str(input.name)}` }
+      case 'kill_card':
+        return { title: `Close ${titleFor(String(input.cardId))}`, detail: 'ends its session — cannot be undone' }
       case 'focus_canvas':
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
       default:
@@ -406,6 +408,18 @@ export function Canvas() {
           ? { ok: true, message: `renamed to ${name.trim()}` }
           : { ok: false, message: `couldn't rename ${cardId}` },
       )
+      return
+    }
+
+    if (cmd.cmd === 'killCard') {
+      const cardId = String(cmd.payload.cardId ?? '')
+      if (!nodesRef.current.some((n) => n.id === cardId && n.type === 'card')) {
+        reply({ ok: false, message: `no card with id ${cardId}` })
+        return
+      }
+      const name = titleFor(cardId) // capture before onCloseCard removes the node
+      onCloseCard(cardId)
+      reply({ ok: true, message: `closed ${name}` })
       return
     }
 

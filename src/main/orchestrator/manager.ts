@@ -162,6 +162,7 @@ export class Orchestrator {
   private dispatch(
     cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'confirm',
     payload: Record<string, unknown>,
+    timeoutMs = 30_000,
   ): Promise<OrchestratorCommandResult> {
     const id = this.nextId++
     this.deps.send('orchestrator-command', { id, cmd, payload })
@@ -170,7 +171,7 @@ export class Orchestrator {
       // The renderer might never reply (window gone) — don't wedge the turn.
       setTimeout(() => {
         if (this.pending.delete(id)) resolve({ ok: false, message: 'no response from the app' })
-      }, 30_000)
+      }, timeoutMs)
     })
   }
 
@@ -246,7 +247,8 @@ export class Orchestrator {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<GateDecision> => {
-    const r = await this.dispatch('confirm', { toolName, input })
+    // A human decides this one — give it minutes, not the 30s machine round-trip.
+    const r = await this.dispatch('confirm', { toolName, input }, 5 * 60_000)
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
   }
 

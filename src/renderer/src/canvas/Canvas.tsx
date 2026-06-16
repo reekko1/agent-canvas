@@ -18,6 +18,10 @@ import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
 import { OrchestratorChatBar } from '@/orchestrator/ChatBar'
+import {
+  OrchestratorConfirmToast,
+  type OrchestratorConfirm,
+} from '@/orchestrator/OrchestratorConfirmToast'
 import { DiffNode } from '@/diff/DiffNode'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
 import type {
@@ -87,6 +91,9 @@ export function Canvas() {
   )
   // Rename dialog (Electron has no window.prompt — we render our own input).
   const [renaming, setRenaming] = useState<{ cardId: string; value: string } | null>(null)
+  // The orchestrator's pending permission gate (one at a time — the SDK awaits
+  // canUseTool before the next tool, so confirms never overlap).
+  const [orchConfirm, setOrchConfirm] = useState<OrchestratorConfirm | null>(null)
   const { w: winW, h: winH } = useWindowSize()
   const PlusIcon = useIcon('plus')
 
@@ -298,6 +305,38 @@ export function Canvas() {
     [proj.switchProject],
   )
 
+  // Turn a gated tool call into a plain-language gate: "Spawn an agent" / "on
+  // web · fix the failing test", resolving canvas/card ids to their names.
+  const describeConfirm = (
+    toolName: string,
+    input: Record<string, unknown>,
+  ): { title: string; detail: string } => {
+    const verb = toolName.replace(/^mcp__canvas__/, '')
+    const clip = (s: string): string => (s.length > 80 ? `${s.slice(0, 80)}…` : s)
+    const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+    const canvasName = (id: unknown): string =>
+      proj.projects.find((p) => p.id === String(id))?.name ?? String(id ?? '?')
+    switch (verb) {
+      case 'spawn_agent': {
+        const where = input.canvasId ? canvasName(input.canvasId) : (proj.active?.name ?? 'the active canvas')
+        const who = str(input.name)
+        const task = str(input.prompt)
+        return {
+          title: who ? `Spawn “${who}”` : 'Spawn an agent',
+          detail: `on ${where}${task ? ` · ${clip(task)}` : ''}`,
+        }
+      }
+      case 'send_to_agent':
+        return { title: `Message ${titleFor(String(input.cardId))}`, detail: clip(str(input.message)) }
+      case 'rename_agent':
+        return { title: 'Rename agent', detail: `${titleFor(String(input.cardId))} → ${str(input.name)}` }
+      case 'focus_canvas':
+        return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
+      default:
+        return { title: verb, detail: clip(JSON.stringify(input)) }
+    }
+  }
+
   // The orchestrator (main) dispatches canvas mutations and confirms here; we
   // run them against the live project state and reply by id. A ref holds the
   // latest closure so the IPC listener subscribes once, not every render.
@@ -307,12 +346,13 @@ export function Canvas() {
       window.canvas.orchestratorResult(cmd.id, result)
 
     if (cmd.cmd === 'confirm') {
-      const { toolName, input } = cmd.payload as { toolName: string; input: unknown }
-      // Placeholder gate — to be replaced by the shared permission UI.
-      const allow = window.confirm(
-        `Orchestrator wants to run:\n\n${toolName}\n${JSON.stringify(input, null, 2)}\n\nAllow?`,
-      )
-      reply({ allow })
+      const { toolName, input } = cmd.payload as {
+        toolName: string
+        input: Record<string, unknown>
+      }
+      // Surface the proposed action as an in-app gate toast; it replies by id.
+      const { title, detail } = describeConfirm(toolName, input)
+      setOrchConfirm({ id: cmd.id, title, detail })
       return
     }
 
@@ -659,6 +699,13 @@ export function Canvas() {
           onBodyClick={flyToQuestion}
         />
         <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
+        <OrchestratorConfirmToast
+          confirm={orchConfirm}
+          onDecide={(allow) => {
+            if (orchConfirm) window.canvas.orchestratorResult(orchConfirm.id, { allow })
+            setOrchConfirm(null)
+          }}
+        />
       </div>
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />

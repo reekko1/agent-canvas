@@ -17,9 +17,17 @@ import { AskToasts } from '@/cards/AskToasts'
 import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
+import { OrchestratorChatBar } from '@/orchestrator/ChatBar'
 import { DiffNode } from '@/diff/DiffNode'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
-import type { CardKind, CardRecord, PermissionAskInfo, QuestionAskInfo } from '@shared/types'
+import type {
+  CardKind,
+  CardRecord,
+  OrchestratorCommand,
+  OrchestratorCommandResult,
+  PermissionAskInfo,
+  QuestionAskInfo,
+} from '@shared/types'
 import {
   PAD,
   TOP_STRIP,
@@ -262,6 +270,63 @@ export function Canvas() {
     [proj.switchProject],
   )
 
+  // The orchestrator (main) dispatches canvas mutations and confirms here; we
+  // run them against the live project state and reply by id. A ref holds the
+  // latest closure so the IPC listener subscribes once, not every render.
+  const orchCommandRef = useRef<(cmd: OrchestratorCommand) => void>(() => {})
+  orchCommandRef.current = (cmd) => {
+    const reply = (result: OrchestratorCommandResult): void =>
+      window.canvas.orchestratorResult(cmd.id, result)
+
+    if (cmd.cmd === 'confirm') {
+      const { toolName, input } = cmd.payload as { toolName: string; input: unknown }
+      // Placeholder gate — to be replaced by the shared permission UI.
+      const allow = window.confirm(
+        `Orchestrator wants to run:\n\n${toolName}\n${JSON.stringify(input, null, 2)}\n\nAllow?`,
+      )
+      reply({ allow })
+      return
+    }
+
+    if (cmd.cmd === 'focusCanvas') {
+      const canvasId = String(cmd.payload.canvasId ?? '')
+      const target = proj.projects.find((p) => p.id === canvasId)
+      if (!target) {
+        reply({ ok: false, message: `no canvas with id ${canvasId}` })
+        return
+      }
+      switchProject(canvasId)
+      reply({ ok: true, message: `switched to ${target.name}` })
+      return
+    }
+
+    if (cmd.cmd === 'spawnAgent') {
+      const canvasId = cmd.payload.canvasId ? String(cmd.payload.canvasId) : undefined
+      const target = canvasId ? proj.projects.find((p) => p.id === canvasId) : proj.active
+      if (!target) {
+        reply({ ok: false, message: canvasId ? `no canvas with id ${canvasId}` : 'no active canvas' })
+        return
+      }
+      // NOTE: v1 spawns the card on the target canvas; auto-delivering the
+      // initial prompt into the new agent's terminal is the next increment.
+      void (async () => {
+        const r = await window.canvas.newCard(target.dir)
+        if (!r) {
+          reply({ ok: false, message: 'card creation was cancelled' })
+          return
+        }
+        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'agent')])
+        proj.attachCardTo(target.id, r.cardId)
+        if (proj.activeProjectId !== target.id) switchProject(target.id)
+        reply({ ok: true, cardId: r.cardId, message: `spawned an agent on ${target.name}` })
+      })()
+      return
+    }
+
+    reply({ ok: false, message: 'unknown command' })
+  }
+  useEffect(() => window.canvas.onOrchestratorCommand((cmd) => orchCommandRef.current(cmd)), [])
+
   // ---- Master-stack layout (active project only; others stay parked) ----
   const active = proj.active
   // Partition the cards once per change to the node set / active order / focus —
@@ -497,6 +562,8 @@ export function Canvas() {
       </div>
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
+
+      <OrchestratorChatBar />
 
       {!active ? (
         <div className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4">

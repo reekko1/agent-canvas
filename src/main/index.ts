@@ -9,11 +9,13 @@ import { execFile } from 'node:child_process'
 import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
+import { Orchestrator } from './orchestrator/manager'
 import type {
   AskDecision,
   GitActionRequest,
   GitChange,
   MultiProjectSnapshot,
+  OrchestratorCommandResult,
   QuestionAnswers,
   RemoteState,
   UpdateStatus,
@@ -24,6 +26,7 @@ const spine = new Spine()
 const ptys = new PtyRegistry()
 const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
+let orchestrator: Orchestrator | null = null
 let nextItem = 1
 
 function send(channel: string, ...args: unknown[]): void {
@@ -156,6 +159,10 @@ app.whenReady().then(() => {
   spine.onAsk = (ask) => send('permission-ask', ask)
   spine.onQuestion = (ask) => send('question-ask', ask)
   spine.start()
+  // The in-app orchestrator: drives the canvas via the Agent SDK. Reads the
+  // latest published RemoteState for `list_world`; dispatches mutations and
+  // confirms to the renderer (see the orchestrator-* IPC below).
+  orchestrator = new Orchestrator({ send, getState: () => spine.remote.getLatestState() })
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
   // download in the background, notify, install on quit. Dev builds have no
@@ -294,3 +301,11 @@ spine.remote.isDesktopFocused = () => win?.isFocused() ?? false
 ipcMain.on('open-external', (_e, url: string) => {
   if (typeof url === 'string' && url.startsWith('https://')) void shell.openExternal(url)
 })
+
+// MARK: Orchestrator — chat prompts drive a query() turn; mutations/confirms it
+// issues come back to the renderer as orchestrator-command and are answered by
+// id via orchestrator-result.
+ipcMain.on('orchestrator-prompt', (_e, prompt: string) => void orchestrator?.run(prompt))
+ipcMain.on('orchestrator-result', (_e, id: number, result: OrchestratorCommandResult) =>
+  orchestrator?.resolveCommand(id, result),
+)

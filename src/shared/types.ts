@@ -296,6 +296,29 @@ export interface UpdateStatus {
   percent?: number
 }
 
+// MARK: Orchestrator (in-app agent driving the canvas)
+
+/** One streamed line from an orchestrator turn, shown in the chat bar. */
+export interface OrchestratorEvent {
+  kind: 'assistant' | 'tool' | 'result' | 'error'
+  text: string
+}
+
+/** A command the orchestrator (main) asks the renderer to execute, by id. */
+export interface OrchestratorCommand {
+  id: number
+  cmd: 'focusCanvas' | 'spawnAgent' | 'confirm'
+  payload: Record<string, unknown>
+}
+
+/** The renderer's reply to an OrchestratorCommand. */
+export interface OrchestratorCommandResult {
+  ok?: boolean
+  message?: string
+  cardId?: string
+  allow?: boolean
+}
+
 export interface CanvasApi {
   /** `folder` (the active project's dir) skips the picker; omit it to prompt. */
   newCard(folder?: string): Promise<NewCardResult | null>
@@ -376,4 +399,13 @@ export interface CanvasApi {
   onUpdateStatus(cb: (status: UpdateStatus) => void): () => void
   /** Quit and install the staged update — the banner's "Restart" action. */
   quitAndInstall(): void
+  // MARK: Orchestrator
+  /** Send a chat prompt to the in-app orchestrator (fire-and-forget). */
+  sendOrchestratorPrompt(prompt: string): void
+  /** Stream of orchestrator output lines for the chat bar. */
+  onOrchestratorEvent(cb: (e: OrchestratorEvent) => void): () => void
+  /** A command from the orchestrator (main) to execute against the canvas. */
+  onOrchestratorCommand(cb: (cmd: OrchestratorCommand) => void): () => void
+  /** Reply to an OrchestratorCommand by id. */
+  orchestratorResult(id: number, result: OrchestratorCommandResult): void
 }

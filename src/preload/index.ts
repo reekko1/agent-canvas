@@ -47,6 +47,10 @@ const api: CanvasApi = {
   openExternal: (url) => ipcRenderer.send('open-external', url),
   onUpdateStatus: (cb) => subscribe('update-status', cb),
   quitAndInstall: () => ipcRenderer.send('quit-and-install'),
+  sendOrchestratorPrompt: (prompt) => ipcRenderer.send('orchestrator-prompt', prompt),
+  onOrchestratorEvent: (cb) => subscribe('orchestrator-event', cb),
+  onOrchestratorCommand: (cb) => subscribe('orchestrator-command', cb),
+  orchestratorResult: (id, result) => ipcRenderer.send('orchestrator-result', id, result),
 }
 
 contextBridge.exposeInMainWorld('canvas', api)

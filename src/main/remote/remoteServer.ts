@@ -72,6 +72,7 @@ export class RemoteServer {
   // the simple-request hole that lets a cross-origin tailnet page fire approvals.
   private token = randomBytes(16).toString('hex')
   private stateJSON = '{}'
+  private latestState: RemoteState | null = null
   // The bundled mobile app (vite.remote.config → out/remote). Sits beside
   // out/main, where this file is bundled.
   private staticDir = join(__dirname, '../remote')
@@ -169,7 +170,14 @@ export class RemoteServer {
 
   publish(state: RemoteState): void {
     this.stateJSON = JSON.stringify(state)
+    this.latestState = state
     this.maybeNotify(state)
+  }
+
+  /** The most recently published state, for in-main readers (the orchestrator).
+   *  Null until the renderer publishes its first snapshot. */
+  getLatestState(): RemoteState | null {
+    return this.latestState
   }
 
   /** Push when a NEW thing needs you — and only while the desktop isn't

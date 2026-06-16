@@ -12,6 +12,8 @@ export interface ProjectsApi {
   animate: boolean
   /** Add a card to the active project and make it the master. */
   attachCard: (cardId: string) => void
+  /** Add a card to a specific project (by id) and make it that canvas's master. */
+  attachCardTo: (projectId: string, cardId: string) => void
   /** Remove a card from whatever project owns it, fixing that project's focus. */
   detachCard: (cardId: string) => void
   /** Focus a card as master — switching to its project first if needed. */
@@ -61,6 +63,16 @@ export function useProjects(makeProjectId: () => string): ProjectsApi {
     setProjects((ps) =>
       ps.map((p) =>
         p.id === activeRef.current
+          ? { ...p, cardIds: [...p.cardIds.filter((c) => c !== cardId), cardId], focusedCardId: cardId }
+          : p,
+      ),
+    )
+  }, [])
+
+  const attachCardTo = useCallback((projectId: string, cardId: string) => {
+    setProjects((ps) =>
+      ps.map((p) =>
+        p.id === projectId
           ? { ...p, cardIds: [...p.cardIds.filter((c) => c !== cardId), cardId], focusedCardId: cardId }
           : p,
       ),
@@ -162,6 +174,7 @@ export function useProjects(makeProjectId: () => string): ProjectsApi {
     active,
     animate,
     attachCard,
+    attachCardTo,
     detachCard,
     promote,
     createProject,

@@ -4,6 +4,7 @@
 import { query, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { buildCanvasServer } from './canvasServer'
 import type { CommandBus } from './contract'
+import type { OrchestratorEvent } from '../../shared/types'
 
 const SYSTEM_PROMPT = `You are the orchestrator for Agent Canvas, a desktop app where the user runs fleets of coding agents arranged on "canvases" (each canvas is a project folder; each card on it is a Claude agent or a shell).
 
@@ -15,11 +16,6 @@ Always call list_world before acting, so you reference real canvas and card ids 
 const READ_ONLY = new Set<string>(['mcp__canvas__list_world'])
 
 export type GateDecision = { allow: true } | { allow: false; reason: string }
-
-export interface OrchestratorEvent {
-  kind: 'assistant' | 'tool' | 'result' | 'error'
-  text: string
-}
 
 export interface RunOptions {
   bus: CommandBus

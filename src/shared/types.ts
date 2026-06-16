@@ -418,4 +418,7 @@ export interface CanvasApi {
   onOrchestratorCommand(cb: (cmd: OrchestratorCommand) => void): () => void
   /** Reply to an OrchestratorCommand by id. */
   orchestratorResult(id: number, result: OrchestratorCommandResult): void
+  /** Toggle autonomous supervision — when on, an agent finishing a turn wakes
+   *  the orchestrator; when off, replies are only echoed. */
+  setOrchestratorAutonomous(on: boolean): void
 }

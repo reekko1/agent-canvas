@@ -1,14 +1,20 @@
-// Drives orchestrator turns in the main process. Owns the real CommandBus:
-// `list_world` projects the latest RemoteState; mutations and confirms are
-// dispatched to the renderer over a correlation-id channel and awaited. Streams
-// events back to the chat bar.
+// Drives the orchestrator in the main process. Owns the real CommandBus
+// (`list_world` projects the latest RemoteState; mutations and confirms are
+// dispatched to the renderer over a correlation-id channel and awaited) AND the
+// persistent streaming-input session.
+//
+// The session is one long-lived Agent SDK `query()` fed by an async generator
+// (`input()`) that drains a shared queue. Two producers push into that queue:
+//   • `run(prompt)`        — you typed in the chat bar          (priority 'now')
+//   • `notifyAgentReply()` — an agent's Stop hook fired         (priority 'next')
+// The hook is the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import type { CommandBus, World } from './contract'
-import type {
-  OrchestratorCommandResult,
-  OrchestratorEvent,
-  RemoteState,
-} from '../../shared/types'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { OrchestratorCommandResult, OrchestratorEvent, RemoteState } from '../../shared/types'
+
+/** Long agent replies are clipped before they reach the chat / the session. */
+const REPLY_CLIP = 500
 
 export interface OrchestratorDeps {
   send: (channel: string, ...args: unknown[]) => void
@@ -22,24 +28,76 @@ export interface OrchestratorDeps {
 export class Orchestrator {
   private readonly pending = new Map<number, (r: OrchestratorCommandResult) => void>()
   private nextId = 1
-  private running = false
-  /** Orchestrator session id — resumed across chat turns so the conversation
-   *  persists rather than starting fresh on every message. */
+  /** Orchestrator session id from the init message — diagnostics only; the live
+   *  streaming session is the conversation, so there's no per-turn resume. */
   private sessionId: string | null = null
+
+  // --- Streaming-input session state ---------------------------------------
+  /** Messages waiting to be yielded into the live session, in arrival order. */
+  private readonly queue: SDKUserMessage[] = []
+  /** Resolver for the input generator's idle await, set when the queue drains. */
+  private wake: (() => void) | null = null
+  /** A `query()` is currently consuming the input generator. */
+  private sessionActive = false
+  /** App is tearing down — the input generator should end and not restart. */
+  private disposed = false
+  /** When true, an agent finishing a turn wakes the orchestrator (autonomous
+   *  supervision). When false, replies are only echoed to the chat. */
+  private autonomous = true
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  /** A supervised agent finished a turn — echo its reply into the chat so the
-   *  orchestrator surface stays aware without being asked "what did it say?".
-   *  This is a one-way notification: it does NOT re-enter the query() loop, so
-   *  there's no feedback cycle. Shells and empty replies are dropped. */
+  /** Toggle whether agent reports wake the orchestrator. Off = echo only. */
+  setAutonomous(on: boolean): void {
+    this.autonomous = on
+  }
+
+  /** A chat prompt from the user — highest priority, processed before any
+   *  queued fleet events. */
+  run(prompt: string): void {
+    const text = prompt.trim()
+    if (!text) return
+    this.enqueue({
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+      priority: 'now',
+    })
+  }
+
+  /** A supervised agent finished a turn. Always echo its reply for visibility;
+   *  when autonomous, also push a "[fleet event]" that wakes the session so the
+   *  orchestrator can react. One-way still: the echo never enters the loop, only
+   *  the fleet event does, and the system prompt forbids reacting without a
+   *  standing instruction (which would loop forever). */
   notifyAgentReply(cardId: string, reply: string): void {
     const text = reply.trim()
     if (!text) return
     const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
     if (!card || card.kind !== 'agent') return
-    const clipped = text.length > 500 ? `${text.slice(0, 500)}…` : text
+    const clipped = text.length > REPLY_CLIP ? `${text.slice(0, REPLY_CLIP)}…` : text
     this.emit({ kind: 'agentReply', name: card.name, text: clipped })
+    if (!this.autonomous) return
+    const canvas = card.projectName ? ` on canvas "${card.projectName}"` : ''
+    this.enqueue({
+      type: 'user',
+      message: {
+        role: 'user',
+        content:
+          `[fleet event] Agent "${card.name}" (card ${card.id})${canvas} just finished a turn. Its reply:\n` +
+          `"""\n${clipped}\n"""\n` +
+          `Act only if the user asked you to coordinate this; otherwise acknowledge briefly and stop.`,
+      },
+      parent_tool_use_id: null,
+      priority: 'next',
+    })
+  }
+
+  /** End the live session at app teardown — the input generator returns, the
+   *  `query()` completes, and nothing restarts. */
+  dispose(): void {
+    this.disposed = true
+    this.wake?.()
   }
 
   /** Reply to a dispatched command (called from the renderer via IPC). */
@@ -48,6 +106,56 @@ export class Orchestrator {
     if (resolve) {
       this.pending.delete(id)
       resolve(result)
+    }
+  }
+
+  // --- Session plumbing -----------------------------------------------------
+
+  private enqueue(msg: SDKUserMessage): void {
+    this.queue.push(msg)
+    const w = this.wake
+    this.wake = null
+    w?.() // unblock the input generator if it's idle
+    this.ensureSession()
+  }
+
+  private ensureSession(): void {
+    if (this.sessionActive || this.disposed) return
+    this.sessionActive = true
+    void this.startSession()
+  }
+
+  private async startSession(): Promise<void> {
+    try {
+      await runOrchestrator({
+        bus: this.bus,
+        input: this.input(),
+        gate: this.gate,
+        onEvent: (e) => this.emit(e),
+        onSessionId: (id) => {
+          this.sessionId = id
+        },
+      })
+    } catch (e) {
+      this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      this.sessionActive = false
+      // The SDK ended the session (error / process abort) but work is waiting —
+      // bring a fresh session up to drain it.
+      if (!this.disposed && this.queue.length) this.ensureSession()
+    }
+  }
+
+  /** The live input stream: yield everything queued, then idle until the next
+   *  `enqueue()` wakes us. Returns only on dispose, which ends the session.
+   *  Must never throw — a throwing generator aborts the SDK session opaquely. */
+  private async *input(): AsyncGenerator<SDKUserMessage> {
+    while (!this.disposed) {
+      while (this.queue.length) yield this.queue.shift() as SDKUserMessage
+      if (this.disposed) break
+      await new Promise<void>((resolve) => {
+        this.wake = resolve
+      })
     }
   }
 
@@ -140,31 +248,6 @@ export class Orchestrator {
   ): Promise<GateDecision> => {
     const r = await this.dispatch('confirm', { toolName, input })
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
-  }
-
-  /** Run one orchestrator turn for a chat prompt. */
-  async run(prompt: string): Promise<void> {
-    if (this.running) {
-      this.emit({ kind: 'error', text: 'Still working on the previous request — one at a time.' })
-      return
-    }
-    this.running = true
-    try {
-      await runOrchestrator({
-        bus: this.bus,
-        prompt,
-        gate: this.gate,
-        onEvent: (e) => this.emit(e),
-        resume: this.sessionId ?? undefined,
-        onSessionId: (id) => {
-          this.sessionId = id
-        },
-      })
-    } catch (e) {
-      this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
-    } finally {
-      this.running = false
-    }
   }
 
   private emit(e: OrchestratorEvent): void {

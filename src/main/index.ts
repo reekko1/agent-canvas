@@ -189,6 +189,7 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   workspace.flush()
   diffWatchers.disposeAll()
+  orchestrator?.dispose()
 })
 
 async function pickFolder(message: string): Promise<string | null> {
@@ -324,6 +325,9 @@ ipcMain.on('orchestrator-prompt', (_e, prompt: string) => void orchestrator?.run
 ipcMain.on('orchestrator-result', (_e, id: number, result: OrchestratorCommandResult) =>
   orchestrator?.resolveCommand(id, result),
 )
+// Toggle autonomous supervision — whether an agent's finished turn wakes the
+// orchestrator (vs. echo-only). Lets the user cap autonomous spend.
+ipcMain.on('orchestrator-autonomous', (_e, on: boolean) => orchestrator?.setAutonomous(!!on))
 // Queue an initial prompt for a not-yet-spawned card (set just before mount).
 ipcMain.on('set-initial-prompt', (_e, cardId: string, prompt: string) => {
   if (typeof cardId === 'string' && typeof prompt === 'string' && prompt) {

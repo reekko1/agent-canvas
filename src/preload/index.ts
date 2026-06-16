@@ -52,6 +52,7 @@ const api: CanvasApi = {
   onOrchestratorEvent: (cb) => subscribe('orchestrator-event', cb),
   onOrchestratorCommand: (cb) => subscribe('orchestrator-command', cb),
   orchestratorResult: (id, result) => ipcRenderer.send('orchestrator-result', id, result),
+  setOrchestratorAutonomous: (on) => ipcRenderer.send('orchestrator-autonomous', on),
 }
 
 contextBridge.exposeInMainWorld('canvas', api)

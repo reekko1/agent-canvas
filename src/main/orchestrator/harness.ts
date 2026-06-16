@@ -5,8 +5,15 @@
 //   npm run orchestrator:harness -- "what canvases exist? then switch to beta-web"
 import * as readline from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import { makeStubBus } from './stubBus'
+
+/** One-shot input stream: yield the single prompt, then end so the streaming
+ *  session completes after the turn. */
+async function* once(prompt: string): AsyncGenerator<SDKUserMessage> {
+  yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null }
+}
 
 async function confirm(
   toolName: string,
@@ -33,11 +40,12 @@ async function main(): Promise<void> {
 
   await runOrchestrator({
     bus: makeStubBus(),
-    prompt,
+    input: once(prompt),
     gate: confirm,
     onEvent: (e) => {
       if (e.kind === 'assistant') console.log(`\n${e.text}`)
       else if (e.kind === 'tool') console.log(`  · tool → ${e.text}`)
+      else if (e.kind === 'agentReply') console.log(`  ⤷ ${e.name ?? 'agent'}: ${e.text}`)
       else if (e.kind === 'result') console.log(`\n✓ ${e.text}`)
       else console.error(`\n✗ ${e.text}`)
     },

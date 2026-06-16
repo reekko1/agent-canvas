@@ -52,8 +52,8 @@ export class WorkspaceStore {
  *  project (or null when there are none), and each project references only
  *  cards that exist. Drops projects missing a dir — a project is a folder. */
 function normalize(snap: MultiProjectSnapshot): MultiProjectSnapshot {
-  const cards = Array.isArray(snap.cards) ? snap.cards : []
-  const known = new Set(cards.map((c) => c.id))
+  const registry = Array.isArray(snap.cards) ? snap.cards : []
+  const known = new Set(registry.map((c) => c.id))
   const projects: Project[] = (Array.isArray(snap.projects) ? snap.projects : [])
     .filter((p) => typeof p.dir === 'string' && p.dir.length > 0)
     .map((p) => ({
@@ -61,6 +61,10 @@ function normalize(snap: MultiProjectSnapshot): MultiProjectSnapshot {
       cardIds: (p.cardIds ?? []).filter((id) => known.has(id)),
       focusedCardId: p.focusedCardId && known.has(p.focusedCardId) ? p.focusedCardId : undefined,
     }))
+  // Drop ghost cards — registry entries no surviving project references.
+  // Mounting one would respawn a tmux session for a card on no canvas.
+  const onACanvas = new Set(projects.flatMap((p) => p.cardIds))
+  const cards = registry.filter((c) => onACanvas.has(c.id))
   const activeProjectId = projects.some((p) => p.id === snap.activeProjectId)
     ? snap.activeProjectId
     : (projects[0]?.id ?? null)

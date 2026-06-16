@@ -19,7 +19,9 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 15px/1.45 -apple-system, 'Helvetica Neue', sans-serif;
-  padding: 18px 18px calc(28px + env(safe-area-inset-bottom));
+  /* Clear the status bar / notch (status-bar-style is black-translucent, so
+     content draws under it) and the home indicator. */
+  padding: calc(18px + env(safe-area-inset-top)) 18px calc(28px + env(safe-area-inset-bottom));
   max-width: 720px;
   margin: 0 auto;
 }
@@ -249,12 +251,13 @@ h2 {
 /* Full-screen terminal overlay (xterm + an accessory key bar). */
 .term-overlay {
   position: fixed;
-  inset: 0;
+  inset: 0; /* always covers the panel; JS adds padding-bottom = keyboard height */
   z-index: 100;
   background: var(--bg);
   display: flex;
   flex-direction: column;
-  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  padding-top: env(safe-area-inset-top);
+  overscroll-behavior: none;
 }
 .term-bar {
   display: flex;
@@ -302,4 +305,8 @@ h2 {
 }
 .term-keys button:active {
   background: var(--bar);
+}
+.term-keys button.on {
+  border-color: var(--blocked);
+  color: var(--blocked);
 }

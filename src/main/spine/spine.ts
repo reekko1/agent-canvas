@@ -190,7 +190,8 @@ export class Spine {
    *  One pty per phone connection (not the card's primary pty); killing it just
    *  detaches that client. Null when tmux is unavailable. */
   openTerminal(cardId: string, cols: number, rows: number): TermSession | null {
-    const cmd = this.tmux.attachCommand(`canvas-${cardId}`)
+    const session = `canvas-${cardId}`
+    const cmd = this.tmux.attachCommand(session)
     if (!cmd) return null
     const p = pty.spawn(cmd.file, cmd.args, {
       name: 'xterm-256color',
@@ -206,6 +207,7 @@ export class Spine {
       resize: (c, r) => {
         if (c > 0 && r > 0) p.resize(c, r)
       },
+      scroll: (lines) => this.tmux.scroll(session, lines),
       kill: () => p.kill(),
     }
   }

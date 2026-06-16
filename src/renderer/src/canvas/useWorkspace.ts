@@ -34,14 +34,20 @@ export function useWorkspace({
     void (async () => {
       const ws = await window.canvas.loadWorkspace()
       if (ws) {
+        // Drop ghost cards — registry entries no project references. Mounting
+        // one would respawn its tmux session for a card on no canvas (and it
+        // can't be closed from the UI). Restoring only members keeps the
+        // registry honest; the next save drops the ghosts from disk too.
+        const onACanvas = new Set(ws.projects.flatMap((p) => p.cardIds))
+        const cards = ws.cards.filter((c) => onACanvas.has(c.id))
         // setNodes BEFORE onRestore: in React 18 these async-callback updates
         // aren't batched, so projects must not reference cards not yet mounted
         // (else one render sees an empty active project).
-        setNodes(ws.cards.map(restoreItem).filter((n): n is CanvasNode => n !== null))
+        setNodes(cards.map(restoreItem).filter((n): n is CanvasNode => n !== null))
         onRestore(ws.projects, ws.activeProjectId)
         // Reattached sessions sit silent until their next hook event — pull
         // their plan from the CLI's task store now, not on first activity.
-        for (const c of ws.cards) {
+        for (const c of cards) {
           if (c.kind === 'agent' && c.session) hydrateTodos(c.id, c.session)
         }
       }

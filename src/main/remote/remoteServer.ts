@@ -12,6 +12,8 @@ export interface TermSession {
   onExit(cb: () => void): void
   write(data: string): void
   resize(cols: number, rows: number): void
+  /** Scroll history by `lines` (+back / −forward) via tmux copy-mode. */
+  scroll(lines: number): void
   kill(): void
 }
 
@@ -110,6 +112,7 @@ export class RemoteServer {
         const m = JSON.parse(raw.toString())
         if (typeof m.i === 'string') sess.write(m.i)
         else if (Array.isArray(m.r)) sess.resize(Number(m.r[0]), Number(m.r[1]))
+        else if (typeof m.s === 'number') sess.scroll(m.s)
       } catch {
         // ignore malformed frames
       }

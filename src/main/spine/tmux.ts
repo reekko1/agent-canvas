@@ -127,6 +127,28 @@ bind -T copy-mode-vi Escape send -X cancel
     }
   }
 
+  /** Scroll a session's history by `lines` (+back / −forward) via tmux copy-mode
+   *  — driven straight from the server, so it's immune to whether the foreground
+   *  app grabbed the mouse (the wheel-binding heuristic the mobile terminal
+   *  can't rely on). One tmux invocation keeps the commands ordered; reaching
+   *  the bottom cancels copy-mode so live output resumes. */
+  scroll(session: string, lines: number): void {
+    if (!this.binary || !this.confPath || !lines) return
+    const base = ['-L', this.socket, '-f', this.confPath]
+    const n = String(Math.min(500, Math.abs(lines)))
+    const args =
+      lines > 0
+        ? [...base, 'copy-mode', '-t', session, ';', 'send-keys', '-t', session, '-X', '-N', n, 'scroll-up']
+        : [
+            ...base,
+            'send-keys', '-t', session, '-X', '-N', n, 'scroll-down',
+            ';',
+            'if-shell', '-F', '-t', session, '#{==:#{scroll_position},0}',
+            `send-keys -t ${session} -X cancel`,
+          ]
+    execFile(this.binary, args, () => {})
+  }
+
   /** Leave copy-mode (scrollback) in a session, if it's in it. The renderer
    *  calls this before delivering the first keystroke after a wheel-scroll,
    *  so typing lands in the app, never in copy-mode. Resolves once the tmux

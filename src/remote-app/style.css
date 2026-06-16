@@ -1,0 +1,234 @@
+/* Dark palette mirrors the desktop's index.css by hand — keep in sync. */
+:root {
+  --bg: #13111c;
+  --body: #201f2a;
+  --bar: #2a2836;
+  --text: #eee9df;
+  --muted: #92909f;
+  --border: #393744;
+  --blocked: #fbb636;
+  --error: #f33f4c;
+  --done: #76cd98;
+}
+* {
+  box-sizing: border-box;
+  margin: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, 'Helvetica Neue', sans-serif;
+  padding: 18px 18px calc(28px + env(safe-area-inset-bottom));
+  max-width: 720px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 17px;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+h1 .badge {
+  background: var(--blocked);
+  color: #13111c;
+  border-radius: 10px;
+  padding: 1px 9px;
+  font-size: 13px;
+  font-weight: 700;
+  display: none;
+}
+.canvas {
+  margin: 20px 0 4px;
+}
+.chead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 8px;
+}
+.chead .cname {
+  font-weight: 700;
+  font-size: 15px;
+}
+.chead .git {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  margin-left: auto;
+}
+.chead .git .dirty {
+  color: var(--blocked);
+}
+.adot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.adot.blocking {
+  background: var(--blocked);
+  box-shadow: 0 0 8px rgba(251, 182, 54, 0.6);
+}
+.adot.done {
+  background: transparent;
+  border: 1.5px solid var(--done);
+}
+.adot.none {
+  background: var(--border);
+}
+.tile {
+  background: var(--body);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 13px;
+  margin-bottom: 8px;
+}
+.tile.loud {
+  border-color: var(--blocked);
+  box-shadow: 0 0 18px rgba(251, 182, 54, 0.18);
+}
+.tile.err {
+  border-color: var(--error);
+  box-shadow: 0 0 18px rgba(243, 63, 76, 0.2);
+}
+.tile.ask {
+  border-color: var(--blocked);
+}
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  align-self: center;
+}
+.name {
+  font-weight: 650;
+}
+.word {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.age {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: auto;
+  flex: none;
+  font-family: ui-monospace, monospace;
+}
+.meta {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta .bypass {
+  color: var(--error);
+  font-weight: 700;
+}
+.detail {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 9px;
+  word-break: break-all;
+}
+.q {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 9px 0 7px;
+}
+.opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+.opt {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+.opt.on {
+  border-color: var(--done);
+  color: var(--done);
+  background: rgba(118, 205, 152, 0.1);
+}
+.opt small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+.opt.on small {
+  color: var(--done);
+}
+button {
+  font: 600 13px -apple-system, sans-serif;
+  border-radius: 8px;
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+.acts {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+button.allow,
+button.send {
+  border-color: var(--done);
+  color: var(--done);
+}
+button.deny,
+button.decline {
+  border-color: var(--error);
+  color: var(--error);
+}
+button:active {
+  background: var(--bar);
+}
+button:disabled {
+  opacity: 0.4;
+}
+h2 {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  margin: 24px 0 8px;
+  font-family: ui-monospace, monospace;
+}
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 6px 2px;
+}
+.offline {
+  color: var(--error);
+  font-size: 12px;
+  display: none;
+  margin-left: auto;
+}
+#enable {
+  display: none;
+  margin-left: auto;
+  border-color: var(--blocked);
+  color: var(--blocked);
+  padding: 5px 12px;
+  font-size: 12px;
+}

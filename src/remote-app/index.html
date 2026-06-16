@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#13111c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Canvas" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <title>Agent Canvas</title>
+  </head>
+  <body>
+    <h1>
+      Agent Canvas
+      <span class="badge" id="badge"></span>
+      <span class="offline" id="offline">offline</span>
+      <button id="enable">Enable alerts</button>
+    </h1>
+    <div id="canvases"></div>
+    <h2>ACTIVITY</h2>
+    <div id="feed" class="empty">…</div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

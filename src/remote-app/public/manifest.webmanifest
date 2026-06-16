@@ -1,0 +1,11 @@
+{
+  "name": "Agent Canvas",
+  "short_name": "Canvas",
+  "description": "Triage your agent fleet from anywhere on your tailnet.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#13111c",
+  "theme_color": "#13111c",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

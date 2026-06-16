@@ -5,8 +5,9 @@
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "concurrently -k -n remote,app -c blue,green \"vite build -c vite.remote.config.ts --watch\" \"electron-vite dev\"",
+    "build": "electron-vite build && npm run build:remote",
+    "build:remote": "vite build -c vite.remote.config.ts",
     "dist": "Packaging/package.sh",
     "postinstall": "patch-package && electron-rebuild -f -w node-pty"
   },
@@ -37,6 +38,7 @@
     "@xterm/xterm": "^5.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "concurrently": "^10.0.3",
     "electron": "^34.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^3.0.0",

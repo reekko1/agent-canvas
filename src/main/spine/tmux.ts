@@ -53,6 +53,11 @@ set -s escape-time 0
 set -g default-terminal "xterm-256color"
 set -g history-limit 50000
 set -g focus-events on
+# Shared attach (phone + desktop on one session): size to whoever's driving,
+# not the smallest client, so a phone client doesn't shrink the desktop when
+# it's idle. With a single client this is identical to today.
+set -g window-size latest
+setw -g aggressive-resize on
 # Mouse is on for SCROLLBACK ONLY. Selection never reaches tmux: the
 # renderer strips mouse-tracking sequences before xterm sees them (so
 # drags select natively, like any normal terminal) and synthesizes wheel

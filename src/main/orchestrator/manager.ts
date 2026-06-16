@@ -13,12 +13,19 @@ import type {
 export interface OrchestratorDeps {
   send: (channel: string, ...args: unknown[]) => void
   getState: () => RemoteState | null
+  /** Write input to a card's terminal (keystroke injection). */
+  writeToCard: (cardId: string, data: string) => void
+  /** A card's last full assistant reply, or null if none captured yet. */
+  getReply: (cardId: string) => string | null
 }
 
 export class Orchestrator {
   private readonly pending = new Map<number, (r: OrchestratorCommandResult) => void>()
   private nextId = 1
   private running = false
+  /** Orchestrator session id — resumed across chat turns so the conversation
+   *  persists rather than starting fresh on every message. */
+  private sessionId: string | null = null
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -86,6 +93,27 @@ export class Orchestrator {
       const r = await this.dispatch('spawnAgent', { ...input })
       return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'spawned' : 'failed') }
     },
+
+    sendToAgent: async (cardId, message) => {
+      const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no agent with id ${cardId}` }
+      if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
+      // Keystroke injection into the agent's terminal; Enter (\r) submits the
+      // line. Claude queues input when busy, so this is safe at any status.
+      this.deps.writeToCard(cardId, message.endsWith('\r') ? message : `${message}\r`)
+      return {
+        ok: true,
+        message: card.status === 'running' ? `queued for ${card.name} (busy)` : `sent to ${card.name}`,
+      }
+    },
+
+    getAgentReply: async (cardId) => {
+      const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no agent with id ${cardId}` }
+      const reply = this.deps.getReply(cardId)
+      if (!reply) return { ok: true, message: `${card.name} hasn't finished a turn yet — no reply captured` }
+      return { ok: true, reply, message: `last reply from ${card.name}` }
+    },
   }
 
   private readonly gate = async (
@@ -109,6 +137,10 @@ export class Orchestrator {
         prompt,
         gate: this.gate,
         onEvent: (e) => this.emit(e),
+        resume: this.sessionId ?? undefined,
+        onSessionId: (id) => {
+          this.sessionId = id
+        },
       })
     } catch (e) {
       this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })

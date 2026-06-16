@@ -162,7 +162,12 @@ app.whenReady().then(() => {
   // The in-app orchestrator: drives the canvas via the Agent SDK. Reads the
   // latest published RemoteState for `list_world`; dispatches mutations and
   // confirms to the renderer (see the orchestrator-* IPC below).
-  orchestrator = new Orchestrator({ send, getState: () => spine.remote.getLatestState() })
+  orchestrator = new Orchestrator({
+    send,
+    getState: () => spine.remote.getLatestState(),
+    writeToCard: (cardId, data) => ptys.write(cardId, data),
+    getReply: (cardId) => spine.lastReply(cardId),
+  })
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
   // download in the background, notify, install on quit. Dev builds have no

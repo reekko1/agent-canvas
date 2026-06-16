@@ -55,4 +55,8 @@ export interface CommandBus {
   listWorld(): Promise<World>
   focusCanvas(canvasId: string): Promise<ActionResult>
   spawnAgent(input: SpawnAgentInput): Promise<SpawnResult>
+  /** Deliver a message (instruction / follow-up) to a running agent. */
+  sendToAgent(cardId: string, message: string): Promise<ActionResult>
+  /** The agent's most recent full reply (from the last turn it finished). */
+  getAgentReply(cardId: string): Promise<{ ok: boolean; reply?: string; message: string }>
 }

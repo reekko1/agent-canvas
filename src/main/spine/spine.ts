@@ -83,6 +83,9 @@ export class Spine {
   private sink = new HookSink(this.config.token)
   private asks = new Map<string, HeldAsk>()
   private askSeq = 1
+  /** Last full assistant reply per card, captured from the Stop hook's
+   *  `last_assistant_message` — read by the orchestrator's get_agent_reply. */
+  private replies = new Map<string, string>()
 
   start(): void {
     this.tmux.prepare()
@@ -159,6 +162,12 @@ export class Spine {
   /** The CLI's stored plan for a session — the re-hydration read. */
   todos(sessionId: string) {
     return this.adapter.currentTodos(sessionId)
+  }
+
+  /** A card's last full assistant reply (from its most recent finished turn),
+   *  or null if it hasn't finished a turn since launch. */
+  lastReply(cardId: string): string | null {
+    return this.replies.get(cardId) ?? null
   }
 
   /** The foreground process in a card's pane — feeds the shell card's title. */
@@ -266,6 +275,13 @@ export class Spine {
       }
     } else {
       req.respond(null) // telemetry never blocks the agent
+      // Capture the agent's full final reply when a turn finishes — the
+      // orchestrator reads it back via get_agent_reply. Stop carries the
+      // complete text in last_assistant_message; the CardEvent keeps only a
+      // clipped summary.
+      if (req.event === 'Stop' && typeof req.payload.last_assistant_message === 'string') {
+        this.replies.set(req.cardId, req.payload.last_assistant_message)
+      }
       const event = this.adapter.event(req.event, req.payload)
       if (event) this.onUpdate?.(req.cardId, event)
     }

@@ -57,5 +57,22 @@ export function makeStubBus(): CommandBus {
       const tail = input.prompt ? ` with initial prompt: "${input.prompt}"` : ''
       return { ok: true, cardId: id, message: `spawned agent ${id} on ${cv.name}${tail}` }
     },
+
+    async sendToAgent(cardId: string, message: string): Promise<ActionResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
+      return { ok: true, message: `sent to ${card.name}: "${message}"` }
+    },
+
+    async getAgentReply(cardId: string): Promise<{ ok: boolean; reply?: string; message: string }> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      return {
+        ok: true,
+        reply: `(stub) ${card.name}: finished ${card.task ?? 'the task'}.`,
+        message: `last reply from ${card.name}`,
+      }
+    },
   }
 }

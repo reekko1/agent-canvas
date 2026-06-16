@@ -61,9 +61,41 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
+  const sendToAgent = tool(
+    'send_to_agent',
+    "Send a message — a new instruction or follow-up — to a running agent's terminal, as if the user typed it. Use a card id from list_world. If the agent is busy, the message is queued and processed when it next idles.",
+    {
+      cardId: z.string().describe('Agent card id from list_world'),
+      message: z.string().describe('The instruction or follow-up to deliver to the agent'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.sendToAgent(args.cardId, args.message)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`send_to_agent failed: ${errText(e)}`)
+      }
+    },
+  )
+
+  const getAgentReply = tool(
+    'get_agent_reply',
+    "Read an agent's most recent full reply — its message from the last turn it finished. Use a card id from list_world. Returns empty if the agent hasn't finished a turn yet.",
+    { cardId: z.string().describe('Agent card id from list_world') },
+    async (args) => {
+      try {
+        const r = await bus.getAgentReply(args.cardId)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`get_agent_reply failed: ${errText(e)}`)
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  )
+
   return createSdkMcpServer({
     name: 'canvas',
     version: '0.1.0',
-    tools: [listWorld, focusCanvas, spawnAgent],
+    tools: [listWorld, focusCanvas, spawnAgent, sendToAgent, getAgentReply],
   })
 }

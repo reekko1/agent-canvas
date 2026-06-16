@@ -18,10 +18,7 @@ import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
 import { OrchestratorChatBar } from '@/orchestrator/ChatBar'
-import {
-  OrchestratorConfirmToast,
-  type OrchestratorConfirm,
-} from '@/orchestrator/OrchestratorConfirmToast'
+import type { OrchestratorConfirm } from '@/orchestrator/OrchestratorConfirmToast'
 import { DiffNode } from '@/diff/DiffNode'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
 import type {
@@ -699,18 +696,17 @@ export function Canvas() {
           onBodyClick={flyToQuestion}
         />
         <AskToasts asks={asks} contextFor={askContextFor} onDecide={decide} onBodyClick={flyToAsk} />
-        <OrchestratorConfirmToast
-          confirm={orchConfirm}
-          onDecide={(allow) => {
-            if (orchConfirm) window.canvas.orchestratorResult(orchConfirm.id, { allow })
-            setOrchConfirm(null)
-          }}
-        />
       </div>
 
       <UpdateToast update={update} onRestart={restartForUpdate} onDismiss={dismissUpdate} />
 
-      <OrchestratorChatBar />
+      <OrchestratorChatBar
+        confirm={orchConfirm}
+        onConfirmDecide={(allow) => {
+          if (orchConfirm) window.canvas.orchestratorResult(orchConfirm.id, { allow })
+          setOrchConfirm(null)
+        }}
+      />
 
       {!active ? (
         <div className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4">

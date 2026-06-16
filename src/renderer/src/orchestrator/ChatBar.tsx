@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OrchestratorEvent } from '@shared/types'
+import {
+  OrchestratorConfirmToast,
+  type OrchestratorConfirm,
+} from '@/orchestrator/OrchestratorConfirmToast'
 
 type Line = { kind: OrchestratorEvent['kind'] | 'you'; text: string; name?: string }
 
@@ -12,8 +16,16 @@ const TONE: Record<Line['kind'], string> = {
   agentReply: 'text-cyan-400',
 }
 
-/** Bottom-center chat bar that drives the in-app orchestrator. */
-export function OrchestratorChatBar(): React.JSX.Element {
+/** Bottom-center chat bar that drives the in-app orchestrator. The orchestrator's
+ *  permission gate rides directly above the input (passed in from Canvas, which
+ *  owns the pending-confirm state) so it's never hidden behind the bar. */
+export function OrchestratorChatBar({
+  confirm,
+  onConfirmDecide,
+}: {
+  confirm: OrchestratorConfirm | null
+  onConfirmDecide: (allow: boolean) => void
+}): React.JSX.Element {
   const [lines, setLines] = useState<Line[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -66,6 +78,7 @@ export function OrchestratorChatBar(): React.JSX.Element {
       className="fixed bottom-4 left-1/2 z-40 w-[640px] max-w-[calc(100vw-2rem)] -translate-x-1/2"
       style={{ WebkitAppRegion: 'no-drag' }}
     >
+      <OrchestratorConfirmToast confirm={confirm} onDecide={onConfirmDecide} />
       {lines.length > 0 && (
         <div
           ref={logRef}

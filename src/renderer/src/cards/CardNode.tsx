@@ -34,6 +34,8 @@ export function CardNode({
   // Shells follow their pane's working directory as the user cd's around; agents
   // (and a shell before its first poll) fall back to where the card was opened.
   const folderName = basenameOf((isShell && cwd) || folder) ?? folder
+  // Agents show their (renameable) name; shells follow the pane folder.
+  const displayName = (!isShell && data.name) || folderName
 
   return (
     <div
@@ -59,7 +61,7 @@ export function CardNode({
         ) : (
           <Bot className="size-3.5 text-muted-foreground/70" aria-hidden />
         )}
-        <span className="text-muted-foreground">{folderName}</span>
+        <span className="text-muted-foreground">{displayName}</span>
         {/* Shell bar carries only the folder; its command lives on the poster. */}
         <span className="flex-1 truncate">{isShell ? '' : (meta.task ?? meta.detail ?? '')}</span>
         {meta.model && <span className="text-muted-foreground">{meta.model}</span>}

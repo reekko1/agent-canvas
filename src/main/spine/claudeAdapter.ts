@@ -49,9 +49,12 @@ export class ClaudeAdapter {
     console.log(`[adapter] wrote HTTP hooks (port ${port}) → ${file}`)
   }
 
-  launchCommand(): string {
+  launchCommand(initialPrompt?: string): string {
     if (!this.settingsFile) return 'exec claude' // sink not ready (shouldn't happen)
-    return `exec claude --settings ${shellQuote(this.settingsFile)}`
+    const base = `exec claude --settings ${shellQuote(this.settingsFile)}`
+    // An initial prompt makes the interactive session boot already working on
+    // the task (`claude [prompt]`) — race-free vs. typing it in after launch.
+    return initialPrompt ? `${base} ${shellQuote(initialPrompt)}` : base
   }
 
   isPermissionAsk(name: string): boolean {

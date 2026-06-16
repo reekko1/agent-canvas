@@ -45,9 +45,10 @@ export function makeStubBus(): CommandBus {
       const cv = world.canvases.find((c) => c.id === canvasId)
       if (!cv) return { ok: false, message: `no canvas with id ${canvasId}` }
       const id = `cd_new${++counter}`
+      const name = input.name?.trim() || `Agent ${world.cards.length + 1}`
       world.cards.push({
         id,
-        name: 'new agent',
+        name,
         kind: 'agent',
         status: 'idle',
         task: input.prompt,
@@ -55,7 +56,7 @@ export function makeStubBus(): CommandBus {
         canvasName: cv.name,
       })
       const tail = input.prompt ? ` with initial prompt: "${input.prompt}"` : ''
-      return { ok: true, cardId: id, message: `spawned agent ${id} on ${cv.name}${tail}` }
+      return { ok: true, cardId: id, message: `spawned ${name} (${id}) on ${cv.name}${tail}` }
     },
 
     async sendToAgent(cardId: string, message: string): Promise<ActionResult> {
@@ -73,6 +74,15 @@ export function makeStubBus(): CommandBus {
         reply: `(stub) ${card.name}: finished ${card.task ?? 'the task'}.`,
         message: `last reply from ${card.name}`,
       }
+    },
+
+    async renameAgent(cardId: string, name: string): Promise<ActionResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      const clean = name.trim()
+      if (!clean) return { ok: false, message: 'name cannot be empty' }
+      card.name = clean
+      return { ok: true, message: `renamed to ${clean}` }
     },
   }
 }

@@ -85,6 +85,8 @@ export function Canvas() {
   const [contextMenu, setContextMenu] = useState<{ cardId: string; x: number; y: number } | null>(
     null,
   )
+  // Rename dialog (Electron has no window.prompt — we render our own input).
+  const [renaming, setRenaming] = useState<{ cardId: string; value: string } | null>(null)
   const { w: winW, h: winH } = useWindowSize()
   const PlusIcon = useIcon('plus')
 
@@ -146,12 +148,13 @@ export function Canvas() {
   )
 
   const makeCard = useCallback(
-    (cardId: string, folder: string, kind: CardKind): CanvasNode => ({
+    (cardId: string, folder: string, kind: CardKind, name?: string): CanvasNode => ({
       id: cardId,
       type: 'card',
       data: {
         folder,
         kind,
+        name,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
         onEngage: engageCard,
@@ -162,7 +165,8 @@ export function Canvas() {
   )
 
   const restoreItem = useCallback(
-    (c: CardRecord): CanvasNode | null => (c.folder ? makeCard(c.id, c.folder, c.kind) : null),
+    (c: CardRecord): CanvasNode | null =>
+      c.folder ? makeCard(c.id, c.folder, c.kind, c.name) : null,
     [makeCard],
   )
 
@@ -183,8 +187,31 @@ export function Canvas() {
 
   const titleFor = useCallback((cardId: string) => {
     const n = nodesRef.current.find((x) => x.id === cardId)
-    const folder = n && n.type === 'card' ? n.data.folder : undefined
-    return basenameOf(folder ?? '') ?? 'agent'
+    if (!n || n.type !== 'card') return 'agent'
+    return n.data.name ?? basenameOf(n.data.folder ?? '') ?? 'agent'
+  }, [])
+
+  // Default name for a new agent: the next free "Agent N" across all cards.
+  const nextAgentName = useCallback((): string => {
+    let max = 0
+    for (const n of nodesRef.current) {
+      if (n.type !== 'card') continue
+      const m = /^Agent (\d+)$/.exec(n.data.name ?? '')
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    return `Agent ${max + 1}`
+  }, [])
+
+  /** Set a card's display name. Returns false if the card or name is invalid. */
+  const renameCard = useCallback((cardId: string, name: string): boolean => {
+    const clean = name.trim()
+    if (!clean || !nodesRef.current.some((n) => n.id === cardId && n.type === 'card')) return false
+    setNodes((ns) =>
+      ns.map((n) =>
+        n.id === cardId && n.type === 'card' ? { ...n, data: { ...n.data, name: clean } } : n,
+      ),
+    )
+    return true
   }, [])
 
   const { notifications, setNotifications } = useActivityFeed(titleFor, proj.projectNameForCard)
@@ -251,7 +278,8 @@ export function Canvas() {
     if (!dir) return
     const r = await (kind === 'shell' ? window.canvas.newShell(dir) : window.canvas.newCard(dir))
     if (!r) return
-    setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind)])
+    const name = kind === 'agent' ? nextAgentName() : undefined
+    setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind, name)])
     proj.attachCard(r.cardId) // joins the active canvas as its master
   }
 
@@ -307,19 +335,40 @@ export function Canvas() {
         reply({ ok: false, message: canvasId ? `no canvas with id ${canvasId}` : 'no active canvas' })
         return
       }
-      // NOTE: v1 spawns the card on the target canvas; auto-delivering the
-      // initial prompt into the new agent's terminal is the next increment.
+      const name =
+        typeof cmd.payload.name === 'string' && cmd.payload.name.trim()
+          ? cmd.payload.name.trim()
+          : nextAgentName()
+      const prompt = typeof cmd.payload.prompt === 'string' ? cmd.payload.prompt.trim() : ''
       void (async () => {
         const r = await window.canvas.newCard(target.dir)
         if (!r) {
           reply({ ok: false, message: 'card creation was cancelled' })
           return
         }
-        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'agent')])
+        // Queue the instruction BEFORE the card mounts, so ensure-card launches
+        // the agent already working on it (no keystroke race against startup).
+        if (prompt) window.canvas.setInitialPrompt(r.cardId, prompt)
+        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'agent', name)])
         proj.attachCardTo(target.id, r.cardId)
         if (proj.activeProjectId !== target.id) switchProject(target.id)
-        reply({ ok: true, cardId: r.cardId, message: `spawned an agent on ${target.name}` })
+        reply({
+          ok: true,
+          cardId: r.cardId,
+          message: `spawned ${name} on ${target.name}${prompt ? ', working on the task' : ''}`,
+        })
       })()
+      return
+    }
+
+    if (cmd.cmd === 'renameAgent') {
+      const cardId = String(cmd.payload.cardId ?? '')
+      const name = String(cmd.payload.name ?? '')
+      reply(
+        renameCard(cardId, name)
+          ? { ok: true, message: `renamed to ${name.trim()}` }
+          : { ok: false, message: `couldn't rename ${cardId}` },
+      )
       return
     }
 
@@ -544,8 +593,59 @@ export function Canvas() {
           y={contextMenu.y}
           cardId={contextMenu.cardId}
           onClose={onCloseCard}
+          onRename={(cardId) => {
+            const n = nodesRef.current.find((x) => x.id === cardId)
+            const current = (n?.type === 'card' ? n.data.name : '') ?? ''
+            setRenaming({ cardId, value: current })
+          }}
           onDismiss={() => setContextMenu(null)}
         />
+      )}
+
+      {renaming && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onMouseDown={() => setRenaming(null)}
+        >
+          <div
+            className="w-80 rounded-xl border border-border/40 bg-popover/95 p-4 shadow-2xl backdrop-blur-xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <p className="mb-2 font-mono text-xs text-muted-foreground">Rename agent</p>
+            <input
+              autoFocus
+              value={renaming.value}
+              onChange={(e) => setRenaming({ cardId: renaming.cardId, value: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  renameCard(renaming.cardId, renaming.value)
+                  setRenaming(null)
+                } else if (e.key === 'Escape') {
+                  setRenaming(null)
+                }
+              }}
+              placeholder="Agent name"
+              className="w-full rounded-lg border border-border/40 bg-background px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-border"
+            />
+            <div className="mt-3 flex justify-end gap-2 font-mono text-xs">
+              <button
+                className="rounded-lg px-3 py-1.5 text-muted-foreground hover:bg-accent"
+                onClick={() => setRenaming(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-lg bg-foreground/10 px-3 py-1.5 text-foreground hover:bg-foreground/20"
+                onClick={() => {
+                  renameCard(renaming.cardId, renaming.value)
+                  setRenaming(null)
+                }}
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Shared bottom overlay: questions ride above permission asks. Always

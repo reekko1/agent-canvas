@@ -61,7 +61,15 @@ export function useWorkspace({
     // Card data lives in the registry; projects order them and name a master.
     const cards: CardRecord[] = nodes.flatMap((n) =>
       n.type === 'card'
-        ? [{ id: n.id, folder: n.data.folder, kind: n.data.kind, session: n.data.meta.sessionId }]
+        ? [
+            {
+              id: n.id,
+              folder: n.data.folder,
+              kind: n.data.kind,
+              session: n.data.meta.sessionId,
+              name: n.data.name,
+            },
+          ]
         : [],
     )
     window.canvas.saveWorkspace({ cards, projects, activeProjectId })

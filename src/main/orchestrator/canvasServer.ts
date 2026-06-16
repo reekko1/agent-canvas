@@ -50,6 +50,7 @@ export function buildCanvasServer(bus: CommandBus) {
       canvasId: z.string().optional().describe('Target canvas id; defaults to the active canvas'),
       folder: z.string().optional().describe('Working directory; defaults to the canvas folder'),
       prompt: z.string().optional().describe('Initial instruction for the new agent'),
+      name: z.string().optional().describe('Name for the new agent (e.g. "Chase"); defaults to "Agent N"'),
     },
     async (args) => {
       try {
@@ -93,9 +94,26 @@ export function buildCanvasServer(bus: CommandBus) {
     { annotations: { readOnlyHint: true } },
   )
 
+  const renameAgent = tool(
+    'rename_agent',
+    'Rename an agent card so it can be referred to by name (e.g. "Chase"). Use a card id from list_world.',
+    {
+      cardId: z.string().describe('Agent card id from list_world'),
+      name: z.string().describe('The new name'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.renameAgent(args.cardId, args.name)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`rename_agent failed: ${errText(e)}`)
+      }
+    },
+  )
+
   return createSdkMcpServer({
     name: 'canvas',
     version: '0.1.0',
-    tools: [listWorld, focusCanvas, spawnAgent, sendToAgent, getAgentReply],
+    tools: [listWorld, focusCanvas, spawnAgent, sendToAgent, getAgentReply, renameAgent],
   })
 }

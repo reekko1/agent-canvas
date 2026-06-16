@@ -167,6 +167,8 @@ export interface CardRecord {
   /** Last-known CLI session — keys plan re-hydration across an app restart
    *  (tmux). Stale ids are harmless. */
   session?: string
+  /** Display name (default "Agent N"), set by the user or the orchestrator. */
+  name?: string
 }
 
 /// One project's canvas: a named folder. References cards by id only — it never
@@ -307,7 +309,7 @@ export interface OrchestratorEvent {
 /** A command the orchestrator (main) asks the renderer to execute, by id. */
 export interface OrchestratorCommand {
   id: number
-  cmd: 'focusCanvas' | 'spawnAgent' | 'confirm'
+  cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'confirm'
   payload: Record<string, unknown>
 }
 
@@ -336,6 +338,9 @@ export interface CanvasApi {
     kind: CardKind,
   ): Promise<void>
   killCard(cardId: string): Promise<void>
+  /** Queue an initial prompt for a card so the agent launches already working
+   *  on it (delivered as claude's initial prompt when the pty spawns). */
+  setInitialPrompt(cardId: string, prompt: string): void
   loadWorkspace(): Promise<MultiProjectSnapshot | null>
   saveWorkspace(snapshot: MultiProjectSnapshot): void
   /** The CLI's stored plan for a session (null = no store / none yet). */

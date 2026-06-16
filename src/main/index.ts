@@ -28,6 +28,10 @@ const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
 let orchestrator: Orchestrator | null = null
 let nextItem = 1
+/** Initial prompts queued for a card before its pty spawns — delivered as
+ *  claude's initial prompt by ensure-card (one-shot, so a spawned agent boots
+ *  already working on the task instead of racing a keystroke injection). */
+const pendingPrompts = new Map<string, string>()
 
 function send(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args)
@@ -240,9 +244,11 @@ ipcMain.handle(
   'ensure-card',
   (_e, cardId: string, folder: string, cols: number, rows: number, kind: 'agent' | 'shell') => {
     if (ptys.has(cardId)) return
+    const initialPrompt = pendingPrompts.get(cardId)
+    pendingPrompts.delete(cardId)
     ptys.spawn(
       cardId,
-      spine.launch(cardId, folder, kind === 'shell'),
+      spine.launch(cardId, folder, kind === 'shell', initialPrompt),
       {
         onData: (d) => send('pty-data', cardId, d),
         onExit: () => send('pty-exit', cardId),
@@ -314,3 +320,9 @@ ipcMain.on('orchestrator-prompt', (_e, prompt: string) => void orchestrator?.run
 ipcMain.on('orchestrator-result', (_e, id: number, result: OrchestratorCommandResult) =>
   orchestrator?.resolveCommand(id, result),
 )
+// Queue an initial prompt for a not-yet-spawned card (set just before mount).
+ipcMain.on('set-initial-prompt', (_e, cardId: string, prompt: string) => {
+  if (typeof cardId === 'string' && typeof prompt === 'string' && prompt) {
+    pendingPrompts.set(cardId, prompt)
+  }
+})

@@ -14,6 +14,7 @@ const api: CanvasApi = {
   ensureCard: (cardId, folder, cols, rows, kind) =>
     ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows, kind),
   killCard: (cardId) => ipcRenderer.invoke('kill-card', cardId),
+  setInitialPrompt: (cardId, prompt) => ipcRenderer.send('set-initial-prompt', cardId, prompt),
   readTodos: (sessionId) => ipcRenderer.invoke('read-todos', sessionId),
   paneCommand: (cardId) => ipcRenderer.invoke('pane-command', cardId),
   paneCwd: (cardId) => ipcRenderer.invoke('pane-cwd', cardId),

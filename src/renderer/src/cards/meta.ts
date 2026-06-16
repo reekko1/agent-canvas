@@ -39,6 +39,8 @@ export interface CardData extends Record<string, unknown> {
   /** 'agent' = watched claude session; 'shell' = bare $SHELL, no hooks — the
    *  spine never speaks about it, so its meta stays idle forever. */
   kind: CardKind
+  /** Display name — defaults to "Agent N" for agents; user/orchestrator renameable. */
+  name?: string
   meta: CardMeta
   onClose: (cardId: string) => void
   /** Terminal engaged (mousedown) — releases any held asks to the native

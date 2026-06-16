@@ -48,6 +48,7 @@ export interface SpawnAgentInput {
   canvasId?: string
   folder?: string
   prompt?: string
+  name?: string
 }
 
 /** Everything the orchestrator can do to the app. Kept small and explicit. */
@@ -59,4 +60,6 @@ export interface CommandBus {
   sendToAgent(cardId: string, message: string): Promise<ActionResult>
   /** The agent's most recent full reply (from the last turn it finished). */
   getAgentReply(cardId: string): Promise<{ ok: boolean; reply?: string; message: string }>
+  /** Rename an agent card. */
+  renameAgent(cardId: string, name: string): Promise<ActionResult>
 }

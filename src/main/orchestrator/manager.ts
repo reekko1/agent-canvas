@@ -39,7 +39,7 @@ export class Orchestrator {
   }
 
   private dispatch(
-    cmd: 'focusCanvas' | 'spawnAgent' | 'confirm',
+    cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'confirm',
     payload: Record<string, unknown>,
   ): Promise<OrchestratorCommandResult> {
     const id = this.nextId++
@@ -113,6 +113,11 @@ export class Orchestrator {
       const reply = this.deps.getReply(cardId)
       if (!reply) return { ok: true, message: `${card.name} hasn't finished a turn yet — no reply captured` }
       return { ok: true, reply, message: `last reply from ${card.name}` }
+    },
+
+    renameAgent: async (cardId, name) => {
+      const r = await this.dispatch('renameAgent', { cardId, name })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? 'renamed' : 'failed') }
     },
   }
 

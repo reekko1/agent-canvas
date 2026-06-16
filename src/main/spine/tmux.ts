@@ -135,16 +135,20 @@ bind -T copy-mode-vi Escape send -X cancel
   scroll(session: string, lines: number): void {
     if (!this.binary || !this.confPath || !lines) return
     const base = ['-L', this.socket, '-f', this.confPath]
+    // `=name` exact-matches the session — no prefix bleed (card-1 vs card-10),
+    // the same guard kill()/query()/cancelCopyMode() use. It also keeps the
+    // session out of the if-shell command string below as a single token.
+    const t = `=${session}`
     const n = String(Math.min(500, Math.abs(lines)))
     const args =
       lines > 0
-        ? [...base, 'copy-mode', '-t', session, ';', 'send-keys', '-t', session, '-X', '-N', n, 'scroll-up']
+        ? [...base, 'copy-mode', '-t', t, ';', 'send-keys', '-t', t, '-X', '-N', n, 'scroll-up']
         : [
             ...base,
-            'send-keys', '-t', session, '-X', '-N', n, 'scroll-down',
+            'send-keys', '-t', t, '-X', '-N', n, 'scroll-down',
             ';',
-            'if-shell', '-F', '-t', session, '#{==:#{scroll_position},0}',
-            `send-keys -t ${session} -X cancel`,
+            'if-shell', '-F', '-t', t, '#{==:#{scroll_position},0}',
+            `send-keys -t ${t} -X cancel`,
           ]
     execFile(this.binary, args, () => {})
   }

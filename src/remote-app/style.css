@@ -133,10 +133,6 @@ h1 .badge {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.meta .bypass {
-  color: var(--error);
-  font-weight: 700;
-}
 .detail {
   font-family: ui-monospace, monospace;
   font-size: 12px;

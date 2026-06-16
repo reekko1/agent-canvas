@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -9,7 +10,8 @@ import {
 import { Bot, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useIcon } from '@/lib/icon-context'
-import { NotificationPopover, type Notification } from '@/components/ui/notification-popover'
+import { basenameOf } from '@/lib/utils'
+import { NotificationPopover } from '@/components/ui/notification-popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AskToasts } from '@/cards/AskToasts'
 import { QuestionToasts } from '@/cards/QuestionToasts'
@@ -19,7 +21,6 @@ import { DiffNode } from '@/diff/DiffNode'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
 import type { CardKind, CardRecord, PermissionAskInfo, QuestionAskInfo } from '@shared/types'
 import {
-  GAP,
   PAD,
   TOP_STRIP,
   masterRect,
@@ -175,7 +176,7 @@ export function Canvas() {
   const titleFor = useCallback((cardId: string) => {
     const n = nodesRef.current.find((x) => x.id === cardId)
     const folder = n && n.type === 'card' ? n.data.folder : undefined
-    return folder?.split('/').filter(Boolean).pop() ?? 'agent'
+    return basenameOf(folder ?? '') ?? 'agent'
   }, [])
 
   const { notifications, setNotifications } = useActivityFeed(titleFor, proj.projectNameForCard)
@@ -207,7 +208,7 @@ export function Canvas() {
       const n = nodesRef.current.find((x) => x.id === cardId)
       if (!n || n.type !== 'card') return { name: 'agent' }
       return {
-        name: n.data.folder.split('/').filter(Boolean).pop() ?? 'agent',
+        name: basenameOf(n.data.folder) ?? 'agent',
         project: proj.projectNameForCard(cardId),
         task: n.data.meta.task ?? n.data.meta.detail,
       }
@@ -218,7 +219,7 @@ export function Canvas() {
   /** Activity / ask / question click → promote that card to the main view
    *  (switching canvas if it lives in another one). */
   const flyToCard = useCallback(
-    (n: Notification) => promoteCard((n as ActivityNotification).cardId),
+    (n: ActivityNotification) => promoteCard(n.cardId),
     [promoteCard],
   )
   const flyToAsk = useCallback(
@@ -249,7 +250,7 @@ export function Canvas() {
   const createProject = useCallback(async () => {
     const dir = await window.canvas.pickFolder('Choose the folder for this canvas')
     if (!dir) return // cancelled — don't create a dirless project
-    const name = dir.split('/').filter(Boolean).pop() || 'Canvas'
+    const name = basenameOf(dir) || 'Canvas'
     proj.createProject(name, dir)
   }, [proj.createProject])
 
@@ -263,15 +264,22 @@ export function Canvas() {
 
   // ---- Master-stack layout (active project only; others stay parked) ----
   const active = proj.active
-  const activeSet = new Set(active?.cardIds ?? [])
-  const cardNodes = nodes.flatMap((n) => (n.type === 'card' ? [n] : []))
-  const orderedActive = (active?.cardIds ?? []).flatMap((id) => {
-    const n = cardNodes.find((x) => x.id === id)
-    return n ? [n] : []
-  })
-  const masterCard =
-    orderedActive.find((n) => n.id === active?.focusedCardId) ?? orderedActive[0] ?? null
-  const stackCards = orderedActive.filter((n) => n.id !== masterCard?.id)
+  // Partition the cards once per change to the node set / active order / focus —
+  // not on every render (window resize, scroll, toast churn). rectFor then does
+  // O(1) stack lookups via stackIndex.
+  const { activeSet, cardNodes, orderedActive, masterCard, stackCards, stackIndex } = useMemo(() => {
+    const activeSet = new Set(active?.cardIds ?? [])
+    const cardNodes = nodes.flatMap((n) => (n.type === 'card' ? [n] : []))
+    const orderedActive = (active?.cardIds ?? []).flatMap((id) => {
+      const n = cardNodes.find((x) => x.id === id)
+      return n ? [n] : []
+    })
+    const masterCard =
+      orderedActive.find((n) => n.id === active?.focusedCardId) ?? orderedActive[0] ?? null
+    const stackCards = orderedActive.filter((n) => n.id !== masterCard?.id)
+    const stackIndex = new Map(stackCards.map((n, i) => [n.id, i] as const))
+    return { activeSet, cardNodes, orderedActive, masterCard, stackCards, stackIndex }
+  }, [nodes, active?.cardIds, active?.focusedCardId])
   const hasStack = stackCards.length > 0
   const mRect = masterRect(winW, winH, hasStack)
   // The diff side sheet overlays the right half — independent of the layout.
@@ -285,8 +293,8 @@ export function Canvas() {
 
   const rectFor = (cardId: string): Rect => {
     if (cardId === masterCard?.id) return mRect
-    const i = stackCards.findIndex((n) => n.id === cardId)
-    if (i < 0) return PARKED
+    const i = stackIndex.get(cardId)
+    if (i === undefined) return PARKED
     const s = stackSlot(winW, i)
     return { ...s, y: s.y - scroll }
   }
@@ -338,7 +346,7 @@ export function Canvas() {
               zIndex: isMaster ? 10 : 1,
             }}
           >
-            <CardNode id={n.id} data={n.data} stacked={!isMaster} />
+            <CardNode id={n.id} data={n.data} stacked={!isMaster} title={shellTitles[n.id]} />
           </div>
         )
       })}
@@ -384,7 +392,7 @@ export function Canvas() {
           how the window gets dragged. The toolbars below are no-drag. */}
       <div
         className="fixed inset-x-0 top-0 z-30 h-12"
-        style={{ WebkitAppRegion: 'drag' } as CSSProperties}
+        style={{ WebkitAppRegion: 'drag' }}
       />
 
       <ProjectToolbar
@@ -400,7 +408,7 @@ export function Canvas() {
 
       <div
         className="fixed left-3 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-full border border-border/40 bg-background/55 p-1.5 shadow-lg shadow-black/10 backdrop-blur-xl"
-        style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+        style={{ WebkitAppRegion: 'no-drag' }}
       >
         <Tooltip>
           <TooltipTrigger
@@ -456,11 +464,11 @@ export function Canvas() {
       {/* Activity center: the spine's feed-worthy rows under a bell. */}
       <div
         className="fixed right-3 top-3 z-40"
-        style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+        style={{ WebkitAppRegion: 'no-drag' }}
       >
-        <NotificationPopover
+        <NotificationPopover<ActivityNotification>
           notifications={notifications}
-          onNotificationsChange={(ns) => setNotifications(ns as ActivityNotification[])}
+          onNotificationsChange={(ns) => setNotifications(ns)}
           onNotificationClick={flyToCard}
         />
       </div>
@@ -507,7 +515,7 @@ export function Canvas() {
           <div className="pointer-events-none fixed inset-x-0 top-16 z-30 flex justify-center">
             <span className="rounded-full border border-border/40 bg-background/55 px-3 py-1 font-mono text-xs text-muted-foreground backdrop-blur-xl">
               empty canvas — add an agent or terminal, it spawns in{' '}
-              {active.dir.split('/').filter(Boolean).pop()}
+              {basenameOf(active.dir)}
             </span>
           </div>
         )

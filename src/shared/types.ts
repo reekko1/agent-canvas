@@ -194,6 +194,13 @@ export interface MultiProjectSnapshot {
 
 // MARK: Remote panel (Tailscale)
 
+/// How loudly a canvas wants the user, rolled up from its cards:
+/// - `blocking` — a card is stalled ON YOU (a held ask/question, or a
+///   blocked/error status). The agent can't proceed without you.
+/// - `done` — a card finished and is waiting for a look. Not urgent.
+/// - `none` — quiet.
+export type AttentionLevel = 'none' | 'done' | 'blocking'
+
 /// The JSON projection of the canvas's attention state — what the remote
 /// panel shows. The renderer publishes a fresh snapshot through the same
 /// funnel that feeds the in-app activity center, so the two can never
@@ -206,7 +213,7 @@ export interface RemoteState {
     name: string
     /** Rolled-up attention: a card stalled on you (`blocking`), one done and
      *  waiting (`done`), or quiet (`none`). Mirrors the desktop toolbar. */
-    attention: 'none' | 'done' | 'blocking'
+    attention: AttentionLevel
     /** Changed-file count; branch name. Absent/0 for a non-repo dir. */
     dirty: number
     branch?: string

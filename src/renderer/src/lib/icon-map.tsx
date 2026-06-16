@@ -263,7 +263,7 @@ function hugeicons(iconDef: unknown): IconComponent {
   return function HugeIconsAdapter({ size, strokeWidth, className }: IconComponentProps) {
     return (
       <HugeiconsIcon
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // HugeIcons icon defs are untyped; cast through any.
         icon={iconDef as any}
         size={size}
         strokeWidth={strokeWidth}

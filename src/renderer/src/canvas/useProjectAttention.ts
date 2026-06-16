@@ -1,15 +1,13 @@
 import { useMemo } from 'react'
-import type { Project } from '@shared/types'
+import type { AttentionLevel, Project } from '@shared/types'
 import type { CanvasNode } from './nodes'
+import { isLoud } from '@/cards/meta'
 import type { PendingAsk } from './usePendingAsks'
 import type { PendingQuestion } from './usePendingQuestions'
 
-/// How loudly a canvas wants the user, rolled up from its cards:
-/// - `blocking` — a card is stalled ON YOU (pending ask/question, or
-///   blocked/error status). The agent can't proceed without you.
-/// - `done` — a card finished and is waiting for a look. Not urgent.
-/// - `none` — quiet.
-export type AttentionLevel = 'none' | 'done' | 'blocking'
+// AttentionLevel is shared with the remote panel (see @shared/types) — re-export
+// so existing importers (ProjectToolbar, useRemotePublish) keep their path.
+export type { AttentionLevel } from '@shared/types'
 
 const RANK: Record<AttentionLevel, number> = { none: 0, done: 1, blocking: 2 }
 const louder = (a: AttentionLevel, b: AttentionLevel): AttentionLevel =>
@@ -37,7 +35,7 @@ export function useProjectAttention({
     for (const n of nodes) {
       if (n.type !== 'card') continue
       const s = n.data.meta.status
-      if (s === 'blocked' || s === 'error') blocking.add(n.id)
+      if (isLoud(s)) blocking.add(n.id)
       else if (s === 'done') done.add(n.id)
     }
     for (const a of asks) blocking.add(a.cardId)

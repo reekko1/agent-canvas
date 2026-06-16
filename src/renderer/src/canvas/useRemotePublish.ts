@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { Project, RemoteState, RepoIdentity } from '@shared/types'
+import { isLoud } from '@/cards/meta'
+import { basenameOf } from '@/lib/utils'
 import type { CanvasNode } from './nodes'
 import type { ActivityNotification } from './useActivityFeed'
 import type { PendingAsk } from './usePendingAsks'
@@ -60,15 +62,13 @@ export function useRemotePublish({
         // Shell titles follow the pane's cwd (the user's cd's), like the
         // desktop; agents keep the static open folder.
         const name =
-          shell && title?.cwd
-            ? (title.cwd.split('/').filter(Boolean).pop() ?? titleFor(n.id))
-            : titleFor(n.id)
+          shell && title?.cwd ? (basenameOf(title.cwd) ?? titleFor(n.id)) : titleFor(n.id)
         return {
           id: n.id,
           name,
           kind: n.data.kind,
           status: n.data.meta.status,
-          loud: n.data.meta.status === 'blocked' || n.data.meta.status === 'error',
+          loud: isLoud(n.data.meta.status),
           since: (n.data.meta.statusSince ?? 0) / 1000,
           task: n.data.meta.task,
           running: shell ? title?.running : undefined,
@@ -98,7 +98,7 @@ export function useRemotePublish({
     const feed: RemoteState['feed'] = notifications.map((n) => ({
       name: n.title,
       status: n.status,
-      loud: n.status === 'blocked' || n.status === 'error',
+      loud: isLoud(n.status),
       message: n.description,
       date: n.timestamp.getTime() / 1000,
     }))

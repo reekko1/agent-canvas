@@ -40,6 +40,13 @@ export class DiffWatchers {
     for (const [id, e] of this.entries) if (e.folder === folder) void this.tick(id)
   }
 
+  /** Stop every watcher — the before-quit path. Process exit reclaims the
+   *  timers anyway; this makes teardown explicit and symmetric with watch(). */
+  disposeAll(): void {
+    for (const e of this.entries.values()) clearInterval(e.timer)
+    this.entries.clear()
+  }
+
   private async tick(diffId: string): Promise<void> {
     const e = this.entries.get(diffId)
     if (!e || e.running) return // a slow git never stacks ticks

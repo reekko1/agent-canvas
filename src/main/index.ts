@@ -124,7 +124,14 @@ function createWindow(): void {
     // The renderer provides the drag strip (.app-drag in Canvas).
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0f0f14',
-    webPreferences: { preload: join(__dirname, '../preload/index.js') },
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      // Explicit hardening — these are Electron's defaults, pinned so a future
+      // option or version bump can't silently weaken the renderer sandbox.
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   })
   if (process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -134,6 +141,17 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // This is a local app — the only sanctioned external-link path is
+  // shell.openExternal (the open-external IPC). Deny popups outright and block
+  // any in-page navigation away from the app's own origin (dev server / file).
+  app.on('web-contents-created', (_e, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    contents.on('will-navigate', (event, url) => {
+      const devURL = process.env['ELECTRON_RENDERER_URL']
+      const allowed = (!!devURL && url.startsWith(devURL)) || url.startsWith('file://')
+      if (!allowed) event.preventDefault()
+    })
+  })
   spine.onUpdate = (cardId, event) => send('card-event', cardId, event)
   spine.onAsk = (ask) => send('permission-ask', ask)
   spine.onQuestion = (ask) => send('question-ask', ask)
@@ -148,7 +166,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => app.quit())
 // Quitting only detaches tmux clients — the fleet keeps working by design.
-app.on('before-quit', () => workspace.flush())
+app.on('before-quit', () => {
+  workspace.flush()
+  diffWatchers.disposeAll()
+})
 
 async function pickFolder(message: string): Promise<string | null> {
   if (!win) return null

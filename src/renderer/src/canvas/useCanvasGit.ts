@@ -31,7 +31,6 @@ export function useCanvasGit(projects: Project[]): Record<string, RepoIdentity> 
       clearInterval(t)
     }
     // key captures the dir set; projects is read inside but only its dirs matter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
   return byProject

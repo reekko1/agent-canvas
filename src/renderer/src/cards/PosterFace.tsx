@@ -1,5 +1,5 @@
 import { useEffect, useReducer, type CSSProperties } from 'react'
-import { STATUS_COLORS, type CardMeta } from './meta'
+import { STATUS_COLORS, isLoud, type CardMeta } from './meta'
 
 const clamp = (lines: number): CSSProperties => ({
   display: '-webkit-box',
@@ -46,7 +46,7 @@ export function PosterFace({ meta }: { meta: CardMeta }) {
   let reason: { text: string; color: string } | undefined
   if (meta.status === 'done') {
     reason = { text: meta.summary ?? 'Finished — waiting for you', color: 'var(--card-foreground)' }
-  } else if (meta.status === 'blocked' || meta.status === 'error') {
+  } else if (isLoud(meta.status)) {
     if (meta.detail) reason = { text: meta.detail, color }
   } else if (!activeStep && meta.detail) {
     // Nothing in flight (no checklist) — fall back to whatever it last said.

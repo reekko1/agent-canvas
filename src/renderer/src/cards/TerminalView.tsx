@@ -85,9 +85,10 @@ export function TerminalView({
     term.loadAddon(fit)
     term.open(termRef.current!)
     fit.fit()
+    let webgl: WebglAddon | undefined
     try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
+      webgl = new WebglAddon()
+      webgl.onContextLoss(() => webgl?.dispose())
       term.loadAddon(webgl)
     } catch {
       // DOM renderer fallback — fine for a handful of cards
@@ -167,6 +168,7 @@ export function TerminalView({
       offData()
       gridChange.dispose()
       input.dispose()
+      webgl?.dispose()
       term.dispose()
     }
   }, [cardId, folder, kind])

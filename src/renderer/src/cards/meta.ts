@@ -11,6 +11,11 @@ export const STATUS_COLORS: Record<CardStatus, string> = {
   error: 'var(--status-error)',
 }
 
+const LOUD_STATUSES: ReadonlySet<CardStatus> = new Set(['blocked', 'error'])
+/** Loud = the agent is stalled ON YOU — a blocked or error status. The single
+ *  source for that predicate (call sites that also track held asks OR this in). */
+export const isLoud = (s: CardStatus): boolean => LOUD_STATUSES.has(s)
+
 /// A card's accumulated spine state — everything the chrome and the poster
 /// render. Owned by the canvas (per node), fed exclusively by applyCardEvent.
 export interface CardMeta {

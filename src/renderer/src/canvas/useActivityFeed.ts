@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRef } from 'react'
 import type { CardStatus } from '@shared/types'
+import { isLoud } from '@/cards/meta'
 import type { Notification } from '@/components/ui/notification-popover'
 
 /// In-memory log of agent status changes — the source for the activity
@@ -14,10 +15,6 @@ export interface ActivityNotification extends Notification {
 }
 
 const CAP = 40
-
-/** Statuses that demand the user (mirrors the Swift `isLoud`) — these arrive
- *  unread, so they drive the bell badge until acknowledged. */
-const LOUD: ReadonlySet<CardStatus> = new Set(['blocked', 'error'])
 
 /** Per-status fallback copy when the event carries no detail line. */
 const FALLBACK: Record<CardStatus, string> = {
@@ -82,7 +79,8 @@ export function useActivityFeed(
         project: projectNameForRef.current(cardId),
         description: ev.detail ?? FALLBACK[current],
         timestamp: new Date(),
-        read: !LOUD.has(current),
+        // Loud rows (blocked/error) arrive unread → they drive the bell badge.
+        read: !isLoud(current),
       }
       setNotifications((ns) => [row, ...ns].slice(0, CAP))
     })

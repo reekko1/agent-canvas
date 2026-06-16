@@ -20,10 +20,7 @@ export function useShellTitles(nodes: CanvasNode[]): Record<string, ShellTitle> 
   const key = shellIds.join('|')
 
   useEffect(() => {
-    if (!shellIds.length) {
-      setTitles({})
-      return
-    }
+    if (!shellIds.length) return
     let alive = true
     const tick = async (): Promise<void> => {
       const pairs = await Promise.all(
@@ -47,7 +44,6 @@ export function useShellTitles(nodes: CanvasNode[]): Record<string, ShellTitle> 
       clearInterval(t)
     }
     // shellIds is captured via `key`; its contents are what matter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
   return titles

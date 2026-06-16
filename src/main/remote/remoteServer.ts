@@ -1,8 +1,10 @@
 import http from 'node:http'
+import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { QuestionAnswers, RemoteState } from '../../shared/types'
+import { composeAskNotification, type FreshAsk } from './notify'
 import type { PushService } from './push'
 
 /// One mobile terminal: a tmux client attached to a card's session, wrapped so
@@ -16,6 +18,9 @@ export interface TermSession {
   scroll(lines: number): void
   kill(): void
 }
+
+/** The mutating routes — gated behind the session token (see handle()). */
+const MUTATIONS = new Set(['/subscribe', '/decide', '/answer', '/decline'])
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -60,6 +65,12 @@ export class RemoteServer {
   openTerminal?: (cardId: string, cols: number, rows: number) => TermSession | null
 
   port = 0
+  // Per-session CSRF token. tailscale serve fronts the panel at an https origin,
+  // so a loopback Origin check would break the real deployment; instead the
+  // panel fetches this once (GET /token) and echoes it as x-canvas-token on
+  // every mutating request — the custom header forces a CORS preflight, closing
+  // the simple-request hole that lets a cross-origin tailnet page fire approvals.
+  private token = randomBytes(16).toString('hex')
   private stateJSON = '{}'
   // The bundled mobile app (vite.remote.config → out/remote). Sits beside
   // out/main, where this file is bundled.
@@ -99,8 +110,14 @@ export class RemoteServer {
    *  resize. Closing the socket detaches the client (the session survives). */
   private handleTerm(req: http.IncomingMessage, ws: WebSocket): void {
     const q = new URLSearchParams((req.url ?? '').split('?')[1] ?? '')
+    // The card id reaches tmux as a `-t` target (and inside an `if-shell`
+    // command string), so validate it here at the trust boundary — a tailnet
+    // device must not smuggle tmux/shell metacharacters through. Legit ids are
+    // `card-<base36>-<n>`; everything else is refused.
     const cardId = q.get('card') ?? ''
-    const sess = cardId ? this.openTerminal?.(cardId, Number(q.get('cols')), Number(q.get('rows'))) : null
+    const sess = /^[\w-]+$/.test(cardId)
+      ? this.openTerminal?.(cardId, Number(q.get('cols')), Number(q.get('rows')))
+      : null
     if (!sess) {
       ws.close()
       return
@@ -117,7 +134,37 @@ export class RemoteServer {
         // ignore malformed frames
       }
     })
-    ws.on('close', () => sess.kill())
+    // A 'ws' 'error' with no listener is rethrown as an uncaught exception —
+    // handle it (and reclaim the pty) so a dropped phone never crashes main.
+    ws.on('error', () => {
+      try {
+        ws.terminate()
+      } finally {
+        sess.kill()
+      }
+    })
+    // Heartbeat: reap a half-open socket (phone out of range / asleep) so its
+    // tmux client + pty don't leak waiting on a close that never comes.
+    let alive = true
+    ws.on('pong', () => {
+      alive = true
+    })
+    const heartbeat = setInterval(() => {
+      if (!alive) {
+        ws.terminate()
+        return
+      }
+      alive = false
+      try {
+        ws.ping()
+      } catch {
+        // socket already tearing down
+      }
+    }, 30_000)
+    ws.on('close', () => {
+      clearInterval(heartbeat)
+      sess.kill()
+    })
   }
 
   publish(state: RemoteState): void {
@@ -128,7 +175,7 @@ export class RemoteServer {
   /** Push when a NEW thing needs you — and only while the desktop isn't
    *  focused (you'd see it there otherwise). */
   private maybeNotify(state: RemoteState): void {
-    const items = [
+    const items: FreshAsk[] = [
       ...state.approvals.map((a) => ({ id: a.id, name: a.name, kind: 'approval' as const })),
       ...state.questions.map((q) => ({ id: q.id, name: q.name, kind: 'question' as const })),
     ]
@@ -142,36 +189,8 @@ export class RemoteServer {
     }
     if (!fresh.length || !this.push || this.isDesktopFocused?.()) return
 
-    // Title = which canvas + what it wants; body = the actual ask (the tool
-    // call to approve, or the question text). The card title equals the canvas
-    // name under project=dir, so we lean on the canvas name and never repeat it.
-    const names = new Map(state.canvases.map((c) => [c.id, c.name]))
-    const trunc = (s: string, n = 140): string => (s.length > n ? s.slice(0, n - 1) + '…' : s)
-    const canvasOf = (it: { id: string; name: string; kind: 'approval' | 'question' }): string => {
-      const pid =
-        it.kind === 'approval'
-          ? state.approvals.find((a) => a.id === it.id)?.projectId
-          : state.questions.find((q) => q.id === it.id)?.projectId
-      return names.get(pid ?? '') ?? it.name
-    }
-
-    let title: string
-    let body: string
-    if (fresh.length > 1) {
-      const canvases = [...new Set(fresh.map(canvasOf))]
-      title = `${fresh.length} agents need you`
-      body = canvases.join(', ')
-    } else if (fresh[0].kind === 'approval') {
-      const a = state.approvals.find((x) => x.id === fresh[0].id)
-      title = `${canvasOf(fresh[0])} needs approval`
-      body = trunc(a?.detail || 'A tool call is waiting')
-    } else {
-      const q = state.questions.find((x) => x.id === fresh[0].id)
-      const first = q?.questions[0]
-      title = `${canvasOf(fresh[0])} asks`
-      body = trunc(first?.header || first?.question || 'Waiting on your choice')
-    }
-    void this.push.notify({ title, body })
+    const n = composeAskNotification(state, fresh)
+    if (n) void this.push.notify(n)
   }
 
   /** Read a JSON POST body, then run `ok`. Malformed → 400. */
@@ -196,6 +215,22 @@ export class RemoteServer {
     }
     if (req.method === 'GET' && url === '/vapid') {
       res.writeHead(200, { 'content-type': 'text/plain' }).end(this.push?.publicKey ?? '')
+      return
+    }
+    if (req.method === 'GET' && url === '/token') {
+      // Unauthenticated by design: the panel fetches this once, then echoes it
+      // back as x-canvas-token on every mutating request.
+      res.writeHead(200, { 'content-type': 'text/plain' }).end(this.token)
+      return
+    }
+    // Gate the mutating routes behind the session token — mismatch → 404 (the
+    // same opaque refusal HookSink uses) so a probe can't even confirm the route.
+    if (
+      req.method === 'POST' &&
+      MUTATIONS.has(url) &&
+      req.headers['x-canvas-token'] !== this.token
+    ) {
+      res.writeHead(404).end()
       return
     }
     if (req.method === 'POST' && url === '/subscribe') {

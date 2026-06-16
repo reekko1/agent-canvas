@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { MultiProjectSnapshot, Project } from '../shared/types'
 
@@ -11,10 +12,10 @@ export class WorkspaceStore {
 
   constructor(private file: string) {}
 
-  load(): MultiProjectSnapshot | null {
+  async load(): Promise<MultiProjectSnapshot | null> {
     let raw: unknown
     try {
-      raw = JSON.parse(readFileSync(this.file, 'utf8'))
+      raw = JSON.parse(await readFile(this.file, 'utf8'))
     } catch {
       return null // first run / unreadable → empty state (no projects)
     }
@@ -52,10 +53,23 @@ export class WorkspaceStore {
  *  project (or null when there are none), and each project references only
  *  cards that exist. Drops projects missing a dir — a project is a folder. */
 function normalize(snap: MultiProjectSnapshot): MultiProjectSnapshot {
-  const registry = Array.isArray(snap.cards) ? snap.cards : []
+  const registry = (Array.isArray(snap.cards) ? snap.cards : []).filter(
+    (c) =>
+      typeof c.id === 'string' &&
+      c.id.length > 0 &&
+      typeof c.folder === 'string' &&
+      (c.kind === 'agent' || c.kind === 'shell'),
+  )
   const known = new Set(registry.map((c) => c.id))
   const projects: Project[] = (Array.isArray(snap.projects) ? snap.projects : [])
-    .filter((p) => typeof p.dir === 'string' && p.dir.length > 0)
+    .filter(
+      (p) =>
+        typeof p.id === 'string' &&
+        p.id.length > 0 &&
+        typeof p.name === 'string' &&
+        typeof p.dir === 'string' &&
+        p.dir.length > 0,
+    )
     .map((p) => ({
       ...p,
       cardIds: (p.cardIds ?? []).filter((id) => known.has(id)),

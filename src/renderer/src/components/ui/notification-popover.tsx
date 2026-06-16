@@ -3,6 +3,7 @@ import { Bell } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { relativeFromSeconds } from "@shared/time"
 
 export type Notification = {
   id: string
@@ -17,11 +18,9 @@ export type Notification = {
 
 /** "now", "5m", "2h", then a date — activity rows are about recency. */
 function timeAgo(date: Date): string {
-  const s = Math.max(0, (Date.now() - date.getTime()) / 1000)
-  if (s < 60) return "now"
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  if (s < 86400) return `${Math.floor(s / 3600)}h`
-  return date.toLocaleDateString()
+  return relativeFromSeconds(date.getTime() / 1000, {
+    overflow: () => date.toLocaleDateString(),
+  })
 }
 
 interface NotificationItemProps {
@@ -103,13 +102,13 @@ const NotificationList = ({
   </div>
 )
 
-interface NotificationPopoverProps {
+interface NotificationPopoverProps<N extends Notification> {
   /** Controlled when paired with onNotificationsChange — the live-feed mode.
    *  Uncontrolled (internal state) otherwise. */
-  notifications?: Notification[]
-  onNotificationsChange?: (notifications: Notification[]) => void
+  notifications?: N[]
+  onNotificationsChange?: (notifications: N[]) => void
   /** Row click, after mark-as-read — the fly-to-card hook. */
-  onNotificationClick?: (notification: Notification) => void
+  onNotificationClick?: (notification: N) => void
   emptyMessage?: string
   buttonClassName?: string
   popoverClassName?: string
@@ -119,7 +118,7 @@ interface NotificationPopoverProps {
   headerBorderColor?: string
 }
 
-export const NotificationPopover = ({
+export const NotificationPopover = <N extends Notification>({
   notifications: notificationsProp,
   onNotificationsChange,
   onNotificationClick,
@@ -130,17 +129,17 @@ export const NotificationPopover = ({
   hoverBgColor = "hover:bg-muted/60",
   dividerColor = "divide-border/40",
   headerBorderColor = "border-border/40",
-}: NotificationPopoverProps) => {
+}: NotificationPopoverProps<N>) => {
   const [isOpen, setIsOpen] = useState(false)
-  const [internal, setInternal] = useState<Notification[]>(
-    notificationsProp ?? dummyNotifications,
+  const [internal, setInternal] = useState<N[]>(
+    notificationsProp ?? (dummyNotifications as N[]),
   )
   // Controlled when the parent owns the array (the live feed); internal state
   // is only for standalone/demo use, where the list never changes from above.
   const controlled = notificationsProp !== undefined && onNotificationsChange !== undefined
   const notifications = controlled ? notificationsProp : internal
 
-  const update = (updated: Notification[]) => {
+  const update = (updated: N[]) => {
     if (!controlled) setInternal(updated)
     onNotificationsChange?.(updated)
   }
@@ -153,11 +152,14 @@ export const NotificationPopover = ({
     update(notifications.map((n) => ({ ...n, read: true })))
   }
 
+  // NotificationList speaks the base Notification type; re-find the row in our
+  // own N[] so the click callback gets the caller's row subtype back.
   const handleItemClick = (notification: Notification) => {
     update(
       notifications.map((n) => (n.id === notification.id ? { ...n, read: true } : n)),
     )
-    onNotificationClick?.(notification)
+    const row = notifications.find((n) => n.id === notification.id)
+    if (row) onNotificationClick?.(row)
   }
 
   return (

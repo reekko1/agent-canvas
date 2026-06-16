@@ -1,5 +1,6 @@
 import './style.css'
-import type { RemoteState } from '@shared/types'
+import type { AttentionLevel, CardStatus, RemoteState } from '@shared/types'
+import { relativeFromSeconds } from '@shared/time'
 import { openTerminal } from './term'
 
 /// The mobile panel: canvas-led triage. Polls /state every 2s and groups each
@@ -16,7 +17,9 @@ const EMPTY: RemoteState = {
   needsYou: 0,
 }
 
-const COLORS: Record<string, string> = {
+// Mirrors the desktop status palette (index.css :root --status-* tokens) —
+// hand-synced as raw hex because the panel ships standalone (no Tailwind/vars).
+const COLORS: Record<CardStatus, string> = {
   idle: '#807e90',
   running: '#48bfc0',
   waiting: '#92aae3',
@@ -25,7 +28,7 @@ const COLORS: Record<string, string> = {
   blocked: '#fbb636',
   error: '#f33f4c',
 }
-const RANK: Record<string, number> = { blocking: 2, done: 1, none: 0 }
+const RANK: Record<AttentionLevel, number> = { blocking: 2, done: 1, none: 0 }
 
 // The desktop's agent identity is lucide's Bot icon; inline it here (vanilla,
 // no lucide), inheriting the mark's color via currentColor.
@@ -48,16 +51,10 @@ function esc(s: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
-function rel(t: number): string {
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - t))
-  if (s < 60) return 'now'
-  if (s < 3600) return Math.floor(s / 60) + 'm'
-  if (s < 86400) return Math.floor(s / 3600) + 'h'
-  return Math.floor(s / 86400) + 'd'
-}
-const dot = (status: string): string =>
+const rel = (t: number): string => relativeFromSeconds(t)
+const dot = (status: CardStatus): string =>
   `<span class="dot" style="background:${COLORS[status] || '#807e90'}"></span>`
-const wordEl = (status: string): string =>
+const wordEl = (status: CardStatus): string =>
   `<span class="word" style="color:${COLORS[status] || '#807e90'}">${esc(status).toUpperCase()}</span>`
 
 // A card tile mirrors the desktop "window bar": status-tinted chrome (a
@@ -223,8 +220,32 @@ function pick(id: string, q: string, label: string, multi: boolean): void {
   bag[q] = cur
   render(STATE)
 }
-const post = (path: string, body: unknown): Promise<unknown> =>
-  fetch(path, { method: 'POST', body: JSON.stringify(body) }).then(refresh, refresh)
+let TOKEN = ''
+// Fetch the CSRF token once (then cache). Every mutating request echoes it back
+// as x-canvas-token, which the server requires and which forces a CORS preflight.
+const ensureToken = (): Promise<string> =>
+  TOKEN ? Promise.resolve(TOKEN) : fetch('token').then((r) => r.text()).then((t) => (TOKEN = t))
+const post = async (path: string, body: unknown): Promise<void> => {
+  const send = (token: string): Promise<Response> =>
+    fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-canvas-token': token },
+      body: JSON.stringify(body),
+    })
+  try {
+    let res = await send(await ensureToken())
+    // 404/401 = our cached token went stale (the desktop restarted and rotated
+    // its per-process token). Drop it, refetch once, and retry — otherwise an
+    // open panel would silently no-op every tap until reloaded.
+    if (res.status === 404 || res.status === 401) {
+      TOKEN = ''
+      res = await send(await ensureToken())
+    }
+  } catch {
+    // network/offline — refresh() surfaces it
+  }
+  refresh()
+}
 function answer(id: string): void {
   const a: Record<string, string> = {}
   const bag = sel[id] ?? {}
@@ -260,12 +281,28 @@ document.addEventListener('click', (e) => {
   }
 })
 
+/** The /state body is untrusted JSON. Validate its shape before rendering so a
+ *  transient `{}` (served in the window before the first publish) renders an
+ *  empty panel instead of throwing inside render() and masquerading as offline. */
+function isRemoteState(v: unknown): v is RemoteState {
+  if (typeof v !== 'object' || v === null) return false
+  const s = v as Record<string, unknown>
+  return (
+    Array.isArray(s.canvases) &&
+    Array.isArray(s.cards) &&
+    Array.isArray(s.approvals) &&
+    Array.isArray(s.questions) &&
+    Array.isArray(s.feed) &&
+    typeof s.needsYou === 'number'
+  )
+}
+
 function refresh(): void {
   fetch('state')
     .then((r) => r.json())
-    .then((st: RemoteState) => {
+    .then((st: unknown) => {
       $('offline').style.display = 'none'
-      render(st)
+      render(isRemoteState(st) ? st : EMPTY)
     })
     .catch(() => {
       $('offline').style.display = 'inline'
@@ -304,7 +341,11 @@ async function enablePush(): Promise<void> {
       userVisibleOnly: true,
       applicationServerKey: urlB64(key) as BufferSource,
     })
-    await fetch('subscribe', { method: 'POST', body: JSON.stringify(subscription) })
+    await fetch('subscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-canvas-token': await ensureToken() },
+      body: JSON.stringify(subscription),
+    })
     updateEnable()
   } catch (err) {
     console.log(err)
@@ -314,5 +355,6 @@ $('enable').addEventListener('click', () => void enablePush())
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {})
 updateEnable()
+void ensureToken() // pre-warm so the first Allow/Deny tap doesn't wait on it
 refresh()
 setInterval(refresh, 2000)

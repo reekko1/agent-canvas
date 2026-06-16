@@ -63,7 +63,7 @@ interface HeldAsk {
   respond: (body: string | null) => void
   /** The original tool_input — present for question asks, whose answer body
    *  must spread it back so `questions` survives the round-trip. */
-  input?: Record<string, any>
+  input?: Record<string, unknown>
 }
 
 /// The attention spine: owns the sink, the adapter, and the tmux launch path;
@@ -106,6 +106,12 @@ export class Spine {
     })
   }
 
+  /** The single source of truth for a card's tmux session name. The one mapping
+   *  to change at the future ~/.agentcanvas namespace cutover. */
+  private sessionName(cardId: string): string {
+    return `canvas-${cardId}`
+  }
+
   /** How a card's process launches: the tmux client (`new-session -A` creates
    *  or reattaches), running `claude` under the user's login shell inside the
    *  session so it resolves from their real PATH — or, for a plain-shell
@@ -119,7 +125,7 @@ export class Spine {
       TERM: 'xterm-256color',
     }
     const inner = bareShell ? `${shell} -l` : `${shell} -lc ${shellQuote(this.adapter.launchCommand())}`
-    const client = this.tmux.clientCommand(`canvas-${cardId}`, inner, folder, cardId)
+    const client = this.tmux.clientCommand(this.sessionName(cardId), inner, folder, cardId)
     if (client) return { file: client.file, args: client.args, cwd: folder, env }
     return {
       file: shell,
@@ -140,14 +146,14 @@ export class Spine {
    *  would merely *detach* — the agent would keep running headless, exactly
    *  the unsupervised state the canvas exists to prevent. */
   killSession(cardId: string): void {
-    this.tmux.kill(`canvas-${cardId}`)
+    this.tmux.kill(this.sessionName(cardId))
   }
 
   /** Snap a card's session out of scrollback (tmux copy-mode), if it's in
    *  it — the renderer awaits this before the first keystroke after a
    *  wheel-scroll. */
   leaveScrollback(cardId: string): Promise<void> {
-    return this.tmux.cancelCopyMode(`canvas-${cardId}`)
+    return this.tmux.cancelCopyMode(this.sessionName(cardId))
   }
 
   /** The CLI's stored plan for a session — the re-hydration read. */
@@ -157,12 +163,12 @@ export class Spine {
 
   /** The foreground process in a card's pane — feeds the shell card's title. */
   paneCommand(cardId: string): Promise<string | null> {
-    return this.tmux.paneCommand(`canvas-${cardId}`)
+    return this.tmux.paneCommand(this.sessionName(cardId))
   }
 
   /** The card pane's current working directory — feeds the shell card's title. */
   paneCwd(cardId: string): Promise<string | null> {
-    return this.tmux.paneCwd(`canvas-${cardId}`)
+    return this.tmux.paneCwd(this.sessionName(cardId))
   }
 
   /** Answer a held permission ask. Exactly one decision wins; the rest no-op. */
@@ -190,7 +196,7 @@ export class Spine {
    *  One pty per phone connection (not the card's primary pty); killing it just
    *  detaches that client. Null when tmux is unavailable. */
   openTerminal(cardId: string, cols: number, rows: number): TermSession | null {
-    const session = `canvas-${cardId}`
+    const session = this.sessionName(cardId)
     const cmd = this.tmux.attachCommand(session)
     if (!cmd) return null
     const p = pty.spawn(cmd.file, cmd.args, {
@@ -234,7 +240,10 @@ export class Spine {
       this.asks.set(askId, {
         cardId: req.cardId,
         respond: req.respond,
-        input: req.payload.tool_input as Record<string, any>,
+        input:
+          typeof req.payload.tool_input === 'object' && req.payload.tool_input !== null
+            ? (req.payload.tool_input as Record<string, unknown>)
+            : undefined,
       })
       // Nobody to render it (or nothing parseable) → fall through to the
       // terminal's own picker rather than strand the agent.

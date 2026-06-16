@@ -172,6 +172,10 @@ app.whenReady().then(() => {
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
   })
+  // Echo every agent's finished turn into the supervision chat the instant its
+  // Stop hook fires — the orchestrator becomes aware of the fleet, not just
+  // commanded by it.
+  spine.onReply = (cardId, reply) => orchestrator?.notifyAgentReply(cardId, reply)
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
   // download in the background, notify, install on quit. Dev builds have no

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OrchestratorEvent } from '@shared/types'
 
-type Line = { kind: OrchestratorEvent['kind'] | 'you'; text: string }
+type Line = { kind: OrchestratorEvent['kind'] | 'you'; text: string; name?: string }
 
 const TONE: Record<Line['kind'], string> = {
   you: 'text-foreground',
@@ -9,6 +9,7 @@ const TONE: Record<Line['kind'], string> = {
   tool: 'text-muted-foreground',
   result: 'text-emerald-400',
   error: 'text-red-400',
+  agentReply: 'text-cyan-400',
 }
 
 /** Bottom-center chat bar that drives the in-app orchestrator. */
@@ -21,7 +22,7 @@ export function OrchestratorChatBar(): React.JSX.Element {
   useEffect(
     () =>
       window.canvas.onOrchestratorEvent((e) => {
-        setLines((ls) => [...ls, { kind: e.kind, text: e.text }])
+        setLines((ls) => [...ls, { kind: e.kind, text: e.text, name: e.name }])
         if (e.kind === 'result' || e.kind === 'error') setBusy(false)
       }),
     [],
@@ -52,7 +53,15 @@ export function OrchestratorChatBar(): React.JSX.Element {
         >
           {lines.map((l, i) => (
             <div key={i} className={`whitespace-pre-wrap ${TONE[l.kind]}`}>
-              {l.kind === 'you' ? '› ' : l.kind === 'tool' ? '· ' : ''}
+              {l.kind === 'agentReply' ? (
+                <span className="text-cyan-400/70">{`⤷ ${l.name ?? 'agent'}: `}</span>
+              ) : l.kind === 'you' ? (
+                '› '
+              ) : l.kind === 'tool' ? (
+                '· '
+              ) : (
+                ''
+              )}
               {l.text}
             </div>
           ))}

@@ -73,6 +73,9 @@ export class Spine {
   onUpdate?: (cardId: string, event: CardEvent) => void
   onAsk?: (ask: PermissionAskInfo) => void
   onQuestion?: (ask: QuestionAskInfo) => void
+  /** A card just finished a turn, carrying its full final reply — the
+   *  orchestrator echoes it into the supervision chat. */
+  onReply?: (cardId: string, reply: string) => void
 
   /** The remote supervision panel (loopback; exposed via Tailscale Serve). */
   readonly remote = new RemoteServer()
@@ -282,6 +285,7 @@ export class Spine {
       // clipped summary.
       if (req.event === 'Stop' && typeof req.payload.last_assistant_message === 'string') {
         this.replies.set(req.cardId, req.payload.last_assistant_message)
+        this.onReply?.(req.cardId, req.payload.last_assistant_message)
       }
       const event = this.adapter.event(req.event, req.payload)
       if (event) this.onUpdate?.(req.cardId, event)

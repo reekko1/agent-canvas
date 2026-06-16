@@ -29,6 +29,19 @@ export class Orchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
+  /** A supervised agent finished a turn — echo its reply into the chat so the
+   *  orchestrator surface stays aware without being asked "what did it say?".
+   *  This is a one-way notification: it does NOT re-enter the query() loop, so
+   *  there's no feedback cycle. Shells and empty replies are dropped. */
+  notifyAgentReply(cardId: string, reply: string): void {
+    const text = reply.trim()
+    if (!text) return
+    const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+    if (!card || card.kind !== 'agent') return
+    const clipped = text.length > 500 ? `${text.slice(0, 500)}…` : text
+    this.emit({ kind: 'agentReply', name: card.name, text: clipped })
+  }
+
   /** Reply to a dispatched command (called from the renderer via IPC). */
   resolveCommand(id: number, result: OrchestratorCommandResult): void {
     const resolve = this.pending.get(id)

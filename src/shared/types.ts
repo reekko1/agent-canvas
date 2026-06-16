@@ -300,10 +300,15 @@ export interface UpdateStatus {
 
 // MARK: Orchestrator (in-app agent driving the canvas)
 
-/** One streamed line from an orchestrator turn, shown in the chat bar. */
+/** One streamed line from an orchestrator turn, shown in the chat bar.
+ *  `agentReply` is the odd one out: not part of a turn but a supervised
+ *  agent's reply echoed in the instant its Stop hook fires, so the chat stays
+ *  aware of what the fleet is saying without being asked. */
 export interface OrchestratorEvent {
-  kind: 'assistant' | 'tool' | 'result' | 'error'
+  kind: 'assistant' | 'tool' | 'result' | 'error' | 'agentReply'
   text: string
+  /** The agent's display name — set only on `agentReply`. */
+  name?: string
 }
 
 /** A command the orchestrator (main) asks the renderer to execute, by id. */

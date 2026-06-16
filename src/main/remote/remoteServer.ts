@@ -1,5 +1,6 @@
 import http from 'node:http'
 import type { QuestionAnswers, RemoteState } from '../../shared/types'
+import type { PushService } from './push'
 
 /// The remote panel: supervision — and the orbit Allow/Deny + answer-questions —
 /// from any device on your tailnet. `GET /` serves a self-contained page,
@@ -20,8 +21,20 @@ export class RemoteServer {
   /** A held AskUserQuestion declined from the panel. */
   onDecline?: (askId: string) => void
 
+  /** Web-push delivery (set by the spine). Absent → the panel works, just no
+   *  notifications. */
+  push?: PushService
+  /** True when the desktop window is focused — we skip the phone push then,
+   *  since you're already looking at the canvas. */
+  isDesktopFocused?: () => boolean
+
   port = 0
   private stateJSON = '{}'
+  // Actionable ask/question ids already pushed for — so we ping on the NEW one,
+  // not every 2s republish. `primed` suppresses a burst for whatever's pending
+  // at startup.
+  private notified = new Set<string>()
+  private primed = false
 
   start(preferredPort: number | undefined, onReady: (port: number) => void): void {
     const server = http.createServer((req, res) => this.handle(req, res))
@@ -43,6 +56,37 @@ export class RemoteServer {
 
   publish(state: RemoteState): void {
     this.stateJSON = JSON.stringify(state)
+    this.maybeNotify(state)
+  }
+
+  /** Push when a NEW thing needs you — and only while the desktop isn't
+   *  focused (you'd see it there otherwise). */
+  private maybeNotify(state: RemoteState): void {
+    const items = [
+      ...state.approvals.map((a) => ({ id: a.id, name: a.name, kind: 'approval' as const })),
+      ...state.questions.map((q) => ({ id: q.id, name: q.name, kind: 'question' as const })),
+    ]
+    const current = new Set(items.map((i) => i.id))
+    const fresh = items.filter((i) => !this.notified.has(i.id))
+    this.notified = current
+
+    if (!this.primed) {
+      this.primed = true // first snapshot just seeds the set — no startup burst
+      return
+    }
+    if (!fresh.length || !this.push || this.isDesktopFocused?.()) return
+
+    const names = new Map(state.canvases.map((c) => [c.id, c.name]))
+    const lead = fresh[0]
+    const canvas =
+      lead.kind === 'approval'
+        ? names.get(state.approvals.find((a) => a.id === lead.id)?.projectId ?? '')
+        : names.get(state.questions.find((q) => q.id === lead.id)?.projectId ?? '')
+    const body =
+      fresh.length > 1
+        ? `${fresh.length} agents need you`
+        : `${canvas ? canvas + ' · ' : ''}${lead.name} ${lead.kind === 'question' ? 'asks you' : 'needs approval'}`
+    void this.push.notify({ title: 'Agent Canvas', body })
   }
 
   /** Read a JSON POST body, then run `ok`. Malformed → 400. */
@@ -79,6 +123,18 @@ export class RemoteServer {
     }
     if (req.method === 'GET' && url === '/icon.svg') {
       res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(ICON)
+      return
+    }
+    if (req.method === 'GET' && url === '/vapid') {
+      res.writeHead(200, { 'content-type': 'text/plain' }).end(this.push?.publicKey ?? '')
+      return
+    }
+    if (req.method === 'POST' && url === '/subscribe') {
+      this.body(req, res, (o) => {
+        if (typeof o?.endpoint !== 'string') return false
+        this.push?.subscribe(o)
+        return true
+      })
       return
     }
     if (req.method === 'POST' && url === '/decide') {
@@ -169,7 +225,9 @@ const PAGE = `<!doctype html>
           --border:#393744; --blocked:#fbb636; --error:#f33f4c; --done:#76cd98; }
   * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
   body { background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, "Helvetica Neue", sans-serif;
-         padding: 18px 18px calc(28px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto; }
+         padding: calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
+                  calc(28px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+         max-width: 720px; margin: 0 auto; }
   h1 { font-size: 17px; letter-spacing: .02em; display: flex; align-items: center; gap: 10px; }
   h1 .badge { background: var(--blocked); color: #13111c; border-radius: 10px; padding: 1px 9px;
               font-size: 13px; font-weight: 700; display: none; }
@@ -215,10 +273,13 @@ const PAGE = `<!doctype html>
        font-family: ui-monospace, monospace; }
   .empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
   .offline { color: var(--error); font-size: 12px; display: none; margin-left: auto; }
+  #enable { display: none; margin-left: auto; border-color: var(--blocked); color: var(--blocked);
+            padding: 5px 12px; font-size: 12px; }
 </style>
 </head>
 <body>
-<h1>Agent Canvas <span class="badge" id="badge"></span><span class="offline" id="offline">offline</span></h1>
+<h1>Agent Canvas <span class="badge" id="badge"></span><span class="offline" id="offline">offline</span>
+<button id="enable" onclick="enablePush()">Enable alerts</button></h1>
 <div id="canvases"></div>
 <h2>ACTIVITY</h2><div id="feed" class="empty">…</div>
 <script>
@@ -372,7 +433,39 @@ function decline(id) {
   delete sel[id];
   fetch('decline', { method: 'POST', body: JSON.stringify({ id: id }) }).then(refresh, refresh);
 }
+// ---- Push: install-as-PWA then subscribe, gated behind a user tap (iOS) ----
+function pushSupported() {
+  return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+}
+function updateEnable() {
+  var b = document.getElementById('enable');
+  var granted = ('Notification' in window) && Notification.permission === 'granted';
+  b.style.display = (pushSupported() && !granted) ? 'inline-block' : 'none';
+}
+function urlB64(b) {
+  var pad = '='.repeat((4 - b.length % 4) % 4);
+  var s = (b + pad).replace(/-/g, '+').replace(/_/g, '/');
+  var raw = atob(s), out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function enablePush() {
+  if (!pushSupported()) { alert('Add to Home Screen first, then enable alerts.'); return; }
+  navigator.serviceWorker.ready.then(function(reg) {
+    return Notification.requestPermission().then(function(perm) {
+      if (perm !== 'granted') return;
+      return fetch('vapid').then(function(r){ return r.text(); }).then(function(key) {
+        if (!key) { alert('Push not configured.'); return; }
+        return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(key) })
+          .then(function(sub) { return fetch('subscribe', { method: 'POST', body: JSON.stringify(sub) }); })
+          .then(updateEnable);
+      });
+    });
+  }).catch(function(e){ console.log(e); });
+}
+
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});
+updateEnable();
 refresh();
 setInterval(refresh, 2000);
 </script>

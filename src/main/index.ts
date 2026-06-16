@@ -268,6 +268,8 @@ spine.remote.onDecline = (askId) => {
   spine.decide(askId, 'deny')
   send('question-decided', askId)
 }
+// Skip the phone push when you're already at the desktop.
+spine.remote.isDesktopFocused = () => win?.isFocused() ?? false
 ipcMain.on('open-external', (_e, url: string) => {
   if (typeof url === 'string' && url.startsWith('https://')) void shell.openExternal(url)
 })

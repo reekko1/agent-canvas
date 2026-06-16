@@ -6,6 +6,7 @@ import { HookSink, type HookRequest } from './hookSink'
 import { ClaudeAdapter, shellQuote } from './claudeAdapter'
 import { Tmux } from './tmux'
 import { RemoteServer } from '../remote/remoteServer'
+import { PushService } from '../remote/push'
 import type {
   AskDecision,
   CardEvent,
@@ -93,6 +94,7 @@ export class Spine {
       this.adapter.installConfig(SPINE_DIR, port, this.config.token)
       console.log(`[spine] sink ready on 127.0.0.1:${port}`)
     })
+    this.remote.push = new PushService(join(SPINE_DIR, 'push.json'))
     this.remote.start(this.config.remotePort, (port) => {
       this.config.remotePort = port
       saveConfig(this.config)

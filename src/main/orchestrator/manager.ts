@@ -11,7 +11,12 @@
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import type { CommandBus, World } from './contract'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { OrchestratorCommandResult, OrchestratorEvent, RemoteState } from '../../shared/types'
+import type {
+  OrchestratorCommandResult,
+  OrchestratorEvent,
+  PermissionAskInfo,
+  RemoteState,
+} from '../../shared/types'
 
 /** Long agent replies are clipped before they reach the chat / the session. */
 const REPLY_CLIP = 500
@@ -23,6 +28,8 @@ export interface OrchestratorDeps {
   writeToCard: (cardId: string, data: string) => void
   /** A card's last full assistant reply, or null if none captured yet. */
   getReply: (cardId: string) => string | null
+  /** Decide a held permission ask (main-owned — no renderer round-trip). */
+  decideAsk: (askId: string, decision: 'allow' | 'deny') => void
 }
 
 export class Orchestrator {
@@ -87,6 +94,31 @@ export class Orchestrator {
           `[fleet event] Agent "${card.name}" (card ${card.id})${canvas} just finished a turn. Its reply:\n` +
           `"""\n${clipped}\n"""\n` +
           `Act only if the user asked you to coordinate this; otherwise acknowledge briefly and stop.`,
+      },
+      parent_tool_use_id: null,
+      priority: 'next',
+    })
+  }
+
+  /** An agent is blocked on a permission request — the second heartbeat source.
+   *  When autonomous, wake the orchestrator so it can clear the block via
+   *  approve_ask IF the user gave a standing instruction (the system prompt
+   *  forbids acting otherwise). The user still sees the normal permission
+   *  prompt; this is awareness, not a replacement for it. */
+  notifyAsk(ask: PermissionAskInfo): void {
+    if (!this.autonomous) return
+    const card = this.deps.getState()?.cards.find((c) => c.id === ask.cardId)
+    const who = card?.name ?? 'An agent'
+    const canvas = card?.projectName ? ` on canvas "${card.projectName}"` : ''
+    this.enqueue({
+      type: 'user',
+      message: {
+        role: 'user',
+        content:
+          `[fleet event] ${who} (card ${ask.cardId})${canvas} is BLOCKED, asking permission to:\n` +
+          `"""\n${ask.detail}\n"""\n` +
+          `Ask id "${ask.askId}". Clear it with approve_ask only if the user gave you a standing ` +
+          `instruction covering this; otherwise do nothing — the user will decide from the prompt.`,
       },
       parent_tool_use_id: null,
       priority: 'next',
@@ -247,6 +279,14 @@ export class Orchestrator {
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
       const r = await this.dispatch('killCard', { cardId })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? `closed ${card.name}` : 'failed') }
+    },
+
+    approveAsk: async (askId, decision) => {
+      const ask = this.deps.getState()?.approvals.find((a) => a.id === askId)
+      if (!ask) return { ok: false, message: `no pending ask with id ${askId}` }
+      // Main-owned decision — straight to spine.decide, no renderer round-trip.
+      this.deps.decideAsk(askId, decision)
+      return { ok: true, message: `${decision === 'allow' ? 'approved' : 'denied'} ${ask.name}'s request` }
     },
   }
 

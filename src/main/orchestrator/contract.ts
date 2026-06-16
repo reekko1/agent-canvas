@@ -64,4 +64,7 @@ export interface CommandBus {
   renameAgent(cardId: string, name: string): Promise<ActionResult>
   /** Close a card — ends its session and removes it from the canvas. */
   killCard(cardId: string): Promise<ActionResult>
+  /** Allow or deny a permission request an agent is blocked on (askId from
+   *  the world's approvals). */
+  approveAsk(askId: string, decision: 'allow' | 'deny'): Promise<ActionResult>
 }

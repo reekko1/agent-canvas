@@ -160,7 +160,10 @@ app.whenReady().then(() => {
     })
   })
   spine.onUpdate = (cardId, event) => send('card-event', cardId, event)
-  spine.onAsk = (ask) => send('permission-ask', ask)
+  spine.onAsk = (ask) => {
+    send('permission-ask', ask)
+    orchestrator?.notifyAsk(ask) // second heartbeat: wake on blocks, not just turns
+  }
   spine.onQuestion = (ask) => send('question-ask', ask)
   spine.start()
   // The in-app orchestrator: drives the canvas via the Agent SDK. Reads the
@@ -171,6 +174,7 @@ app.whenReady().then(() => {
     getState: () => spine.remote.getLatestState(),
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
+    decideAsk: (askId, decision) => spine.decide(askId, decision),
   })
   // Echo every agent's finished turn into the supervision chat the instant its
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just

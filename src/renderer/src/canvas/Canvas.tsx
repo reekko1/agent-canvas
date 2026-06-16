@@ -329,6 +329,12 @@ export function Canvas() {
         return { title: 'Rename agent', detail: `${titleFor(String(input.cardId))} → ${str(input.name)}` }
       case 'kill_card':
         return { title: `Close ${titleFor(String(input.cardId))}`, detail: 'ends its session — cannot be undone' }
+      case 'approve_ask': {
+        const ask = asks.find((a) => a.askId === String(input.askId))
+        const who = ask ? titleFor(ask.cardId) : 'agent'
+        const verb = str(input.decision) === 'deny' ? 'Deny' : 'Approve'
+        return { title: `${verb} ${who}’s request`, detail: ask?.detail ?? String(input.askId) }
+      }
       case 'focus_canvas':
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
       default:

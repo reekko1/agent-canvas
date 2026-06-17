@@ -300,40 +300,61 @@ export interface UpdateStatus {
 
 // MARK: Orchestrator (in-app agent driving the canvas)
 
-/** How much the orchestrator may do on its own:
- *  - `manual`      — agent replies are echoed, but nothing wakes it.
- *  - `supervising` — it wakes on fleet events; every mutation/approval still
- *                    needs your click at the gate.
- *  - `autopilot`   — it wakes AND auto-allows its own gate AND auto-approves
- *                    every agent permission ask. No clicks. Dangerous: this
- *                    bypasses every confirmation in the app. */
+/** How much the orchestrator may do on its own. Its OWN tools
+ *  (spawn/kill/rename/focus/send/approve_ask) run freely whenever it is awake;
+ *  only `manual` gates them. The supervising/autopilot difference is purely
+ *  about unattended AGENT permission asks.
+ *  - `manual`      — agent replies are echoed, but nothing wakes it, and every
+ *                    orchestrator action needs your click at the gate.
+ *  - `supervising` — it wakes on fleet events and runs its own tools without a
+ *                    click; unattended agent permission asks still wait for a
+ *                    human (it only approves one when you tell it to).
+ *  - `autopilot`   — it wakes AND auto-approves every agent permission ask. No
+ *                    clicks. Dangerous: this bypasses every confirmation. */
 export type OrchestratorMode = 'manual' | 'supervising' | 'autopilot'
 
 /** One streamed line from an orchestrator turn, shown in the chat bar.
  *  `agentReply` is the odd one out: not part of a turn but a supervised
  *  agent's reply echoed in the instant its Stop hook fires. `auto` marks an
- *  action autopilot took without asking (a bypassed confirmation). */
+ *  action autopilot took without asking (a bypassed confirmation); `mode`
+ *  marks a user-driven autonomy-mode switch (a status line, not a turn). */
 export interface OrchestratorEvent {
-  kind: 'assistant' | 'tool' | 'result' | 'error' | 'agentReply' | 'auto'
+  kind: 'assistant' | 'tool' | 'result' | 'error' | 'agentReply' | 'auto' | 'mode'
   text: string
   /** The agent's display name — set only on `agentReply`. */
   name?: string
 }
 
-/** A command the orchestrator (main) asks the renderer to execute, by id. */
-export interface OrchestratorCommand {
-  id: number
-  cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'killCard' | 'confirm'
-  payload: Record<string, unknown>
+/** A command the orchestrator (main) asks the renderer to execute, correlated by
+ *  `id`. Discriminated on `cmd` so each payload is typed at both ends of the IPC
+ *  seam — the producer (`manager.dispatch`) and the renderer's handler. */
+export type OrchestratorCommand =
+  | { id: number; cmd: 'focusCanvas'; payload: { canvasId: string } }
+  | {
+      id: number
+      cmd: 'spawnAgent'
+      payload: { canvasId?: string; folder?: string; prompt?: string; name?: string }
+    }
+  | { id: number; cmd: 'renameAgent'; payload: { cardId: string; name: string } }
+  | { id: number; cmd: 'killCard'; payload: { cardId: string } }
+  | { id: number; cmd: 'confirm'; payload: { toolName: string; input: Record<string, unknown> } }
+
+/** The renderer's reply to a mutation command (focus/spawn/rename/kill). */
+export interface OrchestratorActionResult {
+  ok: boolean
+  message: string
+  /** Set by `spawnAgent` — the id of the newly created card. */
+  cardId?: string
 }
 
-/** The renderer's reply to an OrchestratorCommand. */
-export interface OrchestratorCommandResult {
-  ok?: boolean
-  message?: string
-  cardId?: string
-  allow?: boolean
+/** The renderer's reply to a `confirm` command — the gate decision. */
+export interface OrchestratorConfirmResult {
+  allow: boolean
 }
+
+/** The renderer's reply to an OrchestratorCommand, by id. The shape depends on
+ *  the command: `confirm` yields a gate decision, the mutations an action result. */
+export type OrchestratorCommandResult = OrchestratorActionResult | OrchestratorConfirmResult
 
 export interface CanvasApi {
   /** `folder` (the active project's dir) skips the picker; omit it to prompt. */

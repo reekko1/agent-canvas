@@ -15,6 +15,7 @@ const TONE: Record<Line['kind'], string> = {
   error: 'text-red-400',
   agentReply: 'text-cyan-400',
   auto: 'text-amber-400',
+  mode: 'text-amber-400',
 }
 
 // Click cycles through the three modes; the badge shows the current one.
@@ -119,6 +120,8 @@ export function OrchestratorChatBar({
                 '· '
               ) : l.kind === 'auto' ? (
                 '⚡ '
+              ) : l.kind === 'mode' ? (
+                '⚙ '
               ) : (
                 ''
               )}

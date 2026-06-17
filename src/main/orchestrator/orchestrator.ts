@@ -33,9 +33,6 @@ export interface RunOptions {
   /** Confirm a mutating tool call. Read-only tools never reach here. */
   gate: (toolName: string, input: Record<string, unknown>) => Promise<GateDecision>
   onEvent: (e: OrchestratorEvent) => void
-  /** Receives the session id from the init message (diagnostics; streaming mode
-   *  keeps one live session, so there's no per-turn resume). */
-  onSessionId?: (id: string) => void
 }
 
 /** Drive the persistent orchestrator session, streaming events to `onEvent`.
@@ -74,9 +71,7 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
       canUseTool,
     },
   })) {
-    if (m.type === 'system' && m.subtype === 'init') {
-      opts.onSessionId?.(m.session_id)
-    } else if (m.type === 'assistant') {
+    if (m.type === 'assistant') {
       for (const block of m.message.content) {
         if (block.type === 'text') {
           if (block.text.trim()) onEvent({ kind: 'assistant', text: block.text })

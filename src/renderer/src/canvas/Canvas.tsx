@@ -332,8 +332,8 @@ export function Canvas() {
       case 'approve_ask': {
         const ask = asks.find((a) => a.askId === String(input.askId))
         const who = ask ? titleFor(ask.cardId) : 'agent'
-        const verb = str(input.decision) === 'deny' ? 'Deny' : 'Approve'
-        return { title: `${verb} ${who}’s request`, detail: ask?.detail ?? String(input.askId) }
+        const action = str(input.decision) === 'deny' ? 'Deny' : 'Approve'
+        return { title: `${action} ${who}’s request`, detail: ask?.detail ?? String(input.askId) }
       }
       case 'focus_canvas':
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
@@ -351,10 +351,7 @@ export function Canvas() {
       window.canvas.orchestratorResult(cmd.id, result)
 
     if (cmd.cmd === 'confirm') {
-      const { toolName, input } = cmd.payload as {
-        toolName: string
-        input: Record<string, unknown>
-      }
+      const { toolName, input } = cmd.payload
       // Surface the proposed action as an in-app gate toast; it replies by id.
       const { title, detail } = describeConfirm(toolName, input)
       setOrchConfirm({ id: cmd.id, title, detail })
@@ -362,7 +359,7 @@ export function Canvas() {
     }
 
     if (cmd.cmd === 'focusCanvas') {
-      const canvasId = String(cmd.payload.canvasId ?? '')
+      const { canvasId } = cmd.payload
       const target = proj.projects.find((p) => p.id === canvasId)
       if (!target) {
         reply({ ok: false, message: `no canvas with id ${canvasId}` })
@@ -374,17 +371,14 @@ export function Canvas() {
     }
 
     if (cmd.cmd === 'spawnAgent') {
-      const canvasId = cmd.payload.canvasId ? String(cmd.payload.canvasId) : undefined
+      const canvasId = cmd.payload.canvasId
       const target = canvasId ? proj.projects.find((p) => p.id === canvasId) : proj.active
       if (!target) {
         reply({ ok: false, message: canvasId ? `no canvas with id ${canvasId}` : 'no active canvas' })
         return
       }
-      const name =
-        typeof cmd.payload.name === 'string' && cmd.payload.name.trim()
-          ? cmd.payload.name.trim()
-          : nextAgentName()
-      const prompt = typeof cmd.payload.prompt === 'string' ? cmd.payload.prompt.trim() : ''
+      const name = cmd.payload.name?.trim() || nextAgentName()
+      const prompt = cmd.payload.prompt?.trim() ?? ''
       void (async () => {
         const r = await window.canvas.newCard(target.dir)
         if (!r) {
@@ -407,8 +401,7 @@ export function Canvas() {
     }
 
     if (cmd.cmd === 'renameAgent') {
-      const cardId = String(cmd.payload.cardId ?? '')
-      const name = String(cmd.payload.name ?? '')
+      const { cardId, name } = cmd.payload
       reply(
         renameCard(cardId, name)
           ? { ok: true, message: `renamed to ${name.trim()}` }
@@ -418,7 +411,7 @@ export function Canvas() {
     }
 
     if (cmd.cmd === 'killCard') {
-      const cardId = String(cmd.payload.cardId ?? '')
+      const { cardId } = cmd.payload
       if (!nodesRef.current.some((n) => n.id === cardId && n.type === 'card')) {
         reply({ ok: false, message: `no card with id ${cardId}` })
         return

@@ -12,7 +12,10 @@ import { runOrchestrator, type GateDecision } from './orchestrator'
 import type { CommandBus, World } from './contract'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
+  OrchestratorActionResult,
+  OrchestratorCommand,
   OrchestratorCommandResult,
+  OrchestratorConfirmResult,
   OrchestratorEvent,
   OrchestratorMode,
   PermissionAskInfo,
@@ -21,6 +24,12 @@ import type {
 
 /** Long agent replies are clipped before they reach the chat / the session. */
 const REPLY_CLIP = 500
+
+/** The reply shape the renderer sends back for a given command: `confirm` is a
+ *  gate decision, every mutation an action result. */
+type ResultFor<C extends OrchestratorCommand['cmd']> = C extends 'confirm'
+  ? OrchestratorConfirmResult
+  : OrchestratorActionResult
 
 export interface OrchestratorDeps {
   send: (channel: string, ...args: unknown[]) => void
@@ -36,9 +45,6 @@ export interface OrchestratorDeps {
 export class Orchestrator {
   private readonly pending = new Map<number, (r: OrchestratorCommandResult) => void>()
   private nextId = 1
-  /** Orchestrator session id from the init message — diagnostics only; the live
-   *  streaming session is the conversation, so there's no per-turn resume. */
-  private sessionId: string | null = null
 
   // --- Streaming-input session state ---------------------------------------
   /** Messages waiting to be yielded into the live session, in arrival order. */
@@ -62,9 +68,9 @@ export class Orchestrator {
     const was = this.mode
     this.mode = mode
     if (mode === 'autopilot') {
-      this.emit({ kind: 'auto', text: 'autopilot engaged — all confirmations bypassed' })
+      this.emit({ kind: 'mode', text: 'autopilot engaged — all confirmations bypassed' })
     } else if (was === 'autopilot') {
-      this.emit({ kind: 'tool', text: `autopilot off — now ${mode}` })
+      this.emit({ kind: 'mode', text: `autopilot off — now ${mode}` })
     }
   }
 
@@ -89,7 +95,7 @@ export class Orchestrator {
   notifyAgentReply(cardId: string, reply: string): void {
     const text = reply.trim()
     if (!text) return
-    const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+    const card = this.findCard(cardId)
     if (!card || card.kind !== 'agent') return
     const clipped = text.length > REPLY_CLIP ? `${text.slice(0, REPLY_CLIP)}…` : text
     this.emit({ kind: 'agentReply', name: card.name, text: clipped })
@@ -116,7 +122,7 @@ export class Orchestrator {
    *  prompt; this is awareness, not a replacement for it. */
   notifyAsk(ask: PermissionAskInfo): void {
     if (this.mode === 'manual') return
-    const card = this.deps.getState()?.cards.find((c) => c.id === ask.cardId)
+    const card = this.findCard(ask.cardId)
     const who = card?.name ?? 'An agent'
     // Autopilot clears the block immediately — no wake, no model, no click.
     if (this.mode === 'autopilot') {
@@ -179,9 +185,6 @@ export class Orchestrator {
         input: this.input(),
         gate: this.gate,
         onEvent: (e) => this.emit(e),
-        onSessionId: (id) => {
-          this.sessionId = id
-        },
       })
     } catch (e) {
       this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
@@ -206,18 +209,29 @@ export class Orchestrator {
     }
   }
 
-  private dispatch(
-    cmd: 'focusCanvas' | 'spawnAgent' | 'renameAgent' | 'killCard' | 'confirm',
-    payload: Record<string, unknown>,
+  /** The card with this id in the latest published state, or undefined. */
+  private findCard(id: string): RemoteState['cards'][number] | undefined {
+    return this.deps.getState()?.cards.find((c) => c.id === id)
+  }
+
+  private dispatch<C extends OrchestratorCommand['cmd']>(
+    cmd: C,
+    payload: Extract<OrchestratorCommand, { cmd: C }>['payload'],
     timeoutMs = 30_000,
-  ): Promise<OrchestratorCommandResult> {
+  ): Promise<ResultFor<C>> {
     const id = this.nextId++
-    this.deps.send('orchestrator-command', { id, cmd, payload })
-    return new Promise<OrchestratorCommandResult>((resolve) => {
-      this.pending.set(id, resolve)
-      // The renderer might never reply (window gone) — don't wedge the turn.
+    this.deps.send('orchestrator-command', { id, cmd, payload } as OrchestratorCommand)
+    return new Promise<ResultFor<C>>((resolve) => {
+      this.pending.set(id, resolve as (r: OrchestratorCommandResult) => void)
+      // The renderer might never reply (window gone) — don't wedge the turn. A
+      // missing confirm reply denies; a missing mutation reply reports failure.
       setTimeout(() => {
-        if (this.pending.delete(id)) resolve({ ok: false, message: 'no response from the app' })
+        if (!this.pending.delete(id)) return
+        resolve(
+          (cmd === 'confirm'
+            ? { allow: false }
+            : { ok: false, message: 'no response from the app' }) as ResultFor<C>,
+        )
       }, timeoutMs)
     })
   }
@@ -264,7 +278,7 @@ export class Orchestrator {
     },
 
     sendToAgent: async (cardId, message) => {
-      const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+      const card = this.findCard(cardId)
       if (!card) return { ok: false, message: `no agent with id ${cardId}` }
       if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
       // Keystroke injection into the agent's terminal; Enter (\r) submits the
@@ -277,7 +291,7 @@ export class Orchestrator {
     },
 
     getAgentReply: async (cardId) => {
-      const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+      const card = this.findCard(cardId)
       if (!card) return { ok: false, message: `no agent with id ${cardId}` }
       const reply = this.deps.getReply(cardId)
       if (!reply) return { ok: true, message: `${card.name} hasn't finished a turn yet — no reply captured` }
@@ -290,7 +304,7 @@ export class Orchestrator {
     },
 
     killCard: async (cardId) => {
-      const card = this.deps.getState()?.cards.find((c) => c.id === cardId)
+      const card = this.findCard(cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
       const r = await this.dispatch('killCard', { cardId })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? `closed ${card.name}` : 'failed') }

@@ -3,6 +3,7 @@
 // to the renderer. The seeded world mimics two canvases with a blocked agent.
 import type {
   ActionResult,
+  AgentReplyResult,
   CommandBus,
   SpawnAgentInput,
   SpawnResult,
@@ -66,7 +67,7 @@ export function makeStubBus(): CommandBus {
       return { ok: true, message: `sent to ${card.name}: "${message}"` }
     },
 
-    async getAgentReply(cardId: string): Promise<{ ok: boolean; reply?: string; message: string }> {
+    async getAgentReply(cardId: string): Promise<AgentReplyResult> {
       const card = world.cards.find((c) => c.id === cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
       return {

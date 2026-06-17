@@ -44,6 +44,12 @@ export interface SpawnResult extends ActionResult {
   cardId?: string
 }
 
+/** A get_agent_reply result — an ActionResult that also carries the reply text
+ *  when the agent has finished a turn (absent if it hasn't). */
+export interface AgentReplyResult extends ActionResult {
+  reply?: string
+}
+
 export interface SpawnAgentInput {
   canvasId?: string
   folder?: string
@@ -59,7 +65,7 @@ export interface CommandBus {
   /** Deliver a message (instruction / follow-up) to a running agent. */
   sendToAgent(cardId: string, message: string): Promise<ActionResult>
   /** The agent's most recent full reply (from the last turn it finished). */
-  getAgentReply(cardId: string): Promise<{ ok: boolean; reply?: string; message: string }>
+  getAgentReply(cardId: string): Promise<AgentReplyResult>
   /** Rename an agent card. */
   renameAgent(cardId: string, name: string): Promise<ActionResult>
   /** Close a card — ends its session and removes it from the canvas. */

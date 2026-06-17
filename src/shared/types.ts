@@ -300,12 +300,21 @@ export interface UpdateStatus {
 
 // MARK: Orchestrator (in-app agent driving the canvas)
 
+/** How much the orchestrator may do on its own:
+ *  - `manual`      — agent replies are echoed, but nothing wakes it.
+ *  - `supervising` — it wakes on fleet events; every mutation/approval still
+ *                    needs your click at the gate.
+ *  - `autopilot`   — it wakes AND auto-allows its own gate AND auto-approves
+ *                    every agent permission ask. No clicks. Dangerous: this
+ *                    bypasses every confirmation in the app. */
+export type OrchestratorMode = 'manual' | 'supervising' | 'autopilot'
+
 /** One streamed line from an orchestrator turn, shown in the chat bar.
  *  `agentReply` is the odd one out: not part of a turn but a supervised
- *  agent's reply echoed in the instant its Stop hook fires, so the chat stays
- *  aware of what the fleet is saying without being asked. */
+ *  agent's reply echoed in the instant its Stop hook fires. `auto` marks an
+ *  action autopilot took without asking (a bypassed confirmation). */
 export interface OrchestratorEvent {
-  kind: 'assistant' | 'tool' | 'result' | 'error' | 'agentReply'
+  kind: 'assistant' | 'tool' | 'result' | 'error' | 'agentReply' | 'auto'
   text: string
   /** The agent's display name — set only on `agentReply`. */
   name?: string
@@ -418,7 +427,6 @@ export interface CanvasApi {
   onOrchestratorCommand(cb: (cmd: OrchestratorCommand) => void): () => void
   /** Reply to an OrchestratorCommand by id. */
   orchestratorResult(id: number, result: OrchestratorCommandResult): void
-  /** Toggle autonomous supervision — when on, an agent finishing a turn wakes
-   *  the orchestrator; when off, replies are only echoed. */
-  setOrchestratorAutonomous(on: boolean): void
+  /** Set how autonomous the orchestrator is (see OrchestratorMode). */
+  setOrchestratorMode(mode: OrchestratorMode): void
 }

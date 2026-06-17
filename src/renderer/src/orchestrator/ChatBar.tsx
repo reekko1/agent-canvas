@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OrchestratorEvent } from '@shared/types'
+import type { OrchestratorEvent, OrchestratorMode } from '@shared/types'
 import {
   OrchestratorConfirmToast,
   type OrchestratorConfirm,
@@ -14,6 +14,29 @@ const TONE: Record<Line['kind'], string> = {
   result: 'text-emerald-400',
   error: 'text-red-400',
   agentReply: 'text-cyan-400',
+  auto: 'text-amber-400',
+}
+
+// Click cycles through the three modes; the badge shows the current one.
+const MODE_ORDER: OrchestratorMode[] = ['manual', 'supervising', 'autopilot']
+const MODE_BADGE: Record<OrchestratorMode, { label: string; cls: string; title: string }> = {
+  manual: {
+    label: '○ manual',
+    cls: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+    title: 'Manual — agent replies are echoed but never wake the orchestrator. Click to supervise.',
+  },
+  supervising: {
+    label: '◉ supervising',
+    cls: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25',
+    title:
+      'Supervising — agents wake the orchestrator when they finish or block; every action still needs your click. Click to engage autopilot.',
+  },
+  autopilot: {
+    label: '⚡ autopilot',
+    cls: 'bg-red-500/25 text-red-300 ring-1 ring-red-500/60 hover:bg-red-500/35',
+    title:
+      'AUTOPILOT — bypasses every confirmation: the orchestrator auto-allows its own actions and auto-approves every agent permission ask. Click to return to manual.',
+  },
 }
 
 /** Bottom-center chat bar that drives the in-app orchestrator. The orchestrator's
@@ -29,15 +52,14 @@ export function OrchestratorChatBar({
   const [lines, setLines] = useState<Line[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  // When on, an agent finishing a turn wakes the orchestrator; when off, its
-  // reply is only echoed into the chat. Defaults to on (main mirrors this).
-  const [autonomous, setAutonomous] = useState(true)
+  // How autonomous the orchestrator is; defaults to supervising (main mirrors).
+  const [mode, setMode] = useState<OrchestratorMode>('supervising')
   const logRef = useRef<HTMLDivElement>(null)
 
-  function toggleAutonomous(): void {
-    setAutonomous((on) => {
-      const next = !on
-      window.canvas.setOrchestratorAutonomous(next)
+  function cycleMode(): void {
+    setMode((m) => {
+      const next = MODE_ORDER[(MODE_ORDER.indexOf(m) + 1) % MODE_ORDER.length]
+      window.canvas.setOrchestratorMode(next)
       return next
     })
   }
@@ -94,6 +116,8 @@ export function OrchestratorChatBar({
                 '› '
               ) : l.kind === 'tool' ? (
                 '· '
+              ) : l.kind === 'auto' ? (
+                '⚡ '
               ) : (
                 ''
               )}
@@ -115,19 +139,11 @@ export function OrchestratorChatBar({
         />
         <button
           type="button"
-          onClick={toggleAutonomous}
-          title={
-            autonomous
-              ? 'Supervising — agents waking the orchestrator when they finish. Click to make it manual.'
-              : 'Manual — agent replies are echoed but never wake the orchestrator. Click to supervise.'
-          }
-          className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] transition-colors ${
-            autonomous
-              ? 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25'
-              : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'
-          }`}
+          onClick={cycleMode}
+          title={MODE_BADGE[mode].title}
+          className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] transition-colors ${MODE_BADGE[mode].cls}`}
         >
-          {autonomous ? '◉ supervising' : '○ manual'}
+          {MODE_BADGE[mode].label}
         </button>
       </div>
     </div>

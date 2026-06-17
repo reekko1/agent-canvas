@@ -16,6 +16,7 @@ import type {
   GitChange,
   MultiProjectSnapshot,
   OrchestratorCommandResult,
+  OrchestratorMode,
   QuestionAnswers,
   RemoteState,
   UpdateStatus,
@@ -174,7 +175,10 @@ app.whenReady().then(() => {
     getState: () => spine.remote.getLatestState(),
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
-    decideAsk: (askId, decision) => spine.decide(askId, decision),
+    decideAsk: (askId, decision) => {
+      spine.decide(askId, decision)
+      send('ask-decided', askId) // clear the renderer's toast (as the phone path does)
+    },
   })
   // Echo every agent's finished turn into the supervision chat the instant its
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just
@@ -329,9 +333,8 @@ ipcMain.on('orchestrator-prompt', (_e, prompt: string) => void orchestrator?.run
 ipcMain.on('orchestrator-result', (_e, id: number, result: OrchestratorCommandResult) =>
   orchestrator?.resolveCommand(id, result),
 )
-// Toggle autonomous supervision — whether an agent's finished turn wakes the
-// orchestrator (vs. echo-only). Lets the user cap autonomous spend.
-ipcMain.on('orchestrator-autonomous', (_e, on: boolean) => orchestrator?.setAutonomous(!!on))
+// Set the orchestrator's autonomy mode (manual / supervising / autopilot).
+ipcMain.on('orchestrator-mode', (_e, mode: OrchestratorMode) => orchestrator?.setMode(mode))
 // Queue an initial prompt for a not-yet-spawned card (set just before mount).
 ipcMain.on('set-initial-prompt', (_e, cardId: string, prompt: string) => {
   if (typeof cardId === 'string' && typeof prompt === 'string' && prompt) {

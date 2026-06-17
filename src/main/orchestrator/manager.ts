@@ -14,6 +14,7 @@ import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
   OrchestratorCommandResult,
   OrchestratorEvent,
+  OrchestratorMode,
   PermissionAskInfo,
   RemoteState,
 } from '../../shared/types'
@@ -48,15 +49,23 @@ export class Orchestrator {
   private sessionActive = false
   /** App is tearing down — the input generator should end and not restart. */
   private disposed = false
-  /** When true, an agent finishing a turn wakes the orchestrator (autonomous
-   *  supervision). When false, replies are only echoed to the chat. */
-  private autonomous = true
+  /** How autonomous the orchestrator is. See OrchestratorMode. Default to the
+   *  supervised middle: it wakes on events but every action needs a click. */
+  private mode: OrchestratorMode = 'supervising'
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  /** Toggle whether agent reports wake the orchestrator. Off = echo only. */
-  setAutonomous(on: boolean): void {
-    this.autonomous = on
+  /** Switch autonomy mode. Entering autopilot is loud — it bypasses every
+   *  confirmation — so announce both edges in the chat log. */
+  setMode(mode: OrchestratorMode): void {
+    if (mode === this.mode) return
+    const was = this.mode
+    this.mode = mode
+    if (mode === 'autopilot') {
+      this.emit({ kind: 'auto', text: 'autopilot engaged — all confirmations bypassed' })
+    } else if (was === 'autopilot') {
+      this.emit({ kind: 'tool', text: `autopilot off — now ${mode}` })
+    }
   }
 
   /** A chat prompt from the user — highest priority, processed before any
@@ -84,7 +93,7 @@ export class Orchestrator {
     if (!card || card.kind !== 'agent') return
     const clipped = text.length > REPLY_CLIP ? `${text.slice(0, REPLY_CLIP)}…` : text
     this.emit({ kind: 'agentReply', name: card.name, text: clipped })
-    if (!this.autonomous) return
+    if (this.mode === 'manual') return
     const canvas = card.projectName ? ` on canvas "${card.projectName}"` : ''
     this.enqueue({
       type: 'user',
@@ -106,9 +115,15 @@ export class Orchestrator {
    *  forbids acting otherwise). The user still sees the normal permission
    *  prompt; this is awareness, not a replacement for it. */
   notifyAsk(ask: PermissionAskInfo): void {
-    if (!this.autonomous) return
+    if (this.mode === 'manual') return
     const card = this.deps.getState()?.cards.find((c) => c.id === ask.cardId)
     const who = card?.name ?? 'An agent'
+    // Autopilot clears the block immediately — no wake, no model, no click.
+    if (this.mode === 'autopilot') {
+      this.deps.decideAsk(ask.askId, 'allow')
+      this.emit({ kind: 'auto', text: `auto-approved ${who}: ${ask.detail}` })
+      return
+    }
     const canvas = card?.projectName ? ` on canvas "${card.projectName}"` : ''
     this.enqueue({
       type: 'user',
@@ -294,6 +309,9 @@ export class Orchestrator {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<GateDecision> => {
+    // Autopilot bypasses the gate — the tool_use event already shows the action
+    // in the chat, and the loud autopilot badge tells the user clicks are off.
+    if (this.mode === 'autopilot') return { allow: true }
     // A human decides this one — give it minutes, not the 30s machine round-trip.
     const r = await this.dispatch('confirm', { toolName, input }, 5 * 60_000)
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }

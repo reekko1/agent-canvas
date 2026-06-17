@@ -90,9 +90,16 @@ export class RemoteServer {
       if ((req.url ?? '').split('?')[0] !== '/term') return socket.destroy()
       wss.handleUpgrade(req, socket, head, (ws) => this.handleTerm(req, ws))
     })
+    // Same stable-identity contract as the hook sink: a `tailscale serve` route
+    // is pinned to this port across restarts, so retry the held port through a
+    // dying old process (e.g. a dev hot-restart) before conceding to ephemeral.
+    let retriesLeft = 20 // ~10s at 500ms
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && preferredPort) {
-        console.log(`[remote] port ${preferredPort} taken — falling back to ephemeral`)
+      if (err.code === 'EADDRINUSE' && preferredPort && retriesLeft > 0) {
+        retriesLeft--
+        setTimeout(() => server.listen(preferredPort!, '127.0.0.1'), 500)
+      } else if (err.code === 'EADDRINUSE' && preferredPort) {
+        console.log(`[remote] port ${preferredPort} stuck after retries — falling back to ephemeral`)
         preferredPort = undefined
         server.listen(0, '127.0.0.1')
       } else {

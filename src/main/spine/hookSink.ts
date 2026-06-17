@@ -21,13 +21,23 @@ export class HookSink {
   constructor(readonly token: string) {}
 
   /** Bind the previous launch's port when possible (stable spine identity —
-   *  tmux sessions outlive the app and their hooks must keep landing here);
-   *  fall back to ephemeral if it's taken. */
+   *  tmux sessions outlive the app and read their hook URL once at launch, so
+   *  their hooks must keep landing on the SAME port). On restart the dying old
+   *  process can still hold the port for a moment (most visibly on a dev
+   *  hot-restart, where the new process overlaps the old) — so retry the same
+   *  port for a few seconds before conceding. Falling straight to an ephemeral
+   *  port would strand every surviving agent on a dead URL (ECONNREFUSED), the
+   *  exact failure this identity exists to prevent. Ephemeral is the last
+   *  resort, only once the preferred port is truly unavailable. */
   start(preferredPort: number | undefined, onReady: (port: number) => void): void {
     const server = http.createServer((req, res) => this.handle(req, res))
+    let retriesLeft = 20 // ~10s at 500ms — covers a slow quit / dev restart overlap
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && preferredPort) {
-        console.log(`[sink] port ${preferredPort} taken — falling back to ephemeral`)
+      if (err.code === 'EADDRINUSE' && preferredPort && retriesLeft > 0) {
+        retriesLeft--
+        setTimeout(() => server.listen(preferredPort!, '127.0.0.1'), 500)
+      } else if (err.code === 'EADDRINUSE' && preferredPort) {
+        console.log(`[sink] port ${preferredPort} stuck after retries — falling back to ephemeral`)
         preferredPort = undefined
         server.listen(0, '127.0.0.1')
       } else {

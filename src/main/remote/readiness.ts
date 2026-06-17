@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { AppReadiness, RemoteReadiness } from '../../shared/types'
 
 /// Environment probe for the remote-access setup: is the tailscale CLI on
@@ -83,11 +84,41 @@ function probeClaude(): Promise<boolean> {
   })
 }
 
+/** Is the host signed into Claude, so the orchestrator's Agent SDK session can
+ *  authenticate? True if an OAuth token is exported, or a stored `claude login`
+ *  session exists — the creds file (Linux/Windows), else the macOS Keychain item.
+ *  We only test EXISTENCE (no `-g`/`-w`), so this never triggers a Keychain
+ *  access prompt. A stray ANTHROPIC_API_KEY does NOT count: the orchestrator
+ *  deletes it to force the subscription path. */
+function probeOrchestratorAuth(): Promise<boolean> {
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return Promise.resolve(true)
+  try {
+    accessSync(join(homedir(), '.claude', '.credentials.json'), constants.R_OK)
+    return Promise.resolve(true)
+  } catch {
+    /* no creds file — fall through to the macOS Keychain */
+  }
+  if (process.platform !== 'darwin') return Promise.resolve(false)
+  return new Promise((resolve) => {
+    execFile(
+      'security',
+      ['find-generic-password', '-s', 'Claude Code-credentials'],
+      { timeout: 5000 },
+      (err) => resolve(!err),
+    )
+  })
+}
+
 export async function checkAppReadiness(): Promise<AppReadiness> {
+  const [claudeFound, orchestratorAuthed] = await Promise.all([
+    probeClaude(),
+    probeOrchestratorAuth(),
+  ])
   return {
-    claudeFound: await probeClaude(),
+    claudeFound,
     tmuxFound: executableAt(TMUX_PATHS),
     brewFound: executableAt(BREW_PATHS),
+    orchestratorAuthed,
   }
 }
 

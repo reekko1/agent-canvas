@@ -272,6 +272,10 @@ export interface AppReadiness {
   claudeFound: boolean
   tmuxFound: boolean
   brewFound: boolean
+  /** The host is signed into Claude (an OAuth token is exported, or a stored
+   *  `claude login` session exists) — the orchestrator reuses it. Optional: the
+   *  canvas and its cards work without it. */
+  orchestratorAuthed: boolean
 }
 
 /// Is the remote panel reachable over the tailnet? (Port of the Swift

@@ -41,11 +41,13 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
   const { bus, input, gate, onEvent } = opts
 
   // Subscription auth: a stray ANTHROPIC_API_KEY outranks CLAUDE_CODE_OAUTH_TOKEN
-  // and would silently bill pay-as-you-go. Force the OAuth (subscription) path.
+  // and would silently bill pay-as-you-go. Force the subscription path by dropping
+  // it. With the key gone the SDK uses CLAUDE_CODE_OAUTH_TOKEN if exported, else
+  // the host's stored `claude login` session (Keychain / ~/.claude creds) — proven
+  // to auth with apiKeySource:"none". So no token export is required when the user
+  // is signed into Claude Code; SetupGate nudges anyone who isn't. If neither
+  // exists the SDK throws, surfaced to the chat as an error event.
   delete process.env.ANTHROPIC_API_KEY
-  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    throw new Error('CLAUDE_CODE_OAUTH_TOKEN not set — run `claude setup-token` and export it')
-  }
 
   const canUseTool = async (
     toolName: string,

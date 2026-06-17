@@ -1,7 +1,7 @@
 // Standalone CLI to sanity-check the orchestrator ↔ MCP ↔ CommandBus wiring,
 // against the in-memory stub world, with a stdin y/N confirm gate. No Electron.
 //
-//   export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…   (from `claude setup-token`)
+//   # Auths off your `claude login` session; export CLAUDE_CODE_OAUTH_TOKEN to override.
 //   npm run orchestrator:harness -- "what canvases exist? then switch to beta-web"
 import * as readline from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'

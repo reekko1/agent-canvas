@@ -27,16 +27,32 @@ function CommandChip({ command }: { command: string }) {
   )
 }
 
-/// The hard gate: the canvas is unusable until `claude` and `tmux` exist.
-/// No close button, no Esc — the only way through is reality. Steps complete
+/// Setup gate, two tiers. `claude` and `tmux` are a HARD block — the canvas is
+/// unusable without them, no close button, no Esc, the only way through is
+/// reality. Being signed into Claude is a SOFT, skippable step (the orchestrator
+/// needs it; the canvas doesn't), shown over a working canvas. Steps complete
 /// themselves: the gate re-probes every few seconds and on window focus, so
-/// running the install in Terminal and switching back dissolves the step
-/// (that IS the feedback — no "verify" button). Hidden until the first probe
-/// answers, so a ready machine never sees a flash.
+/// running an install — or signing into `claude` — in Terminal and switching
+/// back dissolves the step (that IS the feedback — no "verify" button). Hidden
+/// until the first probe answers, so a ready machine never sees a flash.
 export function SetupGate() {
   const [readiness, setReadiness] = useState<AppReadiness | null>(null)
+  // The auth step is optional, so it's dismissible — unlike the claude/tmux
+  // gate. Session-scoped: skipping hides it now but it returns next launch if
+  // still unsigned-in, which is the only way back (placement is onboarding-only).
+  const [authDismissed, setAuthDismissed] = useState(false)
 
-  const blocked = readiness !== null && (!readiness.claudeFound || !readiness.tmuxFound)
+  // claude/tmux are a HARD gate — the canvas can't function without them. Being
+  // signed into Claude is a SOFT prompt — only the orchestrator needs it, so it
+  // shows over a working canvas and can be skipped.
+  const hardBlocked = readiness !== null && (!readiness.claudeFound || !readiness.tmuxFound)
+  const needsAuth =
+    readiness !== null &&
+    readiness.claudeFound &&
+    readiness.tmuxFound &&
+    !readiness.orchestratorAuthed &&
+    !authDismissed
+  const show = hardBlocked || needsAuth
 
   useEffect(() => {
     let live = true
@@ -107,13 +123,37 @@ export function SetupGate() {
         </div>
       ),
     },
+    {
+      step: 3,
+      title: 'Connect your Claude account',
+      description: 'Powers the orchestrator — optional',
+      content: (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            The <span className="font-medium text-foreground">orchestrator</span> — the chat bar
+            that drives your whole fleet — runs on your Claude subscription. Sign in once and it
+            just works. The canvas itself doesn&apos;t need this, so you can skip it.
+          </p>
+          <CommandChip command="claude" />
+          <p className="text-xs text-muted-foreground">
+            Run <span className="font-mono">claude</span> once and sign in — you can close it right
+            after. This step completes itself the moment you&apos;re signed in.
+          </p>
+          <Button variant="tertiary" onClick={() => setAuthDismissed(true)}>
+            Skip for now
+          </Button>
+        </div>
+      ),
+    },
   ]
 
+  // claude → tmux → auth. Index 2 lands on the auth step once both tools exist;
+  // when authed too, `show` is false so the modal is gone regardless.
   const currentStep = !readiness?.claudeFound ? 0 : !readiness.tmuxFound ? 1 : 2
 
   return (
     <AnimatePresence>
-      {blocked && (
+      {show && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

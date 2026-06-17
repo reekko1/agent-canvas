@@ -72,9 +72,13 @@ const MODE_BADGE: Record<OrchestratorMode, { label: string; cls: string; title: 
 export function OrchestratorChatBar({
   confirm,
   onConfirmDecide,
+  onSpeakingChange,
 }: {
   confirm: OrchestratorConfirm | null
   onConfirmDecide: (allow: boolean) => void
+  /** Fires when the orchestrator starts/stops speaking aloud — drives the
+   *  app-wide voice glow (rendered by Canvas). */
+  onSpeakingChange?: (speaking: boolean) => void
 }): React.JSX.Element {
   const [input, setInput] = useState('')
   // It's mid-turn (calling tools) — the pill pulses instead of listing them.
@@ -189,6 +193,12 @@ export function OrchestratorChatBar({
   // input, submit the finished utterance, and bind hold-⌥ as push-to-talk.
   useEffect(() => {
     player.current = new TtsPlayer()
+    // Drive the app-wide voice glow: on/off lifts to Canvas; the live loudness
+    // is written to a CSS var each frame (no React re-render in the hot path).
+    player.current.listen(
+      (active) => onSpeakingChange?.(active),
+      (level) => document.documentElement.style.setProperty('--voice-level', level.toFixed(3)),
+    )
     void window.canvas.voiceAvailable().then((ok) => {
       voiceOkRef.current = ok
       setVoiceOk(ok)

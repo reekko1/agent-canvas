@@ -10,6 +10,15 @@
 const CAPTURE_RATE = 16000
 const PLAYBACK_RATE = 24000
 
+// Voice-reactive glow tuning. The analyser RMS of 16-bit speech sits around
+// 0.05–0.2, so GAIN lifts it toward a ~1 peak; RELEASE is the per-frame decay
+// (fast attack, slow release — an audio-meter envelope, so the glow swells on
+// syllables and eases down instead of strobing); FLOOR keeps it from going dark
+// mid-sentence during brief quiet spots.
+const LEVEL_GAIN = 5
+const LEVEL_RELEASE = 0.9
+const LEVEL_FLOOR = 0.3
+
 // The capture worklet, inlined as a Blob URL so there's no separate asset to
 // bundle across dev and packaged builds. It buffers ~100 ms of float samples,
 // converts to int16, and posts the raw bytes back to the main thread.
@@ -88,14 +97,37 @@ export class TtsPlayer {
   // One reused context for the bar's lifetime — Chromium caps concurrent
   // AudioContexts, so reset() stops the live sources rather than churning contexts.
   private ctx: AudioContext | null = null
+  // Sources feed an analyser (→ destination) so we can read playback loudness and
+  // drive the voice-reactive edge glow off what's actually being heard.
+  private analyser: AnalyserNode | null = null
+  private wave: Float32Array<ArrayBuffer> | null = null
   /** Sources still scheduled or playing, so a barge-in can stop them all. */
   private readonly live = new Set<AudioBufferSourceNode>()
   /** The Web Audio time at which the next chunk should start, so back-to-back
    *  chunks play seamlessly instead of overlapping or gapping. */
   private next = 0
+  /** Smoothed 0..1 loudness driving the glow; the rAF id while it's running. */
+  private level = 0
+  private raf = 0
+  private speaking = false
+  private onActive?: (active: boolean) => void
+  private onLevel?: (level: number) => void
+
+  /** Register glow hooks: `onActive` toggles the edge glow on/off when speech
+   *  starts/ends; `onLevel` fires every frame with the live 0..1 loudness. */
+  listen(onActive: (active: boolean) => void, onLevel: (level: number) => void): void {
+    this.onActive = onActive
+    this.onLevel = onLevel
+  }
 
   private ensure(): AudioContext {
-    if (!this.ctx) this.ctx = new AudioContext({ sampleRate: PLAYBACK_RATE })
+    if (!this.ctx) {
+      this.ctx = new AudioContext({ sampleRate: PLAYBACK_RATE })
+      this.analyser = this.ctx.createAnalyser()
+      this.analyser.fftSize = 512
+      this.analyser.connect(this.ctx.destination)
+      this.wave = new Float32Array(this.analyser.fftSize)
+    }
     if (this.ctx.state === 'suspended') void this.ctx.resume()
     return this.ctx
   }
@@ -114,17 +146,50 @@ export class TtsPlayer {
     buf.getChannelData(0).set(f32)
     const node = ctx.createBufferSource()
     node.buffer = buf
-    node.connect(ctx.destination)
+    node.connect(this.analyser ?? ctx.destination)
     node.onended = () => this.live.delete(node)
     this.live.add(node)
     const now = ctx.currentTime
     if (this.next < now) this.next = now + 0.02 // small lead-in after a gap
     node.start(this.next)
     this.next += buf.duration
+    if (!this.speaking) {
+      this.speaking = true
+      this.onActive?.(true)
+      this.tick()
+    }
+  }
+
+  /** Per-frame loudness → glow level, while audio is playing. */
+  private tick = (): void => {
+    const an = this.analyser
+    const wave = this.wave
+    if (!an || !wave) return
+    an.getFloatTimeDomainData(wave)
+    let sum = 0
+    for (let i = 0; i < wave.length; i++) sum += wave[i] * wave[i]
+    const rms = Math.sqrt(sum / wave.length)
+    const reactive = Math.min(1, rms * LEVEL_GAIN)
+    // Fast attack (jump up), slow release (ease down) — an audio-meter envelope.
+    this.level = Math.max(reactive, this.level * LEVEL_RELEASE)
+    this.onLevel?.(LEVEL_FLOOR + (1 - LEVEL_FLOOR) * this.level)
+    // Speech is over once nothing is queued and the envelope has eased to ~0;
+    // the consumer's on/off fade carries the visual out, so we don't snap to 0.
+    if (this.live.size === 0 && this.level < 0.02) {
+      this.speaking = false
+      this.raf = 0
+      this.onActive?.(false)
+      return
+    }
+    this.raf = requestAnimationFrame(this.tick)
   }
 
   /** Barge-in: stop every scheduled/playing chunk now and forget the timeline. */
   reset(): void {
+    if (this.raf) {
+      cancelAnimationFrame(this.raf)
+      this.raf = 0
+    }
     for (const node of this.live) {
       try {
         node.stop()
@@ -134,5 +199,10 @@ export class TtsPlayer {
     }
     this.live.clear()
     this.next = 0
+    this.level = 0
+    if (this.speaking) {
+      this.speaking = false
+      this.onActive?.(false)
+    }
   }
 }

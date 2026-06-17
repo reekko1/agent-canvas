@@ -91,6 +91,8 @@ export function Canvas() {
   // The orchestrator's pending permission gate (one at a time — the SDK awaits
   // canUseTool before the next tool, so confirms never overlap).
   const [orchConfirm, setOrchConfirm] = useState<OrchestratorConfirm | null>(null)
+  // The orchestrator is speaking aloud — drives the voice-reactive edge glow.
+  const [speaking, setSpeaking] = useState(false)
   const { w: winW, h: winH } = useWindowSize()
   const PlusIcon = useIcon('plus')
 
@@ -479,6 +481,13 @@ export function Canvas() {
     <div className="relative h-screen w-screen overflow-hidden" onWheel={onStackWheel}>
       <VideoBackdrop />
 
+      {/* Voice glow: a cinematic cyan aura on the window edges while the
+          orchestrator speaks. The on/off fade rides the `is-speaking` class; the
+          inner aura's intensity tracks the live voice loudness (--voice-level). */}
+      <div className={`voice-glow ${speaking ? 'is-speaking' : ''}`}>
+        <div className="voice-glow__aura" />
+      </div>
+
       {/* One stable layer of every card across every project. The active
           project's cards take the master/stack slots; the rest stay mounted but
           parked off-screen and hidden — so no card's xterm ever unmounts. */}
@@ -716,6 +725,7 @@ export function Canvas() {
             if (orchConfirm) window.canvas.orchestratorResult(orchConfirm.id, { allow })
             setOrchConfirm(null)
           }}
+          onSpeakingChange={setSpeaking}
         />
       </div>
 

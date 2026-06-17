@@ -23,13 +23,14 @@ const MODE_BADGE: Record<OrchestratorMode, { label: string; cls: string; title: 
   manual: {
     label: '○ manual',
     cls: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
-    title: 'Manual — agent replies are echoed but never wake the orchestrator. Click to supervise.',
+    title:
+      'Manual — replies are echoed but never wake the orchestrator, and every orchestrator action needs your click. Click to supervise.',
   },
   supervising: {
     label: '◉ supervising',
     cls: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25',
     title:
-      'Supervising — agents wake the orchestrator when they finish or block; every action still needs your click. Click to engage autopilot.',
+      'Supervising — the orchestrator wakes on fleet events and uses its own tools (spawn, message, close…) freely, without asking. Agents still answer to you: their permission requests come to you, not the orchestrator. Click to engage autopilot.',
   },
   autopilot: {
     label: '⚡ autopilot',

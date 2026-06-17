@@ -309,10 +309,16 @@ export class Orchestrator {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<GateDecision> => {
-    // Autopilot bypasses the gate — the tool_use event already shows the action
-    // in the chat, and the loud autopilot badge tells the user clicks are off.
+    // Two independent bypass axes:
+    //  • orchestrator-bypass — its own tools (spawn/kill/rename/focus/send) run
+    //    without a click in supervising and autopilot.
+    //  • agent-bypass — approve_ask decides a sub-agent's permission, so it's on
+    //    the AGENT axis; it auto-runs only in autopilot, never in supervising.
     if (this.mode === 'autopilot') return { allow: true }
-    // A human decides this one — give it minutes, not the 30s machine round-trip.
+    const isAgentBypass = toolName === 'mcp__canvas__approve_ask'
+    if (this.mode === 'supervising' && !isAgentBypass) return { allow: true }
+    // manual (any tool) or supervising's approve_ask → a human decides; give it
+    // minutes, not the 30s machine round-trip.
     const r = await this.dispatch('confirm', { toolName, input }, 5 * 60_000)
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
   }

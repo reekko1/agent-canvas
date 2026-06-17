@@ -23,6 +23,12 @@ mac:
   icon: Packaging/AppIcon.icns
   minimumSystemVersion: '13.0'
   hardenedRuntime: true # notarizes cleanly once a real identity is supplied; harmless under ad-hoc
+  # Push-to-talk needs the microphone: the entitlement grants it under the
+  # hardened runtime, and the usage string is what macOS shows in its TCC prompt.
+  entitlements: Packaging/entitlements.mac.plist
+  entitlementsInherit: Packaging/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Agent Canvas uses the microphone for push-to-talk voice control of the orchestrator.
   target:
     - target: dmg
       arch: [arm64]

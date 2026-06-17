@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, session, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -10,6 +10,8 @@ import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import { Orchestrator } from './orchestrator/manager'
+import { SonioxVoice, validateSonioxKey } from './voice/soniox'
+import { storeSonioxKey } from './voice/keyStore'
 import type {
   AskDecision,
   GitActionRequest,
@@ -28,6 +30,7 @@ const ptys = new PtyRegistry()
 const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
 let orchestrator: Orchestrator | null = null
+let voice: SonioxVoice | null = null
 let nextItem = 1
 /** Initial prompts queued for a card before its pty spawns — delivered as
  *  claude's initial prompt by ensure-card (one-shot, so a spawned agent boots
@@ -160,6 +163,13 @@ app.whenReady().then(() => {
       if (!allowed) event.preventDefault()
     })
   })
+  // Push-to-talk needs the microphone (`media`). Some setups don't grant it
+  // without an explicit handler; granting it here makes getUserMedia reliable
+  // (the OS still gates the mic with its own TCC prompt on first use). Every
+  // other permission stays as it was before this handler existed — approved — so
+  // clipboard copies and the like keep working; this is local, first-party content.
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(true))
+  session.defaultSession.setPermissionCheckHandler(() => true)
   spine.onUpdate = (cardId, event) => send('card-event', cardId, event)
   spine.onAsk = (ask) => {
     send('permission-ask', ask)
@@ -170,8 +180,49 @@ app.whenReady().then(() => {
   // The in-app orchestrator: drives the canvas via the Agent SDK. Reads the
   // latest published RemoteState for `list_world`; dispatches mutations and
   // confirms to the renderer (see the orchestrator-* IPC below).
+  // Voice I/O for the orchestrator: mic PCM streams up over IPC, transcripts and
+  // synthesized audio stream back. No-ops gracefully when SONIOX_API_KEY is unset.
+  voice = new SonioxVoice({
+    onPartial: (text) => send('voice-stt-partial', text),
+    onFinal: (text) => send('voice-stt-final', text),
+    onError: (message) => send('voice-stt-error', message),
+    onTtsAudio: (pcm) => send('voice-tts-audio', pcm),
+    onTtsReset: () => send('voice-tts-reset'),
+  })
+  // Speak the orchestrator's own replies aloud (the `assistant` lines — its voice;
+  // `result` just echoes them and `tool` is plumbing). Wrapping `send` keeps the
+  // tap in one place and never alters what the renderer receives.
+  // A whole turn is spoken as ONE continuous utterance: the first text block opens
+  // it, later blocks append (a newline keeps them from running together), and the
+  // turn's result/error closes it. This way back-to-back blocks (e.g. a near-
+  // instant list_world between them) never cut each other's audio off mid-word.
+  let speaking = false
+  const speakSend = (channel: string, ...args: unknown[]): void => {
+    if (channel === 'orchestrator-event') {
+      const e = args[0] as { kind?: string; phase?: string; text?: string } | undefined
+      if (e?.kind === 'assistant') {
+        if (e.phase === 'start') {
+          if (!speaking) {
+            speaking = true
+            voice?.speakStart()
+          } else {
+            voice?.speakChunk('\n') // separate this block from the previous one
+          }
+        } else if (e.phase === 'delta') {
+          voice?.speakChunk(e.text ?? '')
+        } else if (!e.phase && e.text) {
+          voice?.speak(e.text) // non-streamed line — its own utterance
+        }
+        // phase 'final' (block boundary) needs nothing here.
+      } else if ((e?.kind === 'result' || e?.kind === 'error') && speaking) {
+        speaking = false
+        voice?.speakEnd()
+      }
+    }
+    send(channel, ...args)
+  }
   orchestrator = new Orchestrator({
-    send,
+    send: speakSend,
     getState: () => spine.remote.getLatestState(),
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
@@ -198,6 +249,7 @@ app.on('before-quit', () => {
   workspace.flush()
   diffWatchers.disposeAll()
   orchestrator?.dispose()
+  voice?.dispose()
 })
 
 async function pickFolder(message: string): Promise<string | null> {
@@ -335,6 +387,31 @@ ipcMain.on('orchestrator-result', (_e, id: number, result: OrchestratorCommandRe
 )
 // Set the orchestrator's autonomy mode (manual / supervising / autopilot).
 ipcMain.on('orchestrator-mode', (_e, mode: OrchestratorMode) => orchestrator?.setMode(mode))
+
+// MARK: Voice — push-to-talk STT and the orchestrator's spoken replies. The
+// renderer captures mic PCM and plays back TTS PCM; main owns the Soniox sockets.
+ipcMain.handle('voice-available', () => voice?.available ?? false)
+// Onboarding: validate the pasted key against Soniox, then store it OS-encrypted.
+// The plaintext key crosses IPC only this once (local, first-party) and is never
+// sent back; the renderer only learns success and that voice is now available.
+ipcMain.handle('voice-save-key', async (_e, key: string) => {
+  const result = await validateSonioxKey(key)
+  if (!result.ok) return result
+  if (!storeSonioxKey(key)) {
+    return { ok: false, message: 'Secure storage is unavailable on this system.' }
+  }
+  send('voice-availability', true)
+  return { ok: true }
+})
+ipcMain.on('voice-stt-start', () => {
+  voice?.cancelSpeak() // barge-in: talking over the orchestrator silences it
+  voice?.startStt()
+})
+ipcMain.on('voice-stt-audio', (_e, chunk: ArrayBuffer | Uint8Array) =>
+  voice?.pushAudio(Buffer.from(chunk as ArrayBuffer)),
+)
+ipcMain.on('voice-stt-finish', () => voice?.finishStt())
+ipcMain.on('voice-stt-cancel', () => voice?.cancelStt())
 // Queue an initial prompt for a not-yet-spawned card (set just before mount).
 ipcMain.on('set-initial-prompt', (_e, cardId: string, prompt: string) => {
   if (typeof cardId === 'string' && typeof prompt === 'string' && prompt) {

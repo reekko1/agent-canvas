@@ -276,6 +276,9 @@ export interface AppReadiness {
    *  `claude login` session exists) — the orchestrator reuses it. Optional: the
    *  canvas and its cards work without it. */
   orchestratorAuthed: boolean
+  /** A Soniox API key is configured (env or securely stored) — enables the
+   *  orchestrator's voice. Optional: everything else works without it. */
+  voiceKeySet: boolean
 }
 
 /// Is the remote panel reachable over the tailnet? (Port of the Swift
@@ -327,6 +330,10 @@ export type OrchestratorMode = 'manual' | 'supervising' | 'autopilot'
 export interface OrchestratorEvent {
   kind: 'assistant' | 'tool' | 'result' | 'error' | 'auto' | 'mode'
   text: string
+  /** Set on streamed `assistant` lines: `start` opens a live line (text empty),
+   *  `delta` carries one incremental chunk, `final` carries the full text and
+   *  closes it. Absent on a non-streamed assistant line and every other kind. */
+  phase?: 'start' | 'delta' | 'final'
 }
 
 /** A command the orchestrator (main) asks the renderer to execute, correlated by
@@ -454,4 +461,31 @@ export interface CanvasApi {
   orchestratorResult(id: number, result: OrchestratorCommandResult): void
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
   setOrchestratorMode(mode: OrchestratorMode): void
+  // MARK: Voice — push-to-talk speech-to-text and spoken orchestrator replies.
+  /** Whether Soniox voice is configured (a key is present in main). */
+  voiceAvailable(): Promise<boolean>
+  /** Validate and securely store a Soniox API key (onboarding). Rejects a bad
+   *  key without persisting it; the message explains why. */
+  saveVoiceKey(key: string): Promise<{ ok: boolean; message?: string }>
+  /** Voice became available/unavailable (e.g. after the key is saved) — lets the
+   *  chat bar reveal the mic without a restart. */
+  onVoiceAvailable(cb: (available: boolean) => void): () => void
+  /** Begin a push-to-talk utterance — opens the STT session in main. */
+  startSpeech(): void
+  /** Stream one chunk of mic audio (raw pcm_s16le, mono, 16 kHz). */
+  sendSpeechAudio(pcm: ArrayBuffer): void
+  /** Release — finalize the utterance; the transcript arrives on onSpeechFinal. */
+  finishSpeech(): void
+  /** Abort the current utterance without transcribing it. */
+  cancelSpeech(): void
+  /** Live transcript (finalized + interim) while holding to talk. */
+  onSpeechPartial(cb: (text: string) => void): () => void
+  /** The finished utterance after release — feed it to the orchestrator. */
+  onSpeechFinal(cb: (text: string) => void): () => void
+  /** STT failed, or no key — render as a hint. */
+  onSpeechError(cb: (message: string) => void): () => void
+  /** A chunk of spoken-reply audio (raw pcm_s16le, mono, 24 kHz) to play. */
+  onTtsAudio(cb: (pcm: ArrayBuffer) => void): () => void
+  /** Barge-in / new reply — drop any queued or playing TTS audio. */
+  onTtsReset(cb: () => void): () => void
 }

@@ -3,6 +3,7 @@ import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AppReadiness, RemoteReadiness } from '../../shared/types'
+import { sonioxKeySource } from '../voice/keyStore'
 
 /// Environment probe for the remote-access setup: is the tailscale CLI on
 /// this Mac, and is `tailscale serve` currently proxying the panel's port?
@@ -119,6 +120,7 @@ export async function checkAppReadiness(): Promise<AppReadiness> {
     tmuxFound: executableAt(TMUX_PATHS),
     brewFound: executableAt(BREW_PATHS),
     orchestratorAuthed,
+    voiceKeySet: sonioxKeySource() !== 'none',
   }
 }
 

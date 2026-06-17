@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { Mic } from 'lucide-react'
 import type { OrchestratorEvent, OrchestratorMode } from '@shared/types'
 import {
   OrchestratorConfirmToast,
   type OrchestratorConfirm,
 } from '@/orchestrator/OrchestratorConfirmToast'
+import { MicCapture, TtsPlayer } from '@/orchestrator/voice'
 
 // A whisper is one thing the orchestrator said (or one prompt you sent). The
 // latest non-`you` whisper shows transiently above the pill and then fades; the
@@ -84,6 +86,11 @@ export function OrchestratorChatBar({
   // The collapsed-by-default run, revealed by clicking the pill's glyph.
   const [history, setHistory] = useState<Entry[]>([])
   const [expanded, setExpanded] = useState(false)
+  // Push-to-talk: voice is available only when main has a SONIOX_API_KEY; while
+  // holding the talk key (or the mic) we stream the mic up and show the live
+  // transcript in the input until release submits it.
+  const [voiceOk, setVoiceOk] = useState(false)
+  const [recording, setRecording] = useState(false)
 
   const seq = useRef(1)
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -94,6 +101,16 @@ export function OrchestratorChatBar({
   // a turn whose final assistant text we already showed.
   const lastTextRef = useRef('')
   const logRef = useRef<HTMLDivElement>(null)
+  // Voice plumbing — the mic capture for the live utterance, the player for the
+  // orchestrator's spoken replies, and refs the once-bound key/IPC handlers read
+  // so they always see the current state.
+  const player = useRef<TtsPlayer | null>(null)
+  const mic = useRef<MicCapture | null>(null)
+  const recordingRef = useRef(false)
+  const voiceOkRef = useRef(false)
+  // The assistant line currently streaming in — deltas append to it, `final`
+  // commits it to history and lets it fade. Null between turns.
+  const streaming = useRef<{ id: number; text: string } | null>(null)
 
   function clearFade(): void {
     if (fadeTimer.current) clearTimeout(fadeTimer.current)
@@ -111,6 +128,35 @@ export function OrchestratorChatBar({
   // setters, so the closure captured here stays correct across renders.
   useEffect(() => {
     return window.canvas.onOrchestratorEvent((e) => {
+      // Streamed assistant text: open a live line, grow it delta by delta, and
+      // only commit + fade once `final` lands, so it never fades mid-stream.
+      if (e.kind === 'assistant' && e.phase) {
+        if (e.phase === 'start') {
+          streaming.current = { id: seq.current++, text: '' }
+          setWhisper({ id: streaming.current.id, kind: 'assistant', text: '' })
+          clearFade()
+        } else if (e.phase === 'delta') {
+          const s = streaming.current
+          if (!s) return
+          s.text += e.text
+          setWhisper({ id: s.id, kind: 'assistant', text: s.text })
+        } else if (e.phase === 'final') {
+          const s = streaming.current
+          streaming.current = null
+          const id = s?.id ?? seq.current++
+          const text = (e.text || s?.text || '').trim()
+          if (!text) {
+            setWhisper(null)
+            return
+          }
+          lastTextRef.current = text
+          const entry: Entry = { id, kind: 'assistant', text }
+          setHistory((h) => [...h, entry].slice(-HISTORY_CAP))
+          setWhisper(entry)
+          scheduleFade(text)
+        }
+        return
+      }
       // Tool calls aren't shown line-by-line anymore — they just mean "working".
       if (e.kind === 'tool') {
         setThinking(true)
@@ -138,6 +184,57 @@ export function OrchestratorChatBar({
     if (expanded) logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [history, expanded])
 
+  // Voice, set up once for the bar's lifetime: learn whether it's configured,
+  // play the orchestrator's spoken replies, mirror the live transcript into the
+  // input, submit the finished utterance, and bind hold-⌥ as push-to-talk.
+  useEffect(() => {
+    player.current = new TtsPlayer()
+    void window.canvas.voiceAvailable().then((ok) => {
+      voiceOkRef.current = ok
+      setVoiceOk(ok)
+    })
+    const offs = [
+      // Voice can be enabled mid-session from onboarding — reveal the mic live.
+      window.canvas.onVoiceAvailable((ok) => {
+        voiceOkRef.current = ok
+        setVoiceOk(ok)
+      }),
+      window.canvas.onTtsAudio((pcm) => player.current?.push(pcm)),
+      window.canvas.onTtsReset(() => player.current?.reset()),
+      window.canvas.onSpeechPartial((text) => setInput(text)),
+      window.canvas.onSpeechFinal((text) => {
+        setInput('')
+        submitText(text)
+      }),
+      window.canvas.onSpeechError((message) => {
+        setWhisper({ id: seq.current++, kind: 'error', text: message })
+        clearFade()
+      }),
+    ]
+    // Hold the ⌥/Alt key (alone — it types nothing) to talk; release to send.
+    // keydown autorepeats, so guard on the recording ref.
+    const isTalk = (e: KeyboardEvent): boolean => e.code === 'AltLeft' || e.code === 'AltRight'
+    const down = (e: KeyboardEvent): void => {
+      if (isTalk(e) && !e.repeat) void startRecording()
+    }
+    const up = (e: KeyboardEvent): void => {
+      if (isTalk(e)) stopRecording()
+    }
+    // Losing focus mid-hold would never fire keyup — stop so it can't stick on.
+    const blur = (): void => stopRecording()
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      offs.forEach((off) => off())
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+      mic.current?.stop()
+      player.current?.reset()
+    }
+  }, [])
+
   function cycleMode(): void {
     setMode((m) => {
       const next = MODE_ORDER[(MODE_ORDER.indexOf(m) + 1) % MODE_ORDER.length]
@@ -146,8 +243,8 @@ export function OrchestratorChatBar({
     })
   }
 
-  function submit(): void {
-    const text = input.trim()
+  function submitText(raw: string): void {
+    const text = raw.trim()
     if (!text) return
     // Your prompt joins the history (so the expanded view reads as a dialogue)
     // but is never echoed as a transient whisper — you just typed it.
@@ -156,6 +253,41 @@ export function OrchestratorChatBar({
     window.canvas.sendOrchestratorPrompt(text)
     setInput('')
     setThinking(true)
+  }
+
+  function submit(): void {
+    submitText(input)
+  }
+
+  // Hold-to-talk: open the mic and stream pcm up; the live transcript lands in
+  // the input via onSpeechPartial, and release (stopRecording) finalizes it.
+  async function startRecording(): Promise<void> {
+    if (recordingRef.current || !voiceOkRef.current) return
+    recordingRef.current = true
+    setRecording(true)
+    window.canvas.startSpeech()
+    const capture = new MicCapture()
+    mic.current = capture
+    try {
+      await capture.start((pcm) => window.canvas.sendSpeechAudio(pcm))
+    } catch {
+      // Mic denied or unavailable — abort cleanly and tell the user once.
+      recordingRef.current = false
+      setRecording(false)
+      mic.current = null
+      window.canvas.cancelSpeech()
+      setWhisper({ id: seq.current++, kind: 'error', text: 'Microphone unavailable.' })
+      clearFade()
+    }
+  }
+
+  function stopRecording(): void {
+    if (!recordingRef.current) return
+    recordingRef.current = false
+    setRecording(false)
+    mic.current?.stop()
+    mic.current = null
+    window.canvas.finishSpeech()
   }
 
   return (
@@ -244,9 +376,34 @@ export function OrchestratorChatBar({
             if (e.key === 'Enter') submit()
             else if (e.key === 'Escape' && expanded) setExpanded(false)
           }}
-          placeholder="Ask the orchestrator — e.g. “switch to a canvas and spawn an agent there”"
+          placeholder={
+            recording
+              ? 'Listening…'
+              : voiceOk
+                ? 'Ask the orchestrator — or hold ⌥ to talk'
+                : 'Ask the orchestrator — e.g. “switch to a canvas and spawn an agent there”'
+          }
           className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
         />
+        {voiceOk && (
+          // Press-and-hold to talk, mirroring the ⌥ hotkey; pulses while live.
+          <button
+            type="button"
+            aria-label="Push to talk"
+            title="Hold to talk (or hold ⌥)"
+            onPointerDown={(e) => {
+              e.preventDefault()
+              void startRecording()
+            }}
+            onPointerUp={stopRecording}
+            onPointerLeave={stopRecording}
+            className={`shrink-0 transition-colors ${
+              recording ? 'animate-pulse text-red-400' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Mic className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={cycleMode}

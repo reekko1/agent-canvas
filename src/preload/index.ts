@@ -53,6 +53,18 @@ const api: CanvasApi = {
   onOrchestratorCommand: (cb) => subscribe('orchestrator-command', cb),
   orchestratorResult: (id, result) => ipcRenderer.send('orchestrator-result', id, result),
   setOrchestratorMode: (mode) => ipcRenderer.send('orchestrator-mode', mode),
+  voiceAvailable: () => ipcRenderer.invoke('voice-available'),
+  saveVoiceKey: (key) => ipcRenderer.invoke('voice-save-key', key),
+  onVoiceAvailable: (cb) => subscribe('voice-availability', cb),
+  startSpeech: () => ipcRenderer.send('voice-stt-start'),
+  sendSpeechAudio: (pcm) => ipcRenderer.send('voice-stt-audio', pcm),
+  finishSpeech: () => ipcRenderer.send('voice-stt-finish'),
+  cancelSpeech: () => ipcRenderer.send('voice-stt-cancel'),
+  onSpeechPartial: (cb) => subscribe('voice-stt-partial', cb),
+  onSpeechFinal: (cb) => subscribe('voice-stt-final', cb),
+  onSpeechError: (cb) => subscribe('voice-stt-error', cb),
+  onTtsAudio: (cb) => subscribe('voice-tts-audio', cb),
+  onTtsReset: (cb) => subscribe('voice-tts-reset', cb),
 }
 
 contextBridge.exposeInMainWorld('canvas', api)

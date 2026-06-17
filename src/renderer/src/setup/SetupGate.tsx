@@ -3,7 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Copy, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { RegistrationStepper, type StepProps } from '@/components/ui/registration-stepper'
+import type { IconComponent } from '@/lib/icon-context'
 import type { AppReadiness } from '@shared/types'
+
+// lucide's prop types are wider than IconComponent (size is string|number), so it
+// can't go straight into Button's `leadingIcon`; a thin adapter bridges it.
+const ExternalLinkIcon: IconComponent = (props) => <ExternalLink {...props} />
 
 /** A copyable install command — the wizard's CopyChip. */
 function CommandChip({ command }: { command: string }) {
@@ -41,6 +46,14 @@ export function SetupGate() {
   // gate. Session-scoped: skipping hides it now but it returns next launch if
   // still unsigned-in, which is the only way back (placement is onboarding-only).
   const [authDismissed, setAuthDismissed] = useState(false)
+  // The Soniox voice key — also a soft, skippable step. `voiceSaved` closes it
+  // immediately on a successful save (the probe confirms within a few seconds);
+  // `voiceDismissed` skips it for this launch.
+  const [voiceKey, setVoiceKey] = useState('')
+  const [savingVoice, setSavingVoice] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [voiceDismissed, setVoiceDismissed] = useState(false)
+  const [voiceSaved, setVoiceSaved] = useState(false)
 
   // claude/tmux are a HARD gate — the canvas can't function without them. Being
   // signed into Claude is a SOFT prompt — only the orchestrator needs it, so it
@@ -52,7 +65,28 @@ export function SetupGate() {
     readiness.tmuxFound &&
     !readiness.orchestratorAuthed &&
     !authDismissed
-  const show = hardBlocked || needsAuth
+  // Voice is the last soft step — prompt for a key once the tools are in place.
+  const needsVoiceKey =
+    readiness !== null &&
+    readiness.claudeFound &&
+    readiness.tmuxFound &&
+    !readiness.voiceKeySet &&
+    !voiceSaved &&
+    !voiceDismissed
+  const show = hardBlocked || needsAuth || needsVoiceKey
+
+  async function saveVoiceKey(): Promise<void> {
+    setVoiceError(null)
+    setSavingVoice(true)
+    const r = await window.canvas.saveVoiceKey(voiceKey)
+    setSavingVoice(false)
+    if (r.ok) {
+      setVoiceKey('')
+      setVoiceSaved(true)
+    } else {
+      setVoiceError(r.message ?? 'Could not save the key.')
+    }
+  }
 
   useEffect(() => {
     let live = true
@@ -113,9 +147,9 @@ export function SetupGate() {
               </p>
               <Button
                 variant="tertiary"
+                leadingIcon={ExternalLinkIcon}
                 onClick={() => window.canvas.openExternal('https://brew.sh')}
               >
-                <ExternalLink data-icon="inline-start" />
                 Get Homebrew
               </Button>
             </>
@@ -145,11 +179,60 @@ export function SetupGate() {
         </div>
       ),
     },
+    {
+      step: 4,
+      title: 'Enable voice (Soniox)',
+      description: 'Talk to the orchestrator — optional',
+      content: (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Hold <span className="font-mono">⌥</span> to talk to the orchestrator and hear it speak
+            back, powered by <span className="font-medium text-foreground">Soniox</span>. Paste an
+            API key to turn it on — it&apos;s encrypted and stored only on this Mac. The canvas
+            doesn&apos;t need this, so you can skip it.
+          </p>
+          <input
+            type="password"
+            value={voiceKey}
+            onChange={(e) => setVoiceKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && voiceKey.trim() && !savingVoice) void saveVoiceKey()
+            }}
+            placeholder="Paste your Soniox API key"
+            spellCheck={false}
+            autoComplete="off"
+            className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary"
+          />
+          {voiceError && <p className="text-xs text-status-error">{voiceError}</p>}
+          <div className="flex items-center gap-2">
+            <Button onClick={() => void saveVoiceKey()} disabled={!voiceKey.trim() || savingVoice}>
+              {savingVoice ? 'Verifying…' : 'Save key'}
+            </Button>
+            <Button
+              variant="tertiary"
+              leadingIcon={ExternalLinkIcon}
+              onClick={() => window.canvas.openExternal('https://console.soniox.com')}
+            >
+              Get a key
+            </Button>
+            <Button variant="tertiary" onClick={() => setVoiceDismissed(true)}>
+              Skip for now
+            </Button>
+          </div>
+        </div>
+      ),
+    },
   ]
 
-  // claude → tmux → auth. Index 2 lands on the auth step once both tools exist;
-  // when authed too, `show` is false so the modal is gone regardless.
-  const currentStep = !readiness?.claudeFound ? 0 : !readiness.tmuxFound ? 1 : 2
+  // claude → tmux → auth → voice. Each soft step (auth, voice) advances once it's
+  // satisfied or skipped; when both are, `show` is false so the modal is gone.
+  const currentStep = !readiness?.claudeFound
+    ? 0
+    : !readiness.tmuxFound
+      ? 1
+      : needsAuth
+        ? 2
+        : 3
 
   return (
     <AnimatePresence>

@@ -30,7 +30,7 @@ const MODE_BADGE: Record<OrchestratorMode, { label: string; cls: string; title: 
     label: '◉ supervising',
     cls: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25',
     title:
-      'Supervising — the orchestrator wakes on fleet events and uses its own tools (spawn, message, close…) freely, without asking. Agents still answer to you: their permission requests come to you, not the orchestrator. Click to engage autopilot.',
+      'Supervising — the orchestrator wakes on fleet events and uses all its tools freely, without asking, including approving an agent when you tell it to. Unattended agent permission asks still wait for a decision (they are not blanket-approved). Click to engage autopilot.',
   },
   autopilot: {
     label: '⚡ autopilot',

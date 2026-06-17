@@ -309,16 +309,18 @@ export class Orchestrator {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<GateDecision> => {
-    // Two independent bypass axes:
-    //  • orchestrator-bypass — its own tools (spawn/kill/rename/focus/send) run
-    //    without a click in supervising and autopilot.
-    //  • agent-bypass — approve_ask decides a sub-agent's permission, so it's on
-    //    the AGENT axis; it auto-runs only in autopilot, never in supervising.
-    if (this.mode === 'autopilot') return { allow: true }
-    const isAgentBypass = toolName === 'mcp__canvas__approve_ask'
-    if (this.mode === 'supervising' && !isAgentBypass) return { allow: true }
-    // manual (any tool) or supervising's approve_ask → a human decides; give it
-    // minutes, not the 30s machine round-trip.
+    // The orchestrator has full autonomy over its own tools in supervising and
+    // autopilot — approve_ask included. If the user said "approve this", a
+    // re-confirm would just ask for permission they already gave verbally. Only
+    // manual gates the orchestrator's actions.
+    //
+    // The supervising/autopilot difference is about AGENTS and lives in
+    // notifyAsk: autopilot auto-clears every agent ask the instant it fires;
+    // supervising leaves an unattended ask for a human decision — the user, or
+    // the orchestrator acting on the user's instruction (the system prompt
+    // forbids it from approving on its own judgement).
+    if (this.mode !== 'manual') return { allow: true }
+    // manual → a human decides; give it minutes, not the 30s machine round-trip.
     const r = await this.dispatch('confirm', { toolName, input }, 5 * 60_000)
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
   }

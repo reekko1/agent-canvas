@@ -5,25 +5,66 @@ export const meta = {
   whenToUse:
     'Driven by the /cleanup-round command after the diff has been scouted. Pass args = { base, changedFiles, focus }.',
   phases: [
+    { title: 'Scope', detail: 'recover the diff scope if the caller did not supply it (fallback only)' },
     { title: 'Review', detail: 'one reviewer per cleanup dimension, in parallel' },
     { title: 'Verify', detail: 'adversarially confirm each finding (repo-wide search for dupe/dead-code claims)' },
     { title: 'Synthesize', detail: 'dedup findings across dimensions into one prioritized list' },
   ],
 }
 
-// args is supplied by the /cleanup-round command after it scouts the diff.
-const base = (args && args.base) || 'main'
-const changedFiles = (args && args.changedFiles) || []
-const focus = (args && args.focus) || ''
+// In this harness args arrives as a JSON STRING, not a parsed object — parse
+// defensively so it works whether the caller passes an object or a string.
+function parseArgs(a) {
+  if (a == null) return {}
+  if (typeof a === 'string') {
+    try {
+      return JSON.parse(a)
+    } catch (e) {
+      return {}
+    }
+  }
+  return a
+}
 
-// Shared brief every reviewer and verifier sees. This is the scope + the bar.
+const input = parseArgs(args)
+let base = (input.base || '').toString().trim()
+let changedFiles = Array.isArray(input.changedFiles) ? input.changedFiles : []
+const focus = (input.focus || '').toString().trim()
+
+const SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['base', 'changedFiles'],
+  properties: {
+    base: { type: 'string', description: 'merge-base sha of HEAD and main' },
+    changedFiles: { type: 'array', items: { type: 'string' }, description: 'changed paths, excluding pure deletions and lockfiles' },
+  },
+}
+
+// Fallback only: if the command did not hand us a scope, recover it ONCE here
+// rather than letting every reviewer recompute it inconsistently.
+if (!base || !changedFiles.length) {
+  phase('Scope')
+  const scout = await agent(
+    'Establish the scope of this branch review. Run `git merge-base HEAD main` for the base sha, then `git diff --name-only <base>...HEAD` for the changed files. Drop pure deletions and lockfiles (package-lock.json, etc.). Return the base sha and the changed-file list.',
+    { label: 'scout-diff', phase: 'Scope', schema: SCOPE_SCHEMA },
+  )
+  if (scout) {
+    base = base || scout.base
+    changedFiles = changedFiles.length ? changedFiles : scout.changedFiles
+  }
+}
+base = base || 'main'
+
+// Shared brief every reviewer and verifier sees: the scope + the bar.
 const SCOPE = `
 You are reviewing the work done on the current branch — NOT the whole repo.
 Base ref = \`${base}\`. The branch diff is \`git diff ${base}...HEAD\`.
 
-Changed files in scope:
-${changedFiles.length ? changedFiles.map((f) => `  - ${f}`).join('\n') : '  (none reported — recompute from git diff yourself)'}
-${focus ? `\nWeight this focus area more heavily: ${focus}\n` : ''}
+Changed files in scope (already filtered of pure deletions and lockfiles —
+review only these, do not wander off-branch):
+${changedFiles.length ? changedFiles.map((f) => `  - ${f}`).join('\n') : '  (none — report that there is nothing to review)'}
+${focus ? `\nWeight this focus area more heavily: ${focus}\n(Focus re-prioritizes attention WITHIN the files above — it never adds out-of-diff files.)\n` : ''}
 Ground rules:
 - Read the changed files relevant to your dimension IN FULL (not just the diff
   hunks) — anti-patterns and poor separation live in the surrounding code. Also
@@ -38,7 +79,9 @@ Ground rules:
   array. Do NOT manufacture findings to look productive.
 `
 
-// The cleanup bar — one reviewer per dimension, in rough priority order.
+// The cleanup bar — one reviewer per dimension, in rough priority order. The
+// cross-cutting reviewer is the one that holds the whole change at once; the
+// others are single lenses.
 const DIMENSIONS = [
   {
     key: 'duplication',
@@ -49,6 +92,11 @@ const DIMENSIONS = [
     key: 'dead-code',
     brief:
       'DEAD CODE — unused exports, functions, vars, params, branches, or whole files left behind from the prove-it-works phase. Before reporting, grep the WHOLE repo for references to prove it is unused (mind re-exports, dynamic access, and string keys); cite the search in evidence.',
+  },
+  {
+    key: 'cross-cutting',
+    brief:
+      'CROSS-CUTTING / SEAMS — the findings only visible when you hold the WHOLE change at once. Trace each value that crosses a module or process boundary in this diff end-to-end (e.g. shared types -> main producer -> preload bridge -> renderer consumer). Flag where the same shape is redefined on two sides instead of imported from one, where a type is wider at one end than the producer actually emits, or where a contract changed on one side of a boundary but not the other. Read BOTH ends of every boundary you assess, not just one file.',
   },
   {
     key: 'anti-patterns',
@@ -121,7 +169,7 @@ const REPORT_SCHEMA = {
   required: ['summary', 'checked', 'findings'],
   properties: {
     summary: { type: 'string', description: 'one-line overall verdict; say plainly if nothing material was found' },
-    checked: { type: 'string', description: 'short note on what was reviewed and searched, so a clean result is credible' },
+    checked: { type: 'string', description: 'how many files were reviewed and what was searched, so a clean/empty result is self-evidently credible' },
     findings: {
       type: 'array',
       items: {
@@ -154,15 +202,22 @@ const reviewed = await pipeline(
       `${SCOPE}\n\nYou are the ${d.key} reviewer.\n${d.brief}\n\nReturn every finding with: a short title, the file and best line, a one-line "what", the concrete "why it matters", the specific "fix", whether it is mechanical, a severity (must-fix/should-fix/optional), and the evidence that confirms it.`,
       { label: `review:${d.key}`, phase: 'Review', schema: FINDINGS_SCHEMA },
     ),
-  (review, d) =>
-    parallel(
+  (review, d) => {
+    // Searchable dimensions get refute-by-default; judgment dimensions do not,
+    // or the skeptic erodes genuine taste-with-cost findings.
+    const searchable = d.key === 'duplication' || d.key === 'dead-code'
+    const stance = searchable
+      ? 'This is a SEARCHABLE claim. Default to REFUTE unless your OWN repo-wide search confirms it — re-run the search yourself; do not take the finder\'s word.'
+      : 'This is a JUDGMENT call, not a searchable fact. Do NOT default to refute. Confirm it by reading the code yourself (for a boundary/seam finding, read BOTH ends). Drop it only if it is wrong, already handled, or pure taste with no concrete cost named.'
+    return parallel(
       ((review && review.findings) || []).map((f) => () =>
         agent(
-          `${SCOPE}\n\nAdversarially verify this ${d.key} finding. Your default is to REFUTE if you are not convinced. Do the work yourself — if it claims duplication or dead code, run the repo-wide search and confirm or refute it; do not take the finder's word.\n\nFinding:\n${JSON.stringify(f, null, 2)}\n\nDecide: is this REAL and worth fixing, or is it taste / wrong / already handled? Correct the severity if the finder over- or under-rated it; use "drop" to kill it. Remember: do not change behavior, and respect the no-new-tooling stance.`,
+          `${SCOPE}\n\nAdversarially verify this ${d.key} finding. ${stance}\n\nFinding:\n${JSON.stringify(f, null, 2)}\n\nDecide: is this REAL and worth fixing? Correct the severity if the finder over- or under-rated it; use "drop" to kill it. Remember: do not change behavior, and respect the no-new-tooling stance.`,
           { label: `verify:${d.key}:${f.file}`, phase: 'Verify', schema: VERDICT_SCHEMA },
         ).then((verdict) => ({ ...f, dimension: d.key, verdict })),
       ),
-    ),
+    )
+  },
 )
 
 // reviewed = [ [verified...]|null, ... ]. Flatten, drop dead reviewers/verifiers,
@@ -172,13 +227,13 @@ const confirmed = reviewed
   .filter(Boolean)
   .filter((f) => f.verdict && f.verdict.isReal && f.verdict.correctedSeverity !== 'drop')
 
-log(`${confirmed.length} verified finding(s) across ${DIMENSIONS.length} dimensions`)
+log(`reviewed ${changedFiles.length} file(s) across ${DIMENSIONS.length} dimensions → ${confirmed.length} verified finding(s)`)
 
 // Synthesis is a genuine barrier: it needs ALL verified findings at once to
 // merge the same code flagged from different angles and order the whole list.
 phase('Synthesize')
 const report = await agent(
-  `${SCOPE}\n\nHere are the verified cleanup findings across all dimensions (each carries its corrected severity in verdict.correctedSeverity):\n${JSON.stringify(confirmed, null, 2)}\n\nProduce the final review:\n- Merge findings that point at the SAME code from different angles into one entry, listing every angle in "dimensions".\n- Use each finding's corrected severity. Order by severity, then by impact.\n- Format "where" as file_path:line so it is clickable.\n- Write a one-line overall "summary" and a short "checked" note (what was reviewed and searched). If there is nothing material, say so plainly in the summary and return an empty findings array — do NOT pad the list.`,
+  `${SCOPE}\n\nHere are the verified cleanup findings across all dimensions (each carries its corrected severity in verdict.correctedSeverity):\n${JSON.stringify(confirmed, null, 2)}\n\nProduce the final review:\n- MERGE findings that point at the same code into one entry. Treat as the same code any findings whose file:line match OR fall within the same function/block; a file-level (line 0) finding subsumes line-level findings in the same file about the same concern. List every dimension that flagged a merged entry in "dimensions". When two look mergeable but you are unsure, Read the file to decide.\n- Order by corrected severity. Within a severity, keep findings on the same file/region adjacent. Do NOT re-rank on an "impact" you cannot verify from the findings alone.\n- Format "where" as file_path:line so it is clickable.\n- Write a one-line overall "summary" and a "checked" note stating how many files were reviewed and what was searched. If there is nothing material, say so plainly in the summary and return an empty findings array — do NOT pad the list.`,
   { label: 'synthesize', phase: 'Synthesize', schema: REPORT_SCHEMA },
 )
 

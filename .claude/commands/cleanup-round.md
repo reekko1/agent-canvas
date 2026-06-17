@@ -25,7 +25,9 @@ work-list the fan-out pipelines over.
 - Get the changed files and the shape of the change:
   `git diff --stat $(git merge-base HEAD main)...HEAD`.
 - Build the **changed-file list** (paths relative to repo root). Drop pure
-  deletions and lockfiles. If the user's focus narrows scope, honor it.
+  deletions and lockfiles. A focus may narrow this list to part of the diff, but
+  never pull in files outside the branch diff. If `git diff` shows no changes vs
+  `main`, there's nothing to review — say so and stop.
 
 ## 2. Run the review workflow
 
@@ -41,11 +43,13 @@ Workflow({
 What it does (the cleanup bar lives in that script — edit it there, in one
 place, never re-list it here):
 
-1. **Review** — six reviewers run in parallel, one per dimension, in rough
+1. **Review** — seven reviewers run in parallel, one per dimension, in rough
    priority order: **duplication** (search the repo before calling a helper
    new), **dead code** (search for references before calling it dead),
-   **anti-patterns**, **separation of concern**, **semantic soundness**, **DX**.
-   Each reads the in-scope files in full and returns structured findings.
+   **cross-cutting/seams** (trace each value end-to-end across module and
+   process boundaries — the findings only visible holding the whole diff at
+   once), **anti-patterns**, **separation of concern**, **semantic soundness**,
+   **DX**. Each reads the in-scope files in full and returns structured findings.
 2. **Verify** — every finding is handed to an independent skeptic that defaults
    to refuting and does its own repo-wide search to confirm dupe/dead-code
    claims. Taste-only, wrong, or already-handled findings are dropped; severity

@@ -4,10 +4,11 @@
 // persistent streaming-input session.
 //
 // The session is one long-lived Agent SDK `query()` fed by an async generator
-// (`input()`) that drains a shared queue. Two producers push into that queue:
+// (`input()`) that drains a shared queue. Three producers push into that queue:
 //   • `run(prompt)`        — you typed in the chat bar          (priority 'now')
 //   • `notifyAgentReply()` — an agent's Stop hook fired         (priority 'next')
-// The hook is the heartbeat that wakes the session; nothing is polled.
+//   • `notifyAsk()`        — an agent's permission ask fired    (priority 'next')
+// The hooks are the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import type { CommandBus, World } from './contract'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -24,6 +25,10 @@ import type {
 
 /** Long agent replies are clipped before they reach the chat / the session. */
 const REPLY_CLIP = 500
+
+/** The ` on canvas "X"` qualifier the fleet-event prompts share (empty when the
+ *  card isn't on a named canvas). */
+const onCanvas = (name?: string): string => (name ? ` on canvas "${name}"` : '')
 
 /** The reply shape the renderer sends back for a given command: `confirm` is a
  *  gate decision, every mutation an action result. */
@@ -87,20 +92,20 @@ export class Orchestrator {
     })
   }
 
-  /** A supervised agent finished a turn. Always echo its reply for visibility;
-   *  when autonomous, also push a "[fleet event]" that wakes the session so the
-   *  orchestrator can react. One-way still: the echo never enters the loop, only
-   *  the fleet event does, and the system prompt forbids reacting without a
-   *  standing instruction (which would loop forever). */
+  /** A supervised agent finished a turn. When autonomous, push a "[fleet event]"
+   *  that wakes the session so the orchestrator can react; it is NOT echoed to
+   *  the user — the orchestrator digests the reply and speaks its own line (the
+   *  ambient whisper). One-way still: the fleet event never auto-orders work, and
+   *  the system prompt forbids reacting without a standing instruction (which
+   *  would loop forever). */
   notifyAgentReply(cardId: string, reply: string): void {
     const text = reply.trim()
     if (!text) return
     const card = this.findCard(cardId)
     if (!card || card.kind !== 'agent') return
-    const clipped = text.length > REPLY_CLIP ? `${text.slice(0, REPLY_CLIP)}…` : text
-    this.emit({ kind: 'agentReply', name: card.name, text: clipped })
     if (this.mode === 'manual') return
-    const canvas = card.projectName ? ` on canvas "${card.projectName}"` : ''
+    const clipped = text.length > REPLY_CLIP ? `${text.slice(0, REPLY_CLIP)}…` : text
+    const canvas = onCanvas(card.projectName)
     this.enqueue({
       type: 'user',
       message: {
@@ -130,7 +135,7 @@ export class Orchestrator {
       this.emit({ kind: 'auto', text: `auto-approved ${who}: ${ask.detail}` })
       return
     }
-    const canvas = card?.projectName ? ` on canvas "${card.projectName}"` : ''
+    const canvas = onCanvas(card?.projectName)
     this.enqueue({
       type: 'user',
       message: {

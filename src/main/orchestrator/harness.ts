@@ -45,7 +45,6 @@ async function main(): Promise<void> {
     onEvent: (e) => {
       if (e.kind === 'assistant') console.log(`\n${e.text}`)
       else if (e.kind === 'tool') console.log(`  · tool → ${e.text}`)
-      else if (e.kind === 'agentReply') console.log(`  ⤷ ${e.name ?? 'agent'}: ${e.text}`)
       else if (e.kind === 'result') console.log(`\n✓ ${e.text}`)
       else console.error(`\n✗ ${e.text}`)
     },

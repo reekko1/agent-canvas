@@ -249,3 +249,33 @@
     @apply font-sans;
     }
 }
+/* Orchestrator "working" glow — a CSS breathing pulse on the compositor, so no
+   React re-render can restart or flash it. Two decoupled parts keep it organic:
+   the loop (box-shadow keyframes) lives on a pseudo-element and never returns
+   all the way to zero — it breathes between a soft floor and a brighter peak, so
+   it reads as breathing, not blinking; the on/off is a separate opacity
+   transition, so it eases in when work starts and out when it ends instead of
+   snapping. The class toggle is the whole state machine. */
+@keyframes orchestrator-glow {
+  0% { box-shadow: 0 0 10px 1px rgb(34 211 238 / 0.24); }
+  50% { box-shadow: 0 0 20px 2px rgb(34 211 238 / 0.42); }
+  100% { box-shadow: 0 0 10px 1px rgb(34 211 238 / 0.24); }
+}
+.orchestrator-pill {
+  position: relative;
+}
+.orchestrator-pill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 700ms ease;
+  animation: orchestrator-glow 3s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.orchestrator-pill.is-working::after {
+  opacity: 1;
+  animation-play-state: running;
+}

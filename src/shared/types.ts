@@ -308,7 +308,7 @@ export interface UpdateStatus {
  *  (spawn/kill/rename/focus/send/approve_ask) run freely whenever it is awake;
  *  only `manual` gates them. The supervising/autopilot difference is purely
  *  about unattended AGENT permission asks.
- *  - `manual`      — agent replies are echoed, but nothing wakes it, and every
+ *  - `manual`      — nothing wakes it (agent replies are not echoed) and every
  *                    orchestrator action needs your click at the gate.
  *  - `supervising` — it wakes on fleet events and runs its own tools without a
  *                    click; unattended agent permission asks still wait for a
@@ -317,16 +317,16 @@ export interface UpdateStatus {
  *                    clicks. Dangerous: this bypasses every confirmation. */
 export type OrchestratorMode = 'manual' | 'supervising' | 'autopilot'
 
-/** One streamed line from an orchestrator turn, shown in the chat bar.
- *  `agentReply` is the odd one out: not part of a turn but a supervised
- *  agent's reply echoed in the instant its Stop hook fires. `auto` marks an
- *  action autopilot took without asking (a bypassed confirmation); `mode`
- *  marks a user-driven autonomy-mode switch (a status line, not a turn). */
+/** One streamed line from an orchestrator turn. The renderer shows the
+ *  orchestrator's voice (`assistant`/`result`) as a transient whisper and uses
+ *  `tool` only to drive a "working" pulse. `auto` marks an action autopilot took
+ *  without asking (a bypassed confirmation); `mode` marks a user-driven
+ *  autonomy-mode switch (a status line, not a turn); `error` surfaces as a red
+ *  whisper that never auto-fades. The agents' own replies are never echoed here
+ *  — the orchestrator digests them and speaks its own line. */
 export interface OrchestratorEvent {
-  kind: 'assistant' | 'tool' | 'result' | 'error' | 'agentReply' | 'auto' | 'mode'
+  kind: 'assistant' | 'tool' | 'result' | 'error' | 'auto' | 'mode'
   text: string
-  /** The agent's display name — set only on `agentReply`. */
-  name?: string
 }
 
 /** A command the orchestrator (main) asks the renderer to execute, correlated by

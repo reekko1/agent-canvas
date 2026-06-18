@@ -19,6 +19,8 @@ import {
   resolveRefScript,
   focusRefScript,
   scrollScript,
+  selectScript,
+  historyScript,
 } from '../../shared/browserDriver'
 import type { BrowserAction, BrowserSnapshot } from '../../shared/types'
 import type { BrowserDriver } from './mainBus'
@@ -111,12 +113,30 @@ export class BrowserController implements BrowserDriver {
    *  event (background-capable). A stale ref is a normal failure, not a throw. */
   async act(cardId: string, action: BrowserAction): Promise<{ ok: boolean; message: string }> {
     const wc = await this.cdp(cardId)
+    // No-ref ops run as a plain in-page evaluate (no coordinates needed).
     if (action.kind === 'scroll') {
       await wc.debugger.sendCommand('Runtime.evaluate', {
         expression: scrollScript(action.direction),
         returnByValue: true,
       })
       return { ok: true, message: `scrolled ${action.direction}` }
+    }
+    if (action.kind === 'history') {
+      await wc.debugger.sendCommand('Runtime.evaluate', {
+        expression: historyScript(action.action),
+        returnByValue: true,
+      })
+      return { ok: true, message: action.action }
+    }
+    if (action.kind === 'select') {
+      const r = await wc.debugger.sendCommand('Runtime.evaluate', {
+        expression: selectScript(action.ref, action.value),
+        returnByValue: true,
+      })
+      if (r?.result?.value === false) {
+        return { ok: false, message: `stale-ref: no element ${action.ref} — read again first` }
+      }
+      return { ok: true, message: `selected ${action.value} in ${action.ref}` }
     }
     const resolved = await wc.debugger.sendCommand('Runtime.evaluate', {
       expression: resolveRefScript(action.ref),

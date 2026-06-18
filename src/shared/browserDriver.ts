@@ -112,9 +112,21 @@ export function buildActionScript(action: BrowserAction): string {
     window.scrollBy({ top: dy })
     return { ok: true, message: 'scrolled ' + action.direction }
   }
+  if (action.kind === 'history') {
+    if (action.action === 'back') history.back()
+    else if (action.action === 'forward') history.forward()
+    else location.reload()
+    return { ok: true, message: action.action }
+  }
   var el = document.querySelector('[data-canvas-ref="' + action.ref + '"]')
   if (!el) return { ok: false, message: 'stale-ref: no element ' + action.ref + ' on the page — read again first' }
   if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'center' })
+  if (action.kind === 'select') {
+    el.value = action.value
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, message: 'selected ' + action.value + ' in ' + action.ref }
+  }
   if (action.kind === 'click') {
     el.click()
     return { ok: true, message: 'clicked ' + action.ref }
@@ -183,4 +195,23 @@ export function scrollScript(direction: 'up' | 'down'): string {
   window.scrollBy({ top: dy })
   return true
 })()`
+}
+
+/** Set a <select>/value-bearing control to `value`. Returns `false` if stale. */
+export function selectScript(ref: string, value: string): string {
+  const sel = JSON.stringify(`[data-canvas-ref="${ref}"]`)
+  return `(function () {
+  var el = document.querySelector(${sel})
+  if (!el) return false
+  el.value = ${JSON.stringify(value)}
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+  el.dispatchEvent(new Event('change', { bubbles: true }))
+  return true
+})()`
+}
+
+/** History navigation — back / forward / reload (no ref). */
+export function historyScript(action: 'back' | 'forward' | 'reload'): string {
+  const call = action === 'back' ? 'history.back()' : action === 'forward' ? 'history.forward()' : 'location.reload()'
+  return `(function () { ${call}; return true })()`
 }

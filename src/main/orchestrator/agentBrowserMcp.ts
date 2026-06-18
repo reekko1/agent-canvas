@@ -240,6 +240,40 @@ export class AgentBrowserMcp {
     )
 
     server.registerTool(
+      'browser_select',
+      {
+        description:
+          'Choose an option in a dropdown (<select>) on your browser page. `ref` comes from the latest browser_read; `value` is the option to select.',
+        inputSchema: {
+          ref: z.string().describe('Element ref from the latest browser_read'),
+          value: z.string().describe('The option value to select'),
+        },
+      },
+      async ({ ref, value }) => {
+        const b = needBrowser()
+        if ('error' in b) return fail(b.error)
+        const r = await bus.actBrowser(b.id, { kind: 'select', ref, value })
+        return r.ok ? text(r) : fail(r.message)
+      },
+    )
+
+    server.registerTool(
+      'browser_history',
+      {
+        description: 'Navigate your browser history: go back, forward, or reload the current page.',
+        inputSchema: {
+          action: z.enum(['back', 'forward', 'reload']).describe('back, forward, or reload'),
+        },
+      },
+      async ({ action }) => {
+        const b = needBrowser()
+        if ('error' in b) return fail(b.error)
+        const r = await bus.actBrowser(b.id, { kind: 'history', action })
+        return r.ok ? text(r) : fail(r.message)
+      },
+    )
+
+    server.registerTool(
       'browser_screenshot',
       {
         description:

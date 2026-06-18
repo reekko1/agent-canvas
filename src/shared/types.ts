@@ -433,6 +433,8 @@ export type BrowserAction =
   | { kind: 'click'; ref: string }
   | { kind: 'type'; ref: string; text: string; clear?: boolean; submit?: boolean }
   | { kind: 'scroll'; direction: 'up' | 'down' }
+  | { kind: 'select'; ref: string; value: string }
+  | { kind: 'history'; action: 'back' | 'forward' | 'reload' }
 
 /** A command the orchestrator (main) asks the renderer to execute, correlated by
  *  `id`. Discriminated on `cmd` so each payload is typed at both ends of the IPC

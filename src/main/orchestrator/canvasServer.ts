@@ -200,6 +200,41 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
+  const browserSelect = tool(
+    'browser_select',
+    'Choose an option in a dropdown (<select>) on a browser card\'s page. `ref` comes from the latest browser_read. Use a browser card id from list_world.',
+    {
+      cardId: z.string().describe('Browser card id from list_world'),
+      ref: z.string().describe('Element ref from the latest browser_read'),
+      value: z.string().describe('The option value to select'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.actBrowser(args.cardId, { kind: 'select', ref: args.ref, value: args.value })
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`browser_select failed: ${errText(e)}`)
+      }
+    },
+  )
+
+  const browserHistory = tool(
+    'browser_history',
+    "Navigate a browser card's history: go back, forward, or reload. Use a browser card id from list_world.",
+    {
+      cardId: z.string().describe('Browser card id from list_world'),
+      action: z.enum(['back', 'forward', 'reload']).describe('back, forward, or reload'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.actBrowser(args.cardId, { kind: 'history', action: args.action })
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`browser_history failed: ${errText(e)}`)
+      }
+    },
+  )
+
   const sendToAgent = tool(
     'send_to_agent',
     "Send a message — a new instruction or follow-up — to a running agent's terminal, as if the user typed it. Use a card id from list_world. If the agent is busy, the message is queued and processed when it next idles.",
@@ -294,6 +329,8 @@ export function buildCanvasServer(bus: CommandBus) {
       browserClick,
       browserType,
       browserScroll,
+      browserSelect,
+      browserHistory,
       sendToAgent,
       getAgentReply,
       renameAgent,

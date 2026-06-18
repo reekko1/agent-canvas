@@ -158,11 +158,21 @@ export function Canvas() {
 
   const onCloseCard = useCallback(
     (cardId: string) => {
+      // Lifecycle coupling: an agent's requested browser closes with it. Find the
+      // browsers this card owns (request_browser link) and take them along.
+      const owned = nodesRef.current
+        .filter(
+          (n) => n.type === 'card' && n.data.kind === 'browser' && n.data.ownerCardId === cardId,
+        )
+        .map((n) => n.id)
+      const closing = [cardId, ...owned]
       // Browser cards have no tmux/pty session — there's nothing to kill, and
       // killing would log a missing-session error (ids carry the kind prefix).
-      if (!cardId.startsWith('browser-')) void window.canvas.killCard(cardId)
-      setNodes((ns) => ns.filter((n) => n.id !== cardId))
-      proj.detachCard(cardId)
+      closing.forEach((id) => {
+        if (!id.startsWith('browser-')) void window.canvas.killCard(id)
+      })
+      setNodes((ns) => ns.filter((n) => !closing.includes(n.id)))
+      closing.forEach((id) => proj.detachCard(id))
     },
     [proj.detachCard],
   )

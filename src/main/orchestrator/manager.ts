@@ -65,6 +65,17 @@ export class Orchestrator {
   /** How autonomous the orchestrator is. See OrchestratorMode. Default to the
    *  supervised middle: it wakes on events but every action needs a click. */
   private mode: OrchestratorMode = 'supervising'
+  /** Stop the live turn (barge-in), set per session from the SDK query handle.
+   *  Null between sessions. */
+  private interruptTurn: (() => Promise<void>) | null = null
+  /** A turn is producing output right now — gates `interrupt()` so a barge-in
+   *  while idle is a no-op. Flipped from the event stream in `emit`. */
+  private turnActive = false
+  /** We just interrupted the turn — so the SDK's resulting non-success `result`
+   *  (it reports an aborted turn as `error_during_execution`) is expected, not a
+   *  failure, and must be swallowed instead of whispered as a red error. Cleared
+   *  on the next turn-closing event in `emit`. */
+  private interrupted = false
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -155,6 +166,17 @@ export class Orchestrator {
     })
   }
 
+  /** Barge-in: stop the current turn so it stops narrating and runs no further
+   *  tools. Fired when the user grabs the mic to talk over the orchestrator (the
+   *  voice audio is dropped separately in main). No-op when no turn is live; the
+   *  interrupt promise is best-effort, so a races-with-teardown rejection is fine. */
+  interrupt(): void {
+    if (!this.turnActive) return
+    this.turnActive = false
+    this.interrupted = true // swallow the aborted-turn result that follows
+    void this.interruptTurn?.().catch(() => {})
+  }
+
   /** End the live session at app teardown — the input generator returns, the
    *  `query()` completes, and nothing restarts. */
   dispose(): void {
@@ -195,11 +217,15 @@ export class Orchestrator {
         gate: this.gate,
         onEvent: (e) => this.emit(e),
         beforeTool: this.deps.awaitVoiceCaughtUp,
+        onSession: (c) => (this.interruptTurn = c.interrupt),
       })
     } catch (e) {
       this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
     } finally {
       this.sessionActive = false
+      this.interruptTurn = null
+      this.turnActive = false
+      this.interrupted = false
       // The SDK ended the session (error / process abort) but work is waiting —
       // bring a fresh session up to drain it.
       if (!this.disposed && this.queue.length) this.ensureSession()
@@ -281,6 +307,19 @@ export class Orchestrator {
   }
 
   private emit(e: OrchestratorEvent): void {
+    // Track whether a turn is live so a barge-in only interrupts real output:
+    // assistant/tool events mean it's producing; result/error close the turn.
+    if (e.kind === 'assistant' || e.kind === 'tool') this.turnActive = true
+    else if (e.kind === 'result' || e.kind === 'error') {
+      this.turnActive = false
+      // The turn we just interrupted closes with a non-success result; that's the
+      // barge-in landing, not a failure. Swallow the error (don't whisper/speak
+      // it); let a genuine success through. Either way the interrupt is consumed.
+      if (this.interrupted) {
+        this.interrupted = false
+        if (e.kind === 'error') return
+      }
+    }
     this.deps.send('orchestrator-event', e)
     this.deps.speak?.(e) // voice tap, beside the typed event
   }

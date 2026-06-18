@@ -278,6 +278,10 @@ export function OrchestratorChatBar({
     if (recordingRef.current || !voiceOkRef.current) return
     recordingRef.current = true
     setRecording(true)
+    // Barge-in, instantly: cut the orchestrator's voice locally so it stops the
+    // moment you grab the mic, without waiting for main's reset to round-trip
+    // back (main also fires onTtsReset + interrupts the turn via startSpeech).
+    player.current?.reset()
     window.canvas.startSpeech()
     const capture = new MicCapture()
     mic.current = capture

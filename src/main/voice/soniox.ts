@@ -394,9 +394,15 @@ export class SonioxVoice {
     })
   }
 
-  /** Stop speaking now (barge-in or app teardown) and flush the renderer's audio. */
+  /** Stop speaking now (barge-in or app teardown) and flush the renderer's audio.
+   *  Always fires onTtsReset, never gated on a live socket: Soniox streams a whole
+   *  line's audio in a burst and `terminated` closes the socket within a beat,
+   *  while the renderer plays that buffered audio out over several seconds. So by
+   *  the time a line is actually audible the socket is usually already gone —
+   *  gating on it would leave the buffered audio playing, the barge-in that never
+   *  lands. reset() is idempotent, so firing it with nothing playing is harmless. */
   cancelSpeak(): void {
-    if (this.ttsSocket) this.deps.onTtsReset()
+    this.deps.onTtsReset()
     this.closeSocket()
   }
 

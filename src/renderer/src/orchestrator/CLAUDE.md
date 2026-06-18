@@ -19,7 +19,7 @@ Confirm-toast approval flow: main asks via an `OrchestratorCommand` (`onOrchestr
 
 Tracers are likewise Canvas's job: main fires `onOrchestratorTarget`, Canvas resolves the target card's rect and pushes a `TracerSpec`. Tracer timing is shared with main via `TRACER_TRAVEL_MS` so the action's visible effect (e.g. a revealed spawn card) lands when the comet does.
 
-Voice ownership split: the renderer owns the audio devices — mic capture, the TTS playback timeline, barge-in (`reset`), and the loudness envelope. Main owns the Soniox STT/TTS sockets, the `SONIOX_API_KEY`, and turning text into audio chunks. `TtsPlayer.listen` reports speaking on/off (lifted to Canvas via `onSpeakingChange` for the edge glow, and to main via `notifyVoicePlaying` so main can pace actions to the voice) and writes the per-frame `--voice-level` CSS var directly (no React re-render in the hot path).
+Voice ownership split: the renderer owns the audio devices — mic capture, the TTS playback timeline, barge-in (`reset`), and the loudness envelope. Grabbing the mic barges in instantly: `startRecording` calls `reset()` locally rather than waiting for main's `onTtsReset` to round-trip back, and main pairs that with interrupting the orchestrator turn so it stops narrating instead of starting a fresh spoken line a beat later. Main owns the Soniox STT/TTS sockets, the `SONIOX_API_KEY`, and turning text into audio chunks. `TtsPlayer.listen` reports speaking on/off (lifted to Canvas via `onSpeakingChange` for the edge glow, and to main via `notifyVoicePlaying` so main can pace actions to the voice) and writes the per-frame `--voice-level` CSS var directly (no React re-render in the hot path).
 
 ## Conventions & gotchas
 

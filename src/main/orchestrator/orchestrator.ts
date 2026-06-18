@@ -42,12 +42,16 @@ export interface RunOptions {
    *  lands with the line narrating it instead of ahead of it. No-op when there's
    *  nothing to wait for. This is the single mechanism that orders voice + action. */
   beforeTool?: () => Promise<void>
+  /** Handed the live query's controls once the session is up (re-invoked on each
+   *  restart with the fresh handle). Currently just `interrupt()`, so a barge-in —
+   *  the user grabbing the mic — can stop the turn mid-narration. */
+  onSession?: (controls: { interrupt: () => Promise<void> }) => void
 }
 
 /** Drive the persistent orchestrator session, streaming events to `onEvent`.
  *  Resolves only when the input stream ends (app teardown) or the SDK errors. */
 export async function runOrchestrator(opts: RunOptions): Promise<void> {
-  const { bus, input, gate, onEvent, beforeTool } = opts
+  const { bus, input, gate, onEvent, beforeTool, onSession } = opts
 
   // Subscription auth: a stray ANTHROPIC_API_KEY outranks CLAUDE_CODE_OAUTH_TOKEN
   // and would silently bill pay-as-you-go. Force the subscription path by dropping
@@ -64,6 +68,9 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
   ): Promise<PermissionResult> => {
     // Hold every tool until the line narrating it has been heard — this alone
     // serializes the turn to speech, so nothing else has to guard against overlap.
+    // EVERY tool reaches here (read-only ones are NOT in `allowedTools`, which the
+    // SDK auto-approves before this callback): that's what lets the pacing cover
+    // reads too. Read-only tools then auto-allow here; mutating ones hit the gate.
     await beforeTool?.()
     if (READ_ONLY.has(toolName)) return { behavior: 'allow', updatedInput: input }
     const decision = await gate(toolName, input)
@@ -83,22 +90,28 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
   // so a session-wide latch would suppress the fallback for every later turn.
   let streamed = false
 
-  for await (const m of query({
+  const q = query({
     prompt: input,
     options: {
       model: 'claude-opus-4-8',
       systemPrompt: SYSTEM_PROMPT,
       mcpServers: { canvas: buildCanvasServer(bus) },
-      // Read-only tools are pre-approved; mutating ones fall through to canUseTool.
-      // Single-sourced from READ_ONLY so the SDK and the gate can't disagree.
-      allowedTools: [...READ_ONLY],
+      // No `allowedTools`: every tool — read-only included — falls through to
+      // `canUseTool`. Listing reads there would auto-approve them BEFORE the
+      // callback (per the SDK's eval order), skipping the speech-pacing in
+      // `beforeTool`. Routing all tools through `canUseTool` is what makes pacing
+      // cover reads; that callback is the single source for permission AND order.
       // Drop every built-in tool — the orchestrator only has canvas verbs.
       tools: [],
       // Stream assistant text deltas so the chat bar and TTS get them live.
       includePartialMessages: true,
       canUseTool,
     },
-  })) {
+  })
+  // Hand the live handle up so a barge-in can interrupt the turn mid-narration.
+  onSession?.({ interrupt: () => q.interrupt() })
+
+  for await (const m of q) {
     if (m.type === 'stream_event') {
       streamed = true
       const ev = m.event

@@ -376,7 +376,11 @@ ipcMain.handle('voice-save-key', async (_e, key: string) => {
   return { ok: true }
 })
 ipcMain.on('voice-stt-start', () => {
-  voice?.cancelSpeak() // barge-in: talking over the orchestrator silences it
+  // Barge-in: grabbing the mic talks over the orchestrator. Drop the audio still
+  // playing AND interrupt the turn, so a multi-block turn can't start a fresh
+  // spoken line a beat later — the floor is yours.
+  voice?.cancelSpeak()
+  orchestrator?.interrupt()
   voice?.startStt()
 })
 ipcMain.on('voice-stt-audio', (_e, chunk: ArrayBuffer | Uint8Array) =>

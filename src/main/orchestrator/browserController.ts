@@ -17,7 +17,7 @@ import { webContents, type WebContents } from 'electron'
 import {
   READ_SCRIPT,
   resolveRefScript,
-  focusRefScript,
+  selectAllScript,
   scrollScript,
   selectScript,
   historyScript,
@@ -150,11 +150,17 @@ export class BrowserController implements BrowserDriver {
       await this.clickAt(wc, box.x, box.y)
       return { ok: true, message: `clicked ${action.ref}` }
     }
-    // type: focus (+optional clear) in-page, then real keystrokes
-    await wc.debugger.sendCommand('Runtime.evaluate', {
-      expression: focusRefScript(action.ref, action.clear),
-      returnByValue: true,
-    })
+    // type: a REAL click focuses the field first — programmatic el.focus() is
+    // unreliable (many sites only enter an editable state on a pointer event),
+    // which is why typing used to need a separate browser_click. Then optionally
+    // select-all (so the text replaces), then real keystrokes.
+    await this.clickAt(wc, box.x, box.y)
+    if (action.clear) {
+      await wc.debugger.sendCommand('Runtime.evaluate', {
+        expression: selectAllScript(action.ref),
+        returnByValue: true,
+      })
+    }
     if (action.text) await wc.debugger.sendCommand('Input.insertText', { text: action.text })
     if (action.submit) await this.pressEnter(wc)
     return { ok: true, message: `typed into ${action.ref}` }

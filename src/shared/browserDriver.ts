@@ -132,6 +132,7 @@ export function buildActionScript(action: BrowserAction): string {
     return { ok: true, message: 'clicked ' + action.ref }
   }
   if (action.kind === 'type') {
+    if (el.click) el.click() // focus via a click first, like a real user
     if (el.focus) el.focus()
     if (el.isContentEditable) {
       if (action.clear) el.textContent = ''
@@ -172,17 +173,18 @@ export function resolveRefScript(ref: string): string {
 })()`
 }
 
-/** Focus a ref (the trusted keystrokes that follow go to it), optionally clearing
- *  it first. Returns `false` if the ref is stale. */
-export function focusRefScript(ref: string, clear?: boolean): string {
+/** Select all text in a (just-clicked, focused) field so the next keystrokes
+ *  replace it. Works for input/textarea (el.select) and contenteditable.
+ *  Returns `false` if the ref is stale. */
+export function selectAllScript(ref: string): string {
   const sel = JSON.stringify(`[data-canvas-ref="${ref}"]`)
   return `(function () {
   var el = document.querySelector(${sel})
   if (!el) return false
-  if (el.focus) el.focus()
-  if (${clear ? 'true' : 'false'}) {
-    if (el.isContentEditable) el.textContent = ''
-    else if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })) }
+  if (typeof el.select === 'function') { el.select(); return true }
+  if (el.isContentEditable) {
+    var r = document.createRange(); r.selectNodeContents(el)
+    var s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
   }
   return true
 })()`

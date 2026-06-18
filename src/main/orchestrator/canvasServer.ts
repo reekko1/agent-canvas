@@ -159,7 +159,7 @@ export function buildCanvasServer(bus: CommandBus) {
 
   const browserType = tool(
     'browser_type',
-    "Type text into an input/textarea on a browser card's page. `ref` comes from the latest browser_read. Set clear to replace existing text; set submit to press Enter afterward (e.g. to submit a search). Use a browser card id from list_world.",
+    "Type text into an input/textarea on a browser card's page. It focuses the field for you (a real click) — no separate browser_click needed first. `ref` comes from the latest browser_read. Set clear to replace existing text; set submit to press Enter afterward (e.g. to submit a search). Use a browser card id from list_world.",
     {
       cardId: z.string().describe('Browser card id from list_world'),
       ref: z.string().describe('Element ref from the latest browser_read'),

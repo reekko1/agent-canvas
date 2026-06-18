@@ -209,7 +209,7 @@ export class AgentBrowserMcp {
       'browser_type',
       {
         description:
-          'Type text into an input/textarea on your browser page. `ref` comes from the latest browser_read. Set clear to replace existing text; set submit to press Enter afterward.',
+          'Type text into an input/textarea on your browser page. It focuses the field for you (a real click) — no separate browser_click needed first. `ref` comes from the latest browser_read. Set clear to replace existing text; set submit to press Enter afterward.',
         inputSchema: {
           ref: z.string().describe('Element ref from the latest browser_read'),
           text: z.string().describe('The text to type'),

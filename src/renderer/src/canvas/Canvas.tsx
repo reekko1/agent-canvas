@@ -680,6 +680,17 @@ export function Canvas() {
     })
     return new Set(ranked.slice(BROWSER_BUDGET))
   }, [cardNodes, masterCard?.id, browserRecency])
+
+  // Ownership links for the UI: a browser → its owner's name (window-bar chip),
+  // and an agent → the browser it owns (its poster thumbnail). First owner wins.
+  const ownedBrowserByAgent = useMemo(() => {
+    const m = new Map<string, CanvasNode>()
+    for (const n of cardNodes) {
+      const owner = n.data.kind === 'browser' ? n.data.ownerCardId : undefined
+      if (owner && !m.has(owner)) m.set(owner, n)
+    }
+    return m
+  }, [cardNodes])
   const mRect = masterRect(winW, winH, hasStack)
   // The diff side sheet overlays the right half — independent of the layout.
   const sheetW = Math.min(900, Math.max(520, Math.round(winW * 0.5)))
@@ -824,6 +835,17 @@ export function Canvas() {
               data={n.data}
               stacked={!isMaster}
               dormant={dormantBrowsers.has(n.id)}
+              ownerName={
+                n.data.kind === 'browser' &&
+                n.data.ownerCardId &&
+                cardNodes.some((x) => x.id === n.data.ownerCardId)
+                  ? titleFor(n.data.ownerCardId)
+                  : undefined
+              }
+              onFlyToOwner={
+                n.data.ownerCardId ? () => promoteCard(n.data.ownerCardId!) : undefined
+              }
+              browserThumb={ownedBrowserByAgent.get(n.id)?.data.snapshot}
               title={shellTitles[n.id]}
             />
           </div>

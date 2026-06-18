@@ -15,7 +15,7 @@ const clamp = (lines: number): CSSProperties => ({
 /// progress bar standing in for the shell's cursor — a glance at how alive it is
 /// and how far it's got. Clicking promotes the card to master, where the full
 /// plan and terminal live.
-export function PosterFace({ meta }: { meta: CardMeta }) {
+export function PosterFace({ meta, browserThumb }: { meta: CardMeta; browserThumb?: string }) {
   // Keep the attention-debt minutes current while the poster shows.
   const [, tick] = useReducer((n: number) => n + 1, 0)
   useEffect(() => {
@@ -67,6 +67,16 @@ export function PosterFace({ meta }: { meta: CardMeta }) {
 
       {/* The live now-lines and progress, pinned low like the shell's prompt. */}
       <div className="mt-auto flex flex-col gap-2">
+        {/* What this agent's browser is looking at — a glance without promoting. */}
+        {browserThumb && (
+          <div className="overflow-hidden rounded-md border border-border/60">
+            <img
+              src={browserThumb}
+              alt=""
+              className="h-16 w-full object-cover object-top opacity-90"
+            />
+          </div>
+        )}
         {activeStep && (
           <div
             className="font-mono text-[12px] leading-snug text-card-foreground"

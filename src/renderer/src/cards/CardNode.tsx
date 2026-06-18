@@ -29,6 +29,9 @@ export function CardNode({
   data,
   stacked,
   dormant,
+  ownerName,
+  onFlyToOwner,
+  browserThumb,
   title,
 }: {
   id: string
@@ -37,6 +40,14 @@ export function CardNode({
   /** Browser card evicted by the webview budget — its guest is unmounted (the
    *  snapshot face shows). Always implies `stacked` (the master is never evicted). */
   dormant?: boolean
+  /** For a browser opened by an agent: the owner's display name (a window-bar
+   *  chip that flies to it). Undefined for hand/orchestrator-opened browsers. */
+  ownerName?: string
+  /** Promote/reveal this browser's owning agent. */
+  onFlyToOwner?: () => void
+  /** For an agent that owns a browser: a thumbnail of what that browser shows,
+   *  surfaced on its poster ("what my agent is looking at"). */
+  browserThumb?: string
   /** Live shell-pane title bits (command + cwd) from the global useShellTitles
    *  poll — undefined for agent cards and for a shell before its first poll. */
   title?: ShellTitle
@@ -97,6 +108,16 @@ export function CardNode({
         <span className="flex-1 truncate">
           {isBrowser ? (data.reason ?? '') : neutral ? '' : (meta.task ?? meta.detail ?? '')}
         </span>
+        {/* Provenance chip: who opened this browser — click to fly to that agent. */}
+        {isBrowser && ownerName && (
+          <button
+            className="shrink-0 rounded bg-border/50 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-border hover:text-foreground"
+            onClick={onFlyToOwner}
+            title={`Opened by ${ownerName} — click to view it`}
+          >
+            {ownerName}
+          </button>
+        )}
         {meta.model && <span className="text-muted-foreground">{meta.model}</span>}
         {meta.permissionMode === 'bypassPermissions' && (
           <span className="font-bold text-status-error">BYPASS</span>
@@ -159,7 +180,7 @@ export function CardNode({
             ) : isShell ? (
               <ShellFace running={running} />
             ) : (
-              <PosterFace meta={meta} />
+              <PosterFace meta={meta} browserThumb={browserThumb} />
             )}
           </button>
         )}

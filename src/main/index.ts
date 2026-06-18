@@ -10,6 +10,7 @@ import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import { Orchestrator } from './orchestrator/manager'
+import { AgentBrowserMcp } from './orchestrator/agentBrowserMcp'
 import { SonioxVoice, validateSonioxKey } from './voice/soniox'
 import { storeSonioxKey } from './voice/keyStore'
 import type {
@@ -251,6 +252,19 @@ app.whenReady().then(() => {
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just
   // commanded by it.
   spine.onReply = (cardId, reply) => orchestrator?.notifyAgentReply(cardId, reply)
+  // Agent-facing browser tools: a loopback HTTP MCP server attached to every
+  // card via --mcp-config, driving browsers through the orchestrator's bus. It
+  // shares the spine's token (cards authenticate as their hooks do) and a stable
+  // port (surviving sessions read their mcp.json url once at launch).
+  const agentBrowserMcp = new AgentBrowserMcp({
+    bus: orchestrator.commandBus,
+    getState: () => spine.remote.getLatestState(),
+    token: spine.token,
+  })
+  agentBrowserMcp.start(spine.browserMcpPort, (port) => {
+    spine.attachBrowserMcp(port)
+    console.log(`[browser-mcp] ready on 127.0.0.1:${port}`)
+  })
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
   // download in the background, notify, install on quit. Dev builds have no

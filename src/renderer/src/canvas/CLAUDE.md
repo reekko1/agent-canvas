@@ -75,8 +75,11 @@ only shells are polled (agents speak via status/task).
 **Remote** — `useRemotePublish` projects the whole renderer state (canvases,
 cards, approvals, questions, feed, needs-you) to the phone panel, grouped by
 project id, behind a JSON content-compare so position-only churn doesn't hit IPC.
-A browser row reads as its live page (title, else `hostOf(url)`) and ships its
-current `url` so the orchestrator can answer "what page are we on".
+Each published canvas carries an `active` flag (`p.id === activeProjectId`) so
+the phone knows which project is foregrounded on the desktop; `activeProjectId`
+is in the content-compare deps, so a switch alone republishes. A browser row
+reads as its live page (title, else `hostOf(url)`) and ships its current `url`
+so the orchestrator can answer "what page are we on".
 
 **Auto-update** — `useAutoUpdate` mirrors electron-updater status from main
 (events merge so the captured version survives version-less progress ticks);

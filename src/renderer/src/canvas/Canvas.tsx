@@ -17,6 +17,7 @@ import { AskToasts } from '@/cards/AskToasts'
 import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
+import { getBrowser } from '@/cards/browserBridge'
 import { OrchestratorChatBar } from '@/orchestrator/ChatBar'
 import { OrchestratorTracers, TRACER_COLOR, type TracerSpec } from '@/orchestrator/Tracer'
 import { TRACER_TRAVEL_MS } from '@shared/types'
@@ -213,8 +214,15 @@ export function Canvas() {
   )
 
   const restoreItem = useCallback(
-    (c: CardRecord): CanvasNode | null =>
-      c.folder ? makeCard(c.id, c.folder, c.kind, c.name, c.url) : null,
+    (c: CardRecord): CanvasNode | null => {
+      if (!c.folder) return null
+      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url)
+      // Restore a browser's ownership link + reason so request_browser resolves
+      // the same browser after a restart (agents reattach to live tmux sessions).
+      node.data.ownerCardId = c.ownerCardId
+      node.data.reason = c.reason
+      return node
+    },
     [makeCard],
   )
 
@@ -276,6 +284,7 @@ export function Canvas() {
   useRemotePublish({
     nodes,
     projects: proj.projects,
+    activeProjectId: proj.activeProjectId,
     attention,
     git,
     shellTitles,
@@ -477,13 +486,19 @@ export function Canvas() {
       }
       const url = cmd.payload.url?.trim() || undefined
       const name = cmd.payload.name?.trim() || undefined
+      const ownerCardId = cmd.payload.ownerCardId
+      const reason = cmd.payload.reason?.trim() || undefined
       void (async () => {
         const r = await window.canvas.newBrowser(target.dir, url)
         if (!r) {
           reply({ ok: false, message: 'browser creation was cancelled' })
           return
         }
-        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'browser', name, url)])
+        const node = makeCard(r.cardId, r.folder, 'browser', name, url)
+        // An agent-requested browser carries its owner link + stated reason.
+        node.data.ownerCardId = ownerCardId
+        node.data.reason = reason
+        setNodes((ns) => [...ns, node])
         proj.attachCardTo(target.id, r.cardId)
         if (proj.activeProjectId !== target.id) switchProject(target.id)
         // Same reveal dance as spawnAgent — invisible until the comet lands.
@@ -520,6 +535,57 @@ export function Canvas() {
       )
       promoteCard(cardId)
       reply({ ok: true, message: `navigated ${titleFor(cardId)} to ${url}` })
+      return
+    }
+
+    if (cmd.cmd === 'setBrowserReason') {
+      const { cardId, reason } = cmd.payload
+      const node = nodesRef.current.find((n) => n.id === cardId && n.type === 'card')
+      if (!node || node.data.kind !== 'browser') {
+        reply({ ok: false, message: `${cardId} is not a browser` })
+        return
+      }
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === cardId && n.type === 'card' ? { ...n, data: { ...n.data, reason } } : n,
+        ),
+      )
+      reply({ ok: true, message: `updated reason for ${titleFor(cardId)}` })
+      return
+    }
+
+    if (cmd.cmd === 'readBrowser' || cmd.cmd === 'screenshotBrowser' || cmd.cmd === 'actBrowser') {
+      const { cardId } = cmd.payload
+      const node = nodesRef.current.find((n) => n.id === cardId && n.type === 'card')
+      if (!node) {
+        reply({ ok: false, message: `no card with id ${cardId}` })
+        return
+      }
+      if (node.data.kind !== 'browser') {
+        reply({ ok: false, message: `${titleFor(cardId)} is not a browser` })
+        return
+      }
+      const handle = getBrowser(cardId)
+      if (!handle) {
+        reply({ ok: false, message: `${titleFor(cardId)}'s web view isn't ready yet` })
+        return
+      }
+      // An action mutates the page — surface the card so it's visible. Reads and
+      // screenshots are silent observations (no promote, no comet latency).
+      if (cmd.cmd === 'actBrowser') promoteCard(cardId)
+      void (async () => {
+        try {
+          if (cmd.cmd === 'readBrowser') {
+            reply({ ok: true, message: `read ${titleFor(cardId)}`, snapshot: await handle.read() })
+          } else if (cmd.cmd === 'screenshotBrowser') {
+            reply({ ok: true, message: `captured ${titleFor(cardId)}`, image: await handle.screenshot() })
+          } else {
+            reply(await handle.act(cmd.payload.action))
+          }
+        } catch (e) {
+          reply({ ok: false, message: e instanceof Error ? e.message : String(e) })
+        }
+      })()
       return
     }
 

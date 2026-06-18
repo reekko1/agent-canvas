@@ -50,11 +50,23 @@ export interface MainBusDeps {
   signalTarget: (target: OrchestratorTarget) => void
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 /** Resolve when the comet would reach the card — the action's effect commits here,
  *  so it lands with the dot instead of ahead of it. */
 function landed(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, TRACER_TRAVEL_MS))
+  return delay(TRACER_TRAVEL_MS)
 }
+
+/** Pause between an agent prompt's body and its submitting Enter. The claude TUI
+ *  reads a body+`\r` glued into one write as a single paste/continuation burst and
+ *  treats the trailing `\r` as a literal newline — the text lands in the composer
+ *  but never sends (the "pasted but not submitted" bug). Writing the body, settling
+ *  past the burst window, then writing a lone `\r` makes the Enter a discrete
+ *  keystroke the TUI reads as submit. */
+const SUBMIT_SETTLE_MS = 120
 
 /** Build the live CommandBus backed by the running app (see MainBusDeps). */
 export function makeMainBus(deps: MainBusDeps): CommandBus {
@@ -93,6 +105,35 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       }
     },
 
+    openCanvas: async (): Promise<string> => {
+      const s = deps.getState()
+      const active = s?.canvases.find((c) => c.active)
+      if (!active) return '[Open canvas] none.'
+      const cards = s!.cards.filter((c) => c.projectId === active.id)
+      const asks = s!.approvals.filter((a) => a.projectId === active.id)
+      const cardLines = cards.map((c) => {
+        const bits = [`${c.name} (${c.id}) — ${c.kind}/${c.status}`]
+        if (c.task) bits.push(`task: ${c.task}`)
+        if (c.kind === 'browser' && c.url) bits.push(`at ${c.url}`)
+        if (c.kind === 'shell' && c.running) bits.push(`running ${c.running}`)
+        return '  - ' + bits.join(' · ')
+      })
+      const others = s!.canvases
+        .filter((c) => !c.active)
+        .map((c) => `${c.name} (${c.id})${c.attention !== 'none' ? ` [${c.attention}]` : ''}`)
+      return [
+        `[Open canvas] ${active.name} (${active.id})` +
+          (active.branch ? ` · ${active.branch}${active.dirty ? ` +${active.dirty}` : ''}` : ''),
+        cards.length ? `cards:\n${cardLines.join('\n')}` : 'cards: none',
+        asks.length
+          ? `blocked: ${asks.map((a) => `${a.name} — ${a.detail} (${a.id})`).join('; ')}`
+          : '',
+        others.length ? `other canvases (list_world for their cards): ${others.join(', ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    },
+
     focusCanvas: async (canvasId) => {
       const r = await deps.dispatch({ cmd: 'focusCanvas', payload: { canvasId } })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? 'switched' : 'failed') }
@@ -110,6 +151,14 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'opened' : 'failed') }
     },
 
+    setBrowserReason: async (cardId, reason) => {
+      const card = findCard(cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const r = await deps.dispatch({ cmd: 'setBrowserReason', payload: { cardId, reason } })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? 'updated' : 'failed') }
+    },
+
     navigateBrowser: async (cardId, url) => {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
@@ -121,16 +170,51 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       return { ok: !!r.ok, message: r.message ?? (r.ok ? `pointed ${card.name} at ${url}` : 'failed') }
     },
 
+    readBrowser: async (cardId) => {
+      const card = findCard(cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      // Observation — no comet/landed latency; the agent loop reads frequently.
+      const r = await deps.dispatch({ cmd: 'readBrowser', payload: { cardId } })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? `read ${card.name}` : 'failed'), snapshot: r.snapshot }
+    },
+
+    screenshotBrowser: async (cardId) => {
+      const card = findCard(cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const r = await deps.dispatch({ cmd: 'screenshotBrowser', payload: { cardId } })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? `captured ${card.name}` : 'failed'), image: r.image }
+    },
+
+    actBrowser: async (cardId, action) => {
+      const card = findCard(cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      // A mutation — fly the comet and land it with the narration, like navigate.
+      deps.signalTarget({ kind: 'send', cardId })
+      await landed()
+      const r = await deps.dispatch({ cmd: 'actBrowser', payload: { cardId, action } })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? `acted on ${card.name}` : 'failed') }
+    },
+
     sendToAgent: async (cardId, message) => {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no agent with id ${cardId}` }
       if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
-      // The comet delivers the message: fly first, inject when it lands. Keystroke
-      // injection into the agent's terminal; Enter (\r) submits the line. Claude
+      // The comet delivers the message: fly first, inject when it lands. Claude
       // queues input when busy, so this is safe at any status.
       deps.signalTarget({ kind: 'send', cardId })
       await landed()
-      deps.writeToCard(cardId, message.endsWith('\r') ? message : `${message}\r`)
+      // Strip trailing whitespace and any dangling backslash before submitting:
+      // a body ending in `\` makes the TUI read the following Enter as an escaped
+      // newline (the manual `\`+Enter line-continuation), not a submit. Then write
+      // the body and the Enter as two separated writes — see SUBMIT_SETTLE_MS for
+      // why a glued-on `\r` gets swallowed as a paste newline instead of sending.
+      const body = message.replace(/[\s\\]+$/, '')
+      deps.writeToCard(cardId, body)
+      await delay(SUBMIT_SETTLE_MS)
+      deps.writeToCard(cardId, '\r')
       return {
         ok: true,
         message: card.status === 'running' ? `queued for ${card.name} (busy)` : `sent to ${card.name}`,

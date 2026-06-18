@@ -32,6 +32,9 @@ interface SpineConfig {
   /** The remote panel's port — persisted so a `tailscale serve` route set up
    *  once keeps pointing at the right place across app restarts. */
   remotePort?: number
+  /** The agent-browser MCP server's port — persisted for the same reason as the
+   *  sink: surviving tmux sessions read their mcp.json url once at launch. */
+  browserMcpPort?: number
 }
 
 function loadConfig(): SpineConfig {
@@ -92,6 +95,9 @@ export class Spine {
 
   start(): void {
     this.tmux.prepare()
+    // Materialize the curated skill plugin up front (no sink/port dependency) so
+    // every card launched after this is equipped via --plugin-dir.
+    this.adapter.stageSkills(SPINE_DIR)
     this.sink.onRequest = (req) => this.handle(req)
     // hooks.json embeds the sink's URL, so it's written once the port is
     // bound. Cards spawn lazily, long after.
@@ -110,6 +116,26 @@ export class Spine {
         `[spine] remote panel on http://127.0.0.1:${port} — expose with: tailscale serve --bg localhost:${port}`,
       )
     })
+  }
+
+  /** The spine's persistent loopback token — shared with the agent-browser MCP
+   *  server so cards authenticate to it the same way their hooks do. */
+  get token(): string {
+    return this.config.token
+  }
+
+  /** The agent-browser MCP server's last-bound port (preferred on restart so
+   *  surviving sessions' mcp.json url stays valid). */
+  get browserMcpPort(): number | undefined {
+    return this.config.browserMcpPort
+  }
+
+  /** Persist the agent-browser MCP port and stage the per-card `--mcp-config`
+   *  (the adapter writes browser-mcp.json; cards launched after are equipped). */
+  attachBrowserMcp(port: number): void {
+    this.config.browserMcpPort = port
+    saveConfig(this.config)
+    this.adapter.stageBrowserMcp(SPINE_DIR, port, this.config.token)
   }
 
   /** The single source of truth for a card's tmux session name. The one mapping

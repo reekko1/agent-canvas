@@ -1,9 +1,12 @@
 // An in-memory CommandBus double for exercising the orchestrator without the real
 // app — used by the offline harness (harness.ts). The live bus is mainBus.ts. The
 // seeded world mimics two canvases with a blocked agent.
+import type { BrowserAction } from '../../shared/types'
 import type {
   ActionResult,
   AgentReplyResult,
+  BrowserReadResult,
+  BrowserShotResult,
   CommandBus,
   SpawnAgentInput,
   SpawnBrowserInput,
@@ -33,6 +36,33 @@ export function makeStubBus(): CommandBus {
   return {
     async listWorld(): Promise<World> {
       return structuredClone(world)
+    },
+
+    async openCanvas(): Promise<string> {
+      const cv = world.canvases.find((c) => c.id === active)
+      if (!cv) return '[Open canvas] none.'
+      const cards = world.cards.filter((c) => c.canvasId === cv.id)
+      const asks = world.approvals.filter((a) => a.canvasId === cv.id)
+      const cardLines = cards.map((c) => {
+        const bits = [`${c.name} (${c.id}) — ${c.kind}/${c.status}`]
+        if (c.task) bits.push(`task: ${c.task}`)
+        if (c.kind === 'browser' && c.url) bits.push(`at ${c.url}`)
+        return '  - ' + bits.join(' · ')
+      })
+      const others = world.canvases
+        .filter((c) => c.id !== cv.id)
+        .map((c) => `${c.name} (${c.id})${c.attention !== 'none' ? ` [${c.attention}]` : ''}`)
+      return [
+        `[Open canvas] ${cv.name} (${cv.id})` +
+          (cv.branch ? ` · ${cv.branch}${cv.dirty ? ` +${cv.dirty}` : ''}` : ''),
+        cards.length ? `cards:\n${cardLines.join('\n')}` : 'cards: none',
+        asks.length
+          ? `blocked: ${asks.map((a) => `${a.name} — ${a.detail} (${a.id})`).join('; ')}`
+          : '',
+        others.length ? `other canvases (list_world for their cards): ${others.join(', ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
     },
 
     async focusCanvas(canvasId: string): Promise<ActionResult> {
@@ -78,6 +108,45 @@ export function makeStubBus(): CommandBus {
       if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
       card.url = url
       return { ok: true, message: `pointed ${card.name} at ${url}` }
+    },
+
+    async setBrowserReason(cardId: string, reason: string): Promise<ActionResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      return { ok: true, message: `(stub) reason for ${card.name}: ${reason}` }
+    },
+
+    async readBrowser(cardId: string): Promise<BrowserReadResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      return {
+        ok: true,
+        message: `read ${card.name}`,
+        snapshot: {
+          url: card.url ?? 'about:blank',
+          title: card.name,
+          scroll: { x: 0, y: 0, maxY: 0, viewportH: 800 },
+          elements: [{ ref: '0', role: 'link', name: '(stub) example link', inViewport: true }],
+          text: `(stub) page content for ${card.name}`,
+          truncated: false,
+        },
+      }
+    },
+
+    async screenshotBrowser(cardId: string): Promise<BrowserShotResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      return { ok: true, message: `captured ${card.name}`, image: 'data:image/png;base64,' }
+    },
+
+    async actBrowser(cardId: string, action: BrowserAction): Promise<ActionResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      return { ok: true, message: `(stub) ${action.kind} on ${card.name}` }
     },
 
     async sendToAgent(cardId: string, message: string): Promise<ActionResult> {

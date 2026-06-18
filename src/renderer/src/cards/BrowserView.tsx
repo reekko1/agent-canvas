@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { WebviewTag } from 'electron'
 import { ArrowLeft, ArrowRight, RotateCw } from 'lucide-react'
+import { registerBrowser } from './browserBridge'
+import { READ_SCRIPT, buildActionScript } from './browserDriver'
 
 /// The card's live web view: the browser analogue of TerminalView. Owns an
 /// Electron <webview> guest (its own process, the `persist:browser` session) and
@@ -94,7 +96,15 @@ export function BrowserView({
 
     hostRef.current!.appendChild(view)
     viewRef.current = view
+    // Expose the guest for orchestrator/agent-driven see-and-control. capturePage
+    // works while stacked; executeJavaScript runs the Tier-A driver in the page.
+    const unregister = registerBrowser(cardId, {
+      screenshot: async () => (await view.capturePage()).toDataURL(),
+      read: async () => await view.executeJavaScript(READ_SCRIPT),
+      act: async (action) => await view.executeJavaScript(buildActionScript(action), true),
+    })
     return () => {
+      unregister()
       view.remove() // drops the guest process and its listeners with it
       viewRef.current = null
     }

@@ -45,6 +45,14 @@ export interface CardData extends Record<string, unknown> {
   /** Current page — only for `kind === 'browser'`. Tracked live from the
    *  webview's navigation and persisted (the card reloads it on restore). */
   url?: string
+  /** A browser card's owning agent card id — set when an agent requested it via
+   *  request_browser. Lets the agent MCP server resolve "my browser". Persisted
+   *  (CardRecord) so the link survives a restart: agents reattach to live tmux
+   *  sessions, so a re-request must find the same browser, not spawn a new one. */
+  ownerCardId?: string
+  /** A browser card's stated purpose (why its owner opened it) — rendered on the
+   *  window bar for provenance. Persisted alongside the owner link. */
+  reason?: string
   /** Live page title / favicon-url for a browser card's chrome and face.
    *  Transient — re-derived from the webview on load, never persisted. */
   title?: string

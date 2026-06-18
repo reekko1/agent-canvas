@@ -88,8 +88,11 @@ export function CardNode({
           <Bot className="size-3.5 text-muted-foreground/70" aria-hidden />
         )}
         <span className="truncate text-muted-foreground">{displayName}</span>
-        {/* Shell/browser bars carry no agent task line. */}
-        <span className="flex-1 truncate">{neutral ? '' : (meta.task ?? meta.detail ?? '')}</span>
+        {/* Shell/browser bars carry no agent task line — but a browser opened by
+            an agent shows that agent's stated reason (provenance), not a task. */}
+        <span className="flex-1 truncate">
+          {isBrowser ? (data.reason ?? '') : neutral ? '' : (meta.task ?? meta.detail ?? '')}
+        </span>
         {meta.model && <span className="text-muted-foreground">{meta.model}</span>}
         {meta.permissionMode === 'bypassPermissions' && (
           <span className="font-bold text-status-error">BYPASS</span>

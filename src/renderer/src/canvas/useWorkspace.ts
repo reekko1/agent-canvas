@@ -70,6 +70,8 @@ export function useWorkspace({
               session: n.data.meta.sessionId,
               name: n.data.name,
               url: n.data.url,
+              ownerCardId: n.data.ownerCardId,
+              reason: n.data.reason,
             },
           ]
         : [],

@@ -29,6 +29,7 @@ function hostOf(url?: string): string | undefined {
 export function useRemotePublish({
   nodes,
   projects,
+  activeProjectId,
   attention,
   git,
   shellTitles,
@@ -39,6 +40,7 @@ export function useRemotePublish({
 }: {
   nodes: CanvasNode[]
   projects: Project[]
+  activeProjectId: string | null
   attention: Record<string, AttentionLevel>
   git: Record<string, RepoIdentity>
   shellTitles: Record<string, ShellTitle>
@@ -59,6 +61,7 @@ export function useRemotePublish({
     const canvases: RemoteState['canvases'] = projects.map((p) => ({
       id: p.id,
       name: p.name,
+      active: p.id === activeProjectId,
       attention: attention[p.id] ?? 'none',
       dirty: git[p.id]?.dirty ?? 0,
       branch: git[p.id]?.branch,
@@ -92,6 +95,10 @@ export function useRemotePublish({
           // The browser's current page — lets the orchestrator answer "what page
           // are we on" instead of only seeing the card name.
           url: browser ? n.data.url : undefined,
+          // Owner link + stated reason for an agent-requested browser — main's
+          // agent MCP server resolves "my browser" from ownerId.
+          ownerId: browser ? n.data.ownerCardId : undefined,
+          reason: browser ? n.data.reason : undefined,
           model: n.data.meta.model,
           permissionMode: n.data.meta.permissionMode,
           subagents: n.data.meta.subagents ?? 0,
@@ -136,5 +143,5 @@ export function useRemotePublish({
     if (json === lastJSON.current) return
     lastJSON.current = json
     window.canvas.publishRemoteState(state)
-  }, [nodes, projects, attention, git, shellTitles, asks, questions, notifications, titleFor])
+  }, [nodes, projects, activeProjectId, attention, git, shellTitles, asks, questions, notifications, titleFor])
 }

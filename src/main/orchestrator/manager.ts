@@ -12,6 +12,7 @@
 // The hooks are the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import { makeMainBus, type DispatchCommand, type ResultFor } from './mainBus'
+import type { CommandBus } from './contract'
 import { TRACER_TRAVEL_MS } from '../../shared/types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
@@ -283,6 +284,12 @@ export class Orchestrator {
     decideAsk: (askId, decision) => this.deps.decideAsk(askId, decision),
     signalTarget: (t) => this.signalTarget(t),
   })
+
+  /** The live CommandBus — shared with the agent-facing browser MCP server, which
+   *  drives browsers through the same renderer dispatch the orchestrator uses. */
+  get commandBus(): CommandBus {
+    return this.bus
+  }
 
   private readonly gate = async (
     toolName: string,

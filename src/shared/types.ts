@@ -173,6 +173,14 @@ export interface CardRecord {
   /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
    *  (the live snapshot is transient and never persisted). */
   url?: string
+  /** A browser card's owning agent card id (request_browser link) — persisted so
+   *  the ownership survives a restart: agents reattach to their live tmux session
+   *  (reattach-not-resume), so a re-request must resolve the SAME browser instead
+   *  of spawning an orphaned second one. */
+  ownerCardId?: string
+  /** A browser card's stated purpose (window-bar provenance) — persisted with the
+   *  owner link so the restored card still reads "why". */
+  reason?: string
 }
 
 /// One project's canvas: a named folder. References cards by id only — it never
@@ -217,6 +225,10 @@ export interface RemoteState {
   canvases: {
     id: string
     name: string
+    /** The open (active) canvas — the one showing in the desktop viewport. The
+     *  orchestrator operates on this one by default; exactly one is true when any
+     *  canvas exists. */
+    active: boolean
     /** Rolled-up attention: a card stalled on you (`blocking`), one done and
      *  waiting (`done`), or quiet (`none`). Mirrors the desktop toolbar. */
     attention: AttentionLevel
@@ -239,6 +251,13 @@ export interface RemoteState {
     /** A browser card's current page url — so the orchestrator (and phone) can
      *  see where it's pointed. */
     url?: string
+    /** A browser card's owning agent card id — set when an agent requested the
+     *  browser for itself (request_browser). The agent MCP server resolves "my
+     *  browser" from this. Absent for orchestrator/hand-opened browsers. */
+    ownerId?: string
+    /** A browser card's stated purpose — why its owner opened it (shown on the
+     *  window bar). Set/updated by request_browser. */
+    reason?: string
     model?: string
     permissionMode?: string
     subagents: number
@@ -361,6 +380,60 @@ export interface OrchestratorTarget {
   askId?: string
 }
 
+/// ──────────────────────────────────────────────────────────────────────────
+/// Browser agency — the observation/action contract for seeing and controlling a
+/// browser card's <webview>. This is the one type that must stay stable across
+/// the Tier A (renderer `executeJavaScript`) and Tier B (CDP) implementations:
+/// `ref` is opaque, snapshot-scoped, and resolved by the driver, never parsed by
+/// the caller. See BROWSER_AGENCY_PLAN.md §2.
+/// ──────────────────────────────────────────────────────────────────────────
+
+/** One interactive element in a BrowserSnapshot (set-of-marks). */
+export interface BrowserElement {
+  /** Opaque handle passed back verbatim to click/type. The driver owns
+   *  resolution (Tier A: a stamped `data-canvas-ref`). Valid only for the
+   *  snapshot that produced it — re-read after any mutating action. */
+  ref: string
+  /** ARIA/a11y role: 'button' | 'link' | 'textbox' | 'checkbox' | 'combobox' | … */
+  role: string
+  /** Accessible name: aria-label / associated label / visible text, normalized. */
+  name: string
+  /** Current value for inputs/selects/textareas (omitted when empty). */
+  value?: string
+  /** Only the meaningful flags are present. */
+  state?: {
+    disabled?: boolean
+    checked?: boolean | 'mixed'
+    expanded?: boolean
+    selected?: boolean
+    focused?: boolean
+    required?: boolean
+  }
+  /** Within the visible viewport (vs. present but scrolled off). */
+  inViewport: boolean
+}
+
+/** The agent/orchestrator-facing observation of a browser card. */
+export interface BrowserSnapshot {
+  url: string
+  title: string
+  /** Scroll position + page height (CSS px) so the caller knows where it is and
+   *  whether there's more above/below. */
+  scroll: { x: number; y: number; maxY: number; viewportH: number }
+  /** Interactive elements, viewport-first order. */
+  elements: BrowserElement[]
+  /** Compact readable text of the page's main content, for comprehension. */
+  text: string
+  /** True if `elements` or `text` were capped. */
+  truncated: boolean
+}
+
+/** A mutating action against a browser card's page, keyed on an element `ref`. */
+export type BrowserAction =
+  | { kind: 'click'; ref: string }
+  | { kind: 'type'; ref: string; text: string; clear?: boolean; submit?: boolean }
+  | { kind: 'scroll'; direction: 'up' | 'down' }
+
 /** A command the orchestrator (main) asks the renderer to execute, correlated by
  *  `id`. Discriminated on `cmd` so each payload is typed at both ends of the IPC
  *  seam — the producer (`manager.dispatch`) and the renderer's handler. */
@@ -376,9 +449,13 @@ export type OrchestratorCommand =
   | {
       id: number
       cmd: 'spawnBrowser'
-      payload: { canvasId?: string; url?: string; name?: string }
+      payload: { canvasId?: string; url?: string; name?: string; ownerCardId?: string; reason?: string }
     }
   | { id: number; cmd: 'navigateBrowser'; payload: { cardId: string; url: string } }
+  | { id: number; cmd: 'setBrowserReason'; payload: { cardId: string; reason: string } }
+  | { id: number; cmd: 'readBrowser'; payload: { cardId: string } }
+  | { id: number; cmd: 'screenshotBrowser'; payload: { cardId: string } }
+  | { id: number; cmd: 'actBrowser'; payload: { cardId: string; action: BrowserAction } }
   | { id: number; cmd: 'confirm'; payload: { toolName: string; input: Record<string, unknown> } }
 
 /** The renderer's reply to a mutation command (focus/spawn/rename/kill). */
@@ -387,6 +464,10 @@ export interface OrchestratorActionResult {
   message: string
   /** Set by `spawnAgent` — the id of the newly created card. */
   cardId?: string
+  /** Set by `readBrowser` — the page observation. */
+  snapshot?: BrowserSnapshot
+  /** Set by `screenshotBrowser` — a PNG data URL of the page. */
+  image?: string
 }
 
 /** The renderer's reply to a `confirm` command — the gate decision. */

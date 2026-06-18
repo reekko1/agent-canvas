@@ -27,7 +27,11 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
   - Git: `GitChange` / `GitSnapshot` / `RepoIdentity` / `GitActionRequest` /
     `GitActionResult`.
   - Remote panel: `RemoteState` / `AttentionLevel` + readiness shapes
-    (`AppReadiness`, `RemoteReadiness`), `UpdateStatus`.
+    (`AppReadiness`, `RemoteReadiness`), `UpdateStatus`. Each
+    `RemoteState.canvases` entry carries `active: boolean` — the one canvas
+    open in the desktop viewport (exactly one true when any canvas exists), so
+    the phone can mark the current repo and the orchestrator knows which canvas
+    it operates on by default.
   - Orchestrator: `OrchestratorMode` / `OrchestratorEvent` /
     `OrchestratorCommand` / `OrchestratorTarget` and their result types. Browser
     cards ride the same command seam as agents (`spawnBrowser`/`navigateBrowser`

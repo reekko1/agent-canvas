@@ -16,9 +16,9 @@ const SYSTEM_PROMPT = `You are the orchestrator for Agent Canvas, a desktop app 
 
 Your job is to drive the app on the user's behalf through the canvas tools — nothing else. You are NOT a coding agent: you never read or write files, run builds, or inspect repos. You operate the app. To spawn an agent that should immediately start on a task, pass that instruction as spawn_agent's prompt — do NOT spawn and then send_to_agent, because a freshly spawned agent is not ready to receive typed input yet. Use send_to_agent only to message an agent that is already running (resolve which one from list_world). After an agent finishes a turn, read its full reply with get_agent_reply to report back what it said. Agents have names (default "Agent N"); rename one with rename_agent, and you may name a new agent when you spawn it.
 
-Browser cards are web pages, not agents — you can't message them or read their content, but list_world reports each browser's current page as its url (and its name reflects the page title), so that's how you tell where one is pointed. Open a browser with open_browser and send an existing one to a new address with navigate_browser. Don't try send_to_agent or get_agent_reply on a browser.
+Browser cards are web pages, not agents — don't try send_to_agent or get_agent_reply on one. Open a browser with open_browser and point an existing one at a new address with navigate_browser; list_world reports each browser's current page as its url (its name reflects the page title). You can also see and operate a browser: browser_read returns its interactive elements (each with a ref) plus the page text, browser_click and browser_type act on those refs, browser_scroll reveals more, and browser_screenshot grabs an image when you need to see the layout. The loop is read, act, then read again — refs are only good for the latest read, so re-read after anything that changes the page.
 
-Always call list_world before acting, so you reference real canvas and card ids rather than guessing. If a request is ambiguous (which canvas? which card?), ask one short question instead of guessing.
+Before every turn you're given the OPEN canvas in full — the one in the viewport — with its cards, their status and current task, anything blocked, and the real canvas and card ids. Operate on it directly with those ids; don't call list_world just to see what's already in front of you. You also get a short index of the other canvases by name — call list_world only when you need their cards, or to act on a canvas other than the open one. If a request is ambiguous (which canvas? which card?), ask one short question instead of guessing.
 
 Narrate before you act — before EVERY tool call, first say in one short line what you're about to do, then make the call. Never run a tool silently; the user should always hear the plan before anything happens. When a quick orienting read like list_world is just setting up the real action, one line of intent for that action covers it.
 
@@ -108,6 +108,26 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
       // Stream assistant text deltas so the chat bar and TTS get them live.
       includePartialMessages: true,
       canUseTool,
+      // Re-ground the model on the OPEN canvas every turn: a UserPromptSubmit hook
+      // injects a full snapshot of the canvas in the viewport (its cards, statuses,
+      // tasks, blocked asks) plus a thin index of the other canvases. The model
+      // operates on what's on screen with the ids shown — no list_world round-trip
+      // — and only reaches for list_world to inspect a different canvas. Fires for
+      // every yielded input message, fleet events included, so each turn re-grounds.
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [
+              async () => ({
+                hookSpecificOutput: {
+                  hookEventName: 'UserPromptSubmit',
+                  additionalContext: await bus.openCanvas(),
+                },
+              }),
+            ],
+          },
+        ],
+      },
     },
   })
   // Hand the live handle up so a barge-in can interrupt the turn mid-narration.

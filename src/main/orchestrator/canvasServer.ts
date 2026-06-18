@@ -16,13 +16,18 @@ const failResult = (message: string) => ({
 /** Read-only canvas tools — safe to auto-run. Single source of truth: the gate
  *  builds orchestrator.ts's READ_ONLY from this, and the `readOnlyHint` annotations
  *  on list_world / get_agent_reply below mirror it (keep the two in sync). */
-export const READ_ONLY_TOOLS = ['list_world', 'get_agent_reply'] as const
+export const READ_ONLY_TOOLS = [
+  'list_world',
+  'get_agent_reply',
+  'browser_read',
+  'browser_screenshot',
+] as const
 
 /** Build the `canvas` MCP server backed by a CommandBus implementation. */
 export function buildCanvasServer(bus: CommandBus) {
   const listWorld = tool(
     'list_world',
-    'List every canvas, the cards on each (with status and current task), and anything blocked waiting on the user. Call this first so you reference real canvas and card ids.',
+    'List every canvas, the cards on each (with status and current task), and anything blocked waiting on the user. The open canvas is already given to you each turn — use this to see the OTHER canvases or to act on one that is not currently open.',
     {},
     async () => {
       try {
@@ -98,6 +103,99 @@ export function buildCanvasServer(bus: CommandBus) {
         return r.ok ? okResult(r) : failResult(r.message)
       } catch (e) {
         return failResult(`navigate_browser failed: ${errText(e)}`)
+      }
+    },
+  )
+
+  const browserRead = tool(
+    'browser_read',
+    "See a browser card's page: returns its interactive elements (each with a stable `ref`, role, and name) plus the page text. Use the refs with browser_click / browser_type. Re-read after any action that changes the page — refs are only valid for the latest read. Use a browser card id from list_world (kind \"browser\").",
+    { cardId: z.string().describe('Browser card id from list_world') },
+    async (args) => {
+      try {
+        const r = await bus.readBrowser(args.cardId)
+        return r.ok && r.snapshot ? okResult(r.snapshot) : failResult(r.message)
+      } catch (e) {
+        return failResult(`browser_read failed: ${errText(e)}`)
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  )
+
+  const browserScreenshot = tool(
+    'browser_screenshot',
+    "Capture a screenshot of a browser card's page (an image). Prefer browser_read for acting on the page; reach for a screenshot to inspect visual layout or canvas-rendered content that the text snapshot can't convey. Use a browser card id from list_world.",
+    { cardId: z.string().describe('Browser card id from list_world') },
+    async (args) => {
+      try {
+        const r = await bus.screenshotBrowser(args.cardId)
+        if (!r.ok || !r.image) return failResult(r.message)
+        const m = /^data:(.+?);base64,(.*)$/.exec(r.image)
+        if (!m) return failResult('screenshot was not a base64 data URL')
+        return { content: [{ type: 'image' as const, data: m[2], mimeType: m[1] }] }
+      } catch (e) {
+        return failResult(`browser_screenshot failed: ${errText(e)}`)
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  )
+
+  const browserClick = tool(
+    'browser_click',
+    "Click an element on a browser card's page. `ref` comes from the latest browser_read. Use a browser card id from list_world.",
+    {
+      cardId: z.string().describe('Browser card id from list_world'),
+      ref: z.string().describe('Element ref from the latest browser_read'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.actBrowser(args.cardId, { kind: 'click', ref: args.ref })
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`browser_click failed: ${errText(e)}`)
+      }
+    },
+  )
+
+  const browserType = tool(
+    'browser_type',
+    "Type text into an input/textarea on a browser card's page. `ref` comes from the latest browser_read. Set clear to replace existing text; set submit to press Enter afterward (e.g. to submit a search). Use a browser card id from list_world.",
+    {
+      cardId: z.string().describe('Browser card id from list_world'),
+      ref: z.string().describe('Element ref from the latest browser_read'),
+      text: z.string().describe('The text to type'),
+      clear: z.boolean().optional().describe('Clear the field before typing'),
+      submit: z.boolean().optional().describe('Press Enter after typing'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.actBrowser(args.cardId, {
+          kind: 'type',
+          ref: args.ref,
+          text: args.text,
+          clear: args.clear,
+          submit: args.submit,
+        })
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`browser_type failed: ${errText(e)}`)
+      }
+    },
+  )
+
+  const browserScroll = tool(
+    'browser_scroll',
+    "Scroll a browser card's page up or down by roughly one viewport (to reveal elements outside the current view, then browser_read again). Use a browser card id from list_world.",
+    {
+      cardId: z.string().describe('Browser card id from list_world'),
+      direction: z.enum(['up', 'down']).describe('Scroll direction'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.actBrowser(args.cardId, { kind: 'scroll', direction: args.direction })
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`browser_scroll failed: ${errText(e)}`)
       }
     },
   )
@@ -191,6 +289,11 @@ export function buildCanvasServer(bus: CommandBus) {
       spawnAgent,
       openBrowser,
       navigateBrowser,
+      browserRead,
+      browserScreenshot,
+      browserClick,
+      browserType,
+      browserScroll,
       sendToAgent,
       getAgentReply,
       renameAgent,

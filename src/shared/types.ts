@@ -146,9 +146,10 @@ export type GitActionRequest =
   | { kind: 'stageAll' | 'unstageAll' | 'discardAll' }
   | { kind: 'commit'; message: string }
 
-/// What runs inside a card's terminal: a watched agent, or a bare `$SHELL`
-/// (no hooks, no status — neutral chrome).
-export type CardKind = 'agent' | 'shell'
+/// What runs inside a card: a watched agent, a bare `$SHELL` (no hooks, no
+/// status — neutral chrome), or a `browser` — an in-app `<webview>` with no
+/// tmux/pty session at all (neutral chrome, never speaks to the spine).
+export type CardKind = 'agent' | 'shell' | 'browser'
 
 // MARK: Multi-project persistence
 //
@@ -169,6 +170,9 @@ export interface CardRecord {
   session?: string
   /** Display name (default "Agent N"), set by the user or the orchestrator. */
   name?: string
+  /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
+   *  (the live snapshot is transient and never persisted). */
+  url?: string
 }
 
 /// One project's canvas: a named folder. References cards by id only — it never
@@ -223,7 +227,7 @@ export interface RemoteState {
   cards: {
     id: string
     name: string
-    /** agent (watched) or shell (bare $SHELL) — both get a mobile terminal. */
+    /** agent (watched), shell (bare $SHELL), or browser (an in-app web view). */
     kind: CardKind
     status: CardStatus
     loud: boolean
@@ -232,6 +236,9 @@ export interface RemoteState {
     /** A shell card's foreground command (tmux pane) — the desktop shows it on
      *  the shell face; the phone shows it on the list row. */
     running?: string
+    /** A browser card's current page url — so the orchestrator (and phone) can
+     *  see where it's pointed. */
+    url?: string
     model?: string
     permissionMode?: string
     subagents: number
@@ -366,6 +373,12 @@ export type OrchestratorCommand =
     }
   | { id: number; cmd: 'renameAgent'; payload: { cardId: string; name: string } }
   | { id: number; cmd: 'killCard'; payload: { cardId: string } }
+  | {
+      id: number
+      cmd: 'spawnBrowser'
+      payload: { canvasId?: string; url?: string; name?: string }
+    }
+  | { id: number; cmd: 'navigateBrowser'; payload: { cardId: string; url: string } }
   | { id: number; cmd: 'confirm'; payload: { toolName: string; input: Record<string, unknown> } }
 
 /** The renderer's reply to a mutation command (focus/spawn/rename/kill). */
@@ -389,6 +402,9 @@ export interface CanvasApi {
   /** `folder` (the active project's dir) skips the picker; omit it to prompt. */
   newCard(folder?: string): Promise<NewCardResult | null>
   newShell(folder?: string): Promise<NewCardResult | null>
+  /** Mint a browser card id — no pty, no spine session (an in-app `<webview>`).
+   *  `folder` only tags the card with the active project's dir for symmetry. */
+  newBrowser(folder?: string, url?: string): Promise<NewCardResult | null>
   /** Native folder picker — used when creating a project to set its dir. */
   pickFolder(message: string): Promise<string | null>
   /** Spawn the card's pty if it isn't running — called on CardNode mount, so

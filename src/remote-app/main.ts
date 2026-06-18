@@ -64,25 +64,37 @@ const wordEl = (status: CardStatus): string =>
 // speak for them.
 function cardTile(k: RemoteState['cards'][number]): string {
   const shell = k.kind === 'shell'
-  const color = shell ? 'var(--border)' : COLORS[k.status] || '#807e90'
+  const browser = k.kind === 'browser'
+  // Neither a shell nor a browser has an agent to speak for it — neutral chrome,
+  // no status HUD. A browser also has no tmux session, so tapping it is a no-op
+  // (no terminal to mirror).
+  const neutral = shell || browser
+  const color = neutral ? 'var(--border)' : COLORS[k.status] || '#807e90'
   const glow = k.status === 'error' ? ' err' : k.loud ? ' loud' : ''
   const right: string[] = []
   if (k.model) right.push(`<span class="cmodel">${esc(k.model)}</span>`)
   if (k.permissionMode === 'bypassPermissions') right.push('<span class="cbypass">BYPASS</span>')
   else if (k.permissionMode === 'dontAsk') right.push('<span class="cbypass">DON&#39;T-ASK</span>')
-  if (!shell)
+  if (!neutral)
     right.push(
       `<span class="hud" style="color:${color}"><span class="d" style="background:${color}"></span>${esc(k.status).toUpperCase()}</span>`,
     )
-  // Shells show their foreground command (idle when bare); agents show the task.
-  const activity = shell
-    ? k.running
-      ? esc(k.running)
-      : '<span class="idle">idle</span>'
-    : esc(k.task ?? '')
+  // Shells show their foreground command (idle when bare); a browser shows its
+  // current page url; agents show the task.
+  const activity = browser
+    ? k.url
+      ? esc(k.url)
+      : '<span class="idle">web page</span>'
+    : shell
+      ? k.running
+        ? esc(k.running)
+        : '<span class="idle">idle</span>'
+      : esc(k.task ?? '')
+  // Browser tiles aren't tappable (no terminal); agents/shells open their pty.
+  const act = browser ? '' : ' data-act="term"'
   return (
-    `<div class="tile card${glow}" style="border-color:${color}" data-act="term" data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
-    `<span class="mark">${shell ? '&gt;_' : BOT_SVG}</span>` +
+    `<div class="tile card${glow}" style="border-color:${color}"${act} data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
+    `<span class="mark">${shell ? '&gt;_' : browser ? '🌐' : BOT_SVG}</span>` +
     `<span class="cfolder">${esc(k.name)}</span>` +
     `<span class="ctask">${activity}</span>` +
     right.join('') +

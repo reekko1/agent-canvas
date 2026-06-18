@@ -9,6 +9,17 @@ import type { PendingQuestion } from './usePendingQuestions'
 import type { AttentionLevel } from './useProjectAttention'
 import type { ShellTitle } from './useShellTitles'
 
+/** The host of a browser card's url (e.g. "mail.google.com") — a readable
+ *  fallback name when the page title hasn't loaded yet. */
+function hostOf(url?: string): string | undefined {
+  if (!url) return undefined
+  try {
+    return new URL(url).host || undefined
+  } catch {
+    return url
+  }
+}
+
 /// Mirror the attention state to the remote panel. Riding the same renderer
 /// state as the in-app surfaces (cards' meta, the toast asks/questions, the
 /// activity feed, the per-canvas attention + git) means the phone and the
@@ -58,11 +69,17 @@ export function useRemotePublish({
       .map((n) => {
         const projectId = projectIdFor.get(n.id)
         const shell = n.data.kind === 'shell'
+        const browser = n.data.kind === 'browser'
         const title = shellTitles[n.id]
         // Shell titles follow the pane's cwd (the user's cd's), like the
-        // desktop; agents keep the static open folder.
+        // desktop; a browser reads as its live page (title, else host); agents
+        // keep the static open folder.
         const name =
-          shell && title?.cwd ? (basenameOf(title.cwd) ?? titleFor(n.id)) : titleFor(n.id)
+          shell && title?.cwd
+            ? (basenameOf(title.cwd) ?? titleFor(n.id))
+            : browser
+              ? n.data.name || n.data.title || hostOf(n.data.url) || titleFor(n.id)
+              : titleFor(n.id)
         return {
           id: n.id,
           name,
@@ -72,6 +89,9 @@ export function useRemotePublish({
           since: (n.data.meta.statusSince ?? 0) / 1000,
           task: n.data.meta.task,
           running: shell ? title?.running : undefined,
+          // The browser's current page — lets the orchestrator answer "what page
+          // are we on" instead of only seeing the card name.
+          url: browser ? n.data.url : undefined,
           model: n.data.meta.model,
           permissionMode: n.data.meta.permissionMode,
           subagents: n.data.meta.subagents ?? 0,

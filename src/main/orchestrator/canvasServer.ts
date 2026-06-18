@@ -67,6 +67,41 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
+  const openBrowser = tool(
+    'open_browser',
+    'Open a new browser card (an in-app web view) on a canvas, optionally loading a starting URL. Use this to show a running dev server, docs, or any page beside the agents.',
+    {
+      canvasId: z.string().optional().describe('Target canvas id; defaults to the active canvas'),
+      url: z.string().optional().describe('URL to load (e.g. "http://localhost:3000"); defaults to a blank page'),
+      name: z.string().optional().describe('Name for the browser card'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.openBrowser(args)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`open_browser failed: ${errText(e)}`)
+      }
+    },
+  )
+
+  const navigateBrowser = tool(
+    'navigate_browser',
+    'Point an existing browser card at a URL. Use a browser card id from list_world (kind "browser").',
+    {
+      cardId: z.string().describe('Browser card id from list_world'),
+      url: z.string().describe('The URL to navigate to'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.navigateBrowser(args.cardId, args.url)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`navigate_browser failed: ${errText(e)}`)
+      }
+    },
+  )
+
   const sendToAgent = tool(
     'send_to_agent',
     "Send a message — a new instruction or follow-up — to a running agent's terminal, as if the user typed it. Use a card id from list_world. If the agent is busy, the message is queued and processed when it next idles.",
@@ -154,6 +189,8 @@ export function buildCanvasServer(bus: CommandBus) {
       listWorld,
       focusCanvas,
       spawnAgent,
+      openBrowser,
+      navigateBrowser,
       sendToAgent,
       getAgentReply,
       renameAgent,

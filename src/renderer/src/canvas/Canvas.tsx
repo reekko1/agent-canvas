@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
-import { Bot, Smartphone, SquareTerminal } from 'lucide-react'
+import { Bot, Globe, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useIcon } from '@/lib/icon-context'
 import { basenameOf } from '@/lib/utils'
@@ -157,11 +157,25 @@ export function Canvas() {
 
   const onCloseCard = useCallback(
     (cardId: string) => {
-      void window.canvas.killCard(cardId)
+      // Browser cards have no tmux/pty session — there's nothing to kill, and
+      // killing would log a missing-session error (ids carry the kind prefix).
+      if (!cardId.startsWith('browser-')) void window.canvas.killCard(cardId)
       setNodes((ns) => ns.filter((n) => n.id !== cardId))
       proj.detachCard(cardId)
     },
     [proj.detachCard],
+  )
+
+  /** A browser card's webview reported new state (navigation, title, favicon, or
+   *  a fresh blur snapshot) — fold it into the node so the chrome/face track it
+   *  and persistence captures the url. Stable: the webview captures it at mount. */
+  const navigateCard = useCallback(
+    (cardId: string, patch: { url?: string; title?: string; favicon?: string; snapshot?: string }) => {
+      setNodes((ns) =>
+        ns.map((n) => (n.id === cardId && n.type === 'card' ? { ...n, data: { ...n.data, ...patch } } : n)),
+      )
+    },
+    [],
   )
 
   // Deleting a canvas closes every card on it — kill the sessions, drop the
@@ -169,7 +183,10 @@ export function Canvas() {
   const deleteProject = useCallback(
     (id: string) => {
       const ids = proj.projects.find((p) => p.id === id)?.cardIds ?? []
-      ids.forEach((cardId) => void window.canvas.killCard(cardId))
+      // Browser cards have no session to kill (see onCloseCard).
+      ids.forEach((cardId) => {
+        if (!cardId.startsWith('browser-')) void window.canvas.killCard(cardId)
+      })
       setNodes((ns) => ns.filter((n) => !ids.includes(n.id)))
       proj.deleteProject(id)
     },
@@ -177,25 +194,27 @@ export function Canvas() {
   )
 
   const makeCard = useCallback(
-    (cardId: string, folder: string, kind: CardKind, name?: string): CanvasNode => ({
+    (cardId: string, folder: string, kind: CardKind, name?: string, url?: string): CanvasNode => ({
       id: cardId,
       type: 'card',
       data: {
         folder,
         kind,
         name,
+        url,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
         onEngage: engageCard,
         onPromote: promoteCard,
+        onNavigate: navigateCard,
       },
     }),
-    [onCloseCard, engageCard, promoteCard],
+    [onCloseCard, engageCard, promoteCard, navigateCard],
   )
 
   const restoreItem = useCallback(
     (c: CardRecord): CanvasNode | null =>
-      c.folder ? makeCard(c.id, c.folder, c.kind, c.name) : null,
+      c.folder ? makeCard(c.id, c.folder, c.kind, c.name, c.url) : null,
     [makeCard],
   )
 
@@ -305,8 +324,14 @@ export function Canvas() {
     // Cards spawn in the active canvas's dir — no canvas, nothing to add.
     const dir = proj.active?.dir
     if (!dir) return
-    const r = await (kind === 'shell' ? window.canvas.newShell(dir) : window.canvas.newCard(dir))
+    const r = await (kind === 'shell'
+      ? window.canvas.newShell(dir)
+      : kind === 'browser'
+        ? window.canvas.newBrowser(dir)
+        : window.canvas.newCard(dir))
     if (!r) return
+    // Agents get an "Agent N" name; a browser opens a blank start page (the
+    // address bar takes it from there); shells follow their pane folder.
     const name = kind === 'agent' ? nextAgentName() : undefined
     setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind, name)])
     proj.attachCard(r.cardId) // joins the active canvas as its master
@@ -355,6 +380,13 @@ export function Canvas() {
           detail: `on ${where}${task ? ` · ${clip(task)}` : ''}`,
         }
       }
+      case 'open_browser': {
+        const where = input.canvasId ? canvasName(input.canvasId) : (proj.active?.name ?? 'the active canvas')
+        const url = str(input.url)
+        return { title: 'Open a browser', detail: `on ${where}${url ? ` · ${clip(url)}` : ''}` }
+      }
+      case 'navigate_browser':
+        return { title: `Navigate ${titleFor(String(input.cardId))}`, detail: clip(str(input.url)) }
       case 'send_to_agent':
         return { title: `Message ${titleFor(String(input.cardId))}`, detail: clip(str(input.message)) }
       case 'rename_agent':
@@ -433,6 +465,61 @@ export function Canvas() {
           message: `spawned ${name} on ${target.name}${prompt ? ', working on the task' : ''}`,
         })
       })()
+      return
+    }
+
+    if (cmd.cmd === 'spawnBrowser') {
+      const canvasId = cmd.payload.canvasId
+      const target = canvasId ? proj.projects.find((p) => p.id === canvasId) : proj.active
+      if (!target) {
+        reply({ ok: false, message: canvasId ? `no canvas with id ${canvasId}` : 'no active canvas' })
+        return
+      }
+      const url = cmd.payload.url?.trim() || undefined
+      const name = cmd.payload.name?.trim() || undefined
+      void (async () => {
+        const r = await window.canvas.newBrowser(target.dir, url)
+        if (!r) {
+          reply({ ok: false, message: 'browser creation was cancelled' })
+          return
+        }
+        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'browser', name, url)])
+        proj.attachCardTo(target.id, r.cardId)
+        if (proj.activeProjectId !== target.id) switchProject(target.id)
+        // Same reveal dance as spawnAgent — invisible until the comet lands.
+        setPendingReveal((s) => new Set(s).add(r.cardId))
+        setTimeout(() => reveal(r.cardId), TRACER_TRAVEL_MS + 1500)
+        reply({
+          ok: true,
+          cardId: r.cardId,
+          message: `opened a browser on ${target.name}${url ? ` at ${url}` : ''}`,
+        })
+      })()
+      return
+    }
+
+    if (cmd.cmd === 'navigateBrowser') {
+      const { cardId, url } = cmd.payload
+      const node = nodesRef.current.find((n) => n.id === cardId && n.type === 'card')
+      if (!node) {
+        reply({ ok: false, message: `no card with id ${cardId}` })
+        return
+      }
+      if (node.data.kind !== 'browser') {
+        reply({ ok: false, message: `${titleFor(cardId)} is not a browser` })
+        return
+      }
+      // Bump the nonce so BrowserView loads the url; surface the card so the
+      // navigation is visible. Display url updates from the webview's did-navigate.
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === cardId && n.type === 'card'
+            ? { ...n, data: { ...n.data, goto: { url, nonce: (n.data.goto?.nonce ?? 0) + 1 } } }
+            : n,
+        ),
+      )
+      promoteCard(cardId)
+      reply({ ok: true, message: `navigated ${titleFor(cardId)} to ${url}` })
       return
     }
 
@@ -716,6 +803,22 @@ export function Canvas() {
             }
           />
           <TooltipContent side="right">New terminal</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="New browser"
+                disabled={!active}
+                onClick={() => void addCard('browser')}
+              >
+                <Globe />
+              </Button>
+            }
+          />
+          <TooltipContent side="right">New browser</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger

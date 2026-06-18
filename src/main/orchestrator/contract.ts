@@ -23,6 +23,8 @@ export interface WorldCard {
   kind: CardKind
   status: CardStatus
   task?: string
+  /** A browser card's current page url — where it's pointed right now. */
+  url?: string
   canvasId?: string
   canvasName?: string
 }
@@ -58,11 +60,21 @@ export interface SpawnAgentInput {
   name?: string
 }
 
+export interface SpawnBrowserInput {
+  canvasId?: string
+  url?: string
+  name?: string
+}
+
 /** Everything the orchestrator can do to the app. Kept small and explicit. */
 export interface CommandBus {
   listWorld(): Promise<World>
   focusCanvas(canvasId: string): Promise<ActionResult>
   spawnAgent(input: SpawnAgentInput): Promise<SpawnResult>
+  /** Open a browser card (an in-app web view), optionally at a starting url. */
+  openBrowser(input: SpawnBrowserInput): Promise<SpawnResult>
+  /** Point an existing browser card's web view at a url. */
+  navigateBrowser(cardId: string, url: string): Promise<ActionResult>
   /** Deliver a message (instruction / follow-up) to a running agent. */
   sendToAgent(cardId: string, message: string): Promise<ActionResult>
   /** The agent's most recent full reply (from the last turn it finished). */

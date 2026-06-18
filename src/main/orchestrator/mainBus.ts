@@ -79,6 +79,7 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
           kind: c.kind,
           status: c.status,
           task: c.task,
+          url: c.url,
           canvasId: c.projectId,
           canvasName: c.projectName,
         })),
@@ -101,6 +102,23 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       const r = await deps.dispatch({ cmd: 'spawnAgent', payload: { ...input } })
       if (r.ok && r.cardId) deps.signalTarget({ kind: 'spawn', cardId: r.cardId })
       return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'spawned' : 'failed') }
+    },
+
+    openBrowser: async (input) => {
+      const r = await deps.dispatch({ cmd: 'spawnBrowser', payload: { ...input } })
+      if (r.ok && r.cardId) deps.signalTarget({ kind: 'spawn', cardId: r.cardId })
+      return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'opened' : 'failed') }
+    },
+
+    navigateBrowser: async (cardId, url) => {
+      const card = findCard(cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      // Fly the comet to the card, then load on landing (with the narration).
+      deps.signalTarget({ kind: 'send', cardId })
+      await landed()
+      const r = await deps.dispatch({ cmd: 'navigateBrowser', payload: { cardId, url } })
+      return { ok: !!r.ok, message: r.message ?? (r.ok ? `pointed ${card.name} at ${url}` : 'failed') }
     },
 
     sendToAgent: async (cardId, message) => {

@@ -41,6 +41,24 @@ function send(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args)
 }
 
+// Whole-app zoom (Cmd/Ctrl +/-/0) is applied to the HOST renderer so it scales
+// the entire UI — browser cards included, since each <webview> is a child of
+// that renderer. We own it ourselves (see the before-input-event hook) rather
+// than leaning on the default menu's zoom role, which targets whichever web
+// contents is focused — so a focused browser card's webview would otherwise
+// swallow the shortcut and zoom only its page.
+const ZOOM_MIN = -3
+const ZOOM_MAX = 4.5
+function applyZoom(level: number): void {
+  const wc = win?.webContents
+  if (!wc) return
+  wc.setZoomLevel(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, level)))
+}
+function zoomBy(delta: number): void {
+  const wc = win?.webContents
+  if (wc) applyZoom(wc.getZoomLevel() + delta)
+}
+
 // electron-updater swallows failures by default; a silent `.catch()` once hid a
 // broken update check for a whole release. Log every step to <logs>/updater.log
 // (~/Library/Logs/Agent Canvas/updater.log on macOS) so a stuck updater is
@@ -142,6 +160,10 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Browser cards mount an in-DOM <webview> guest (its own process). The
+      // guest carries no preload and runs in its own `persist:browser` session,
+      // so it can't reach window.canvas — see the navigation exemption below.
+      webviewTag: true,
     },
   })
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -156,6 +178,28 @@ app.whenReady().then(() => {
   // shell.openExternal (the open-external IPC). Deny popups outright and block
   // any in-page navigation away from the app's own origin (dev server / file).
   app.on('web-contents-created', (_e, contents) => {
+    // Whole-app zoom on Cmd/Ctrl +/-/0, intercepted on EVERY web contents —
+    // host and webview guests alike — and redirected to the host renderer.
+    // preventDefault stops the focused contents (a browser card's webview) from
+    // zooming only itself or the menu accelerator from firing; the host zoom
+    // then scales the entire UI as it did before browser cards existed.
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !(input.meta || input.control)) return
+      if (input.key === '=' || input.key === '+') {
+        event.preventDefault()
+        zoomBy(0.5)
+      } else if (input.key === '-' || input.key === '_') {
+        event.preventDefault()
+        zoomBy(-0.5)
+      } else if (input.key === '0') {
+        event.preventDefault()
+        applyZoom(0)
+      }
+    })
+    // Browser cards ARE a web browser — their <webview> guest must navigate
+    // freely. The host frame (the app's own renderer) stays locked: no popups,
+    // no navigating away from the dev server / file origin.
+    if (contents.getType() === 'webview') return
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
     contents.on('will-navigate', (event, url) => {
       const devURL = process.env['ELECTRON_RENDERER_URL']
@@ -245,6 +289,17 @@ ipcMain.handle('new-shell', async (_e, folder?: string) => {
   const dir = folder ?? (await pickFolder('Choose the folder for this terminal'))
   if (!dir) return null
   const cardId = `shell-${Date.now().toString(36)}-${nextItem++}`
+  return { cardId, folder: dir }
+})
+
+// A browser card has no pty and no tmux/spine session — it's an in-DOM
+// <webview>. We only mint its id here (so the `browser-` prefix is consistent
+// with `card-`/`shell-`); the renderer owns its url. `folder` just tags it with
+// the active project's dir; the picker is never shown.
+ipcMain.handle('new-browser', async (_e, folder?: string, _url?: string) => {
+  const dir = folder ?? (await pickFolder('Choose the folder for this browser'))
+  if (!dir) return null
+  const cardId = `browser-${Date.now().toString(36)}-${nextItem++}`
   return { cardId, folder: dir }
 })
 

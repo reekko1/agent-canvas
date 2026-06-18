@@ -37,10 +37,25 @@ export interface CardMeta {
 export interface CardData extends Record<string, unknown> {
   folder: string
   /** 'agent' = watched claude session; 'shell' = bare $SHELL, no hooks — the
-   *  spine never speaks about it, so its meta stays idle forever. */
+   *  spine never speaks about it, so its meta stays idle forever; 'browser' =
+   *  an in-app <webview>, no tmux/pty session, neutral chrome. */
   kind: CardKind
   /** Display name — defaults to "Agent N" for agents; user/orchestrator renameable. */
   name?: string
+  /** Current page — only for `kind === 'browser'`. Tracked live from the
+   *  webview's navigation and persisted (the card reloads it on restore). */
+  url?: string
+  /** Live page title / favicon-url for a browser card's chrome and face.
+   *  Transient — re-derived from the webview on load, never persisted. */
+  title?: string
+  favicon?: string
+  /** A small data-URL thumbnail captured when a browser card is demoted from
+   *  master — what the stacked BrowserFace shows. Transient (never persisted). */
+  snapshot?: string
+  /** An imperative navigation request for a browser card (from the orchestrator).
+   *  BrowserView loads `url` whenever `nonce` changes; the address bar / user
+   *  navigation drives the webview directly and doesn't go through this. */
+  goto?: { url: string; nonce: number }
   meta: CardMeta
   onClose: (cardId: string) => void
   /** Terminal engaged (mousedown) — releases any held asks to the native
@@ -49,6 +64,13 @@ export interface CardData extends Record<string, unknown> {
   /** Promote this card to the master slot — fired when its stacked poster is
    *  clicked. No-op when it's already the master. */
   onPromote: (cardId: string) => void
+  /** A browser card navigated, retitled, or produced a fresh blur snapshot —
+   *  folds the patch back into the node so persistence (url) and the chrome /
+   *  face (title, favicon, snapshot) track the live webview. */
+  onNavigate: (
+    cardId: string,
+    patch: { url?: string; title?: string; favicon?: string; snapshot?: string },
+  ) => void
 }
 
 /** Fold one spine event into a card's meta (pure — the canvas owns the state,

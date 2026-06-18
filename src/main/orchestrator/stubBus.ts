@@ -6,6 +6,7 @@ import type {
   AgentReplyResult,
   CommandBus,
   SpawnAgentInput,
+  SpawnBrowserInput,
   SpawnResult,
   World,
 } from './contract'
@@ -58,6 +59,25 @@ export function makeStubBus(): CommandBus {
       })
       const tail = input.prompt ? ` with initial prompt: "${input.prompt}"` : ''
       return { ok: true, cardId: id, message: `spawned ${name} (${id}) on ${cv.name}${tail}` }
+    },
+
+    async openBrowser(input: SpawnBrowserInput): Promise<SpawnResult> {
+      const canvasId = input.canvasId ?? active
+      const cv = world.canvases.find((c) => c.id === canvasId)
+      if (!cv) return { ok: false, message: `no canvas with id ${canvasId}` }
+      const id = `cd_new${++counter}`
+      const name = input.name?.trim() || `Browser ${world.cards.length + 1}`
+      world.cards.push({ id, name, kind: 'browser', status: 'idle', url: input.url, canvasId, canvasName: cv.name })
+      const tail = input.url ? ` at ${input.url}` : ''
+      return { ok: true, cardId: id, message: `opened ${name} (${id}) on ${cv.name}${tail}` }
+    },
+
+    async navigateBrowser(cardId: string, url: string): Promise<ActionResult> {
+      const card = world.cards.find((c) => c.id === cardId)
+      if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      card.url = url
+      return { ok: true, message: `pointed ${card.name} at ${url}` }
     },
 
     async sendToAgent(cardId: string, message: string): Promise<ActionResult> {

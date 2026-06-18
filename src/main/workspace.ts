@@ -58,7 +58,7 @@ function normalize(snap: MultiProjectSnapshot): MultiProjectSnapshot {
       typeof c.id === 'string' &&
       c.id.length > 0 &&
       typeof c.folder === 'string' &&
-      (c.kind === 'agent' || c.kind === 'shell'),
+      (c.kind === 'agent' || c.kind === 'shell' || c.kind === 'browser'),
   )
   const known = new Set(registry.map((c) => c.id))
   const projects: Project[] = (Array.isArray(snap.projects) ? snap.projects : [])

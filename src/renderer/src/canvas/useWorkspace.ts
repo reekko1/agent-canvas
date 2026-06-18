@@ -57,8 +57,9 @@ export function useWorkspace({
 
   const persist = useCallback(() => {
     if (!hydrated) return // never let a blank pre-restore canvas clobber the file
-    // Only agent/shell cards are persisted — diffs are a transient side sheet.
     // Card data lives in the registry; projects order them and name a master.
+    // Browser cards persist their last url (reload-on-restore); the live
+    // title/favicon/snapshot are transient and deliberately left out.
     const cards: CardRecord[] = nodes.flatMap((n) =>
       n.type === 'card'
         ? [
@@ -68,6 +69,7 @@ export function useWorkspace({
               kind: n.data.kind,
               session: n.data.meta.sessionId,
               name: n.data.name,
+              url: n.data.url,
             },
           ]
         : [],

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import type { CardKind } from '@shared/types'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -50,7 +51,9 @@ export function TerminalView({
 }: {
   cardId: string
   folder: string
-  kind: 'agent' | 'shell'
+  // Only ever 'agent' | 'shell' at runtime (browser cards render BrowserView,
+  // never this); typed as the full union so CardNode can pass `kind` un-narrowed.
+  kind: CardKind
   /** True while the poster covers the card (stacked). visibility, not
    *  display: layout holds the card's size and xterm keeps consuming the
    *  stream; only compositing stops. */

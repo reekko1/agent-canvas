@@ -10,6 +10,7 @@ function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
 const api: CanvasApi = {
   newCard: (folder) => ipcRenderer.invoke('new-card', folder),
   newShell: (folder) => ipcRenderer.invoke('new-shell', folder),
+  newBrowser: (folder, url) => ipcRenderer.invoke('new-browser', folder, url),
   pickFolder: (message) => ipcRenderer.invoke('pick-folder', message),
   ensureCard: (cardId, folder, cols, rows, kind) =>
     ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows, kind),

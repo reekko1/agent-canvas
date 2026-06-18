@@ -134,7 +134,12 @@ export class ClaudeAdapter {
     const base = flags.length ? `exec claude ${flags.join(' ')}` : 'exec claude'
     // An initial prompt makes the interactive session boot already working on
     // the task (`claude [prompt]`) — race-free vs. typing it in after launch.
-    return initialPrompt ? `${base} ${shellQuote(initialPrompt)}` : base
+    // The `--` is load-bearing: `--mcp-config` is variadic (`<configs...>`), so
+    // without an explicit end-of-options marker it swallows the trailing prompt
+    // as another MCP config and claude dies at startup (unknown-option / bad
+    // config) — leaving the card "terminal exited". `--` ends option parsing so
+    // the prompt is unambiguously the positional arg, whatever flags precede it.
+    return initialPrompt ? `${base} -- ${shellQuote(initialPrompt)}` : base
   }
 
   isPermissionAsk(name: string): boolean {

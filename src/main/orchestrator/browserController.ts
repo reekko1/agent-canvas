@@ -3,12 +3,25 @@
 // but main needs to know, deterministically, when a given card's guest is mounted
 // and its DOM is ready (and, for Tier B, what its WebContents id is).
 //
-// Today it does one job: turn the renderer's `browser-ready` signal into an
-// awaitable `ensureReady(cardId)`, so browser tools wait on a real event instead
-// of a fixed delay (it replaces request_browser's 700ms sleep). Phase 1 grows
-// this object into the full BrowserController — a CDP driver keyed off the
-// WebContents id recorded here, with the renderer path as fallback. See
-// BROWSER_AGENCY_V2_PLAN.md §§1–2.
+// It does two jobs:
+//   1. Readiness — turn the renderer's `browser-ready` signal into an awaitable
+//      `ensureReady(cardId)`, so browser tools wait on a real event instead of a
+//      fixed delay (replacing request_browser's 700ms sleep).
+//   2. Tier-B driving — implement BrowserDriver over the Chrome DevTools Protocol
+//      (`webContents.debugger`), keyed off the WebContents id recorded in (1).
+//      Reads reuse the shared in-page driver via `Runtime.evaluate`; actions issue
+//      REAL, trusted `Input.*` events that work while the app is backgrounded
+//      (unlike `sendInputEvent`). Methods throw when CDP is unavailable; the bus
+//      then falls back to the Tier-A renderer path. See BROWSER_AGENCY_V2_PLAN §§1–2.
+import { webContents, type WebContents } from 'electron'
+import {
+  READ_SCRIPT,
+  resolveRefScript,
+  focusRefScript,
+  scrollScript,
+} from '../../shared/browserDriver'
+import type { BrowserAction, BrowserSnapshot } from '../../shared/types'
+import type { BrowserDriver } from './mainBus'
 
 interface BrowserState {
   /** The guest's WebContents id (for Tier-B CDP), or null once torn down. */
@@ -17,7 +30,7 @@ interface BrowserState {
   ready: boolean
 }
 
-export class BrowserController {
+export class BrowserController implements BrowserDriver {
   private readonly states = new Map<string, BrowserState>()
   /** Resolvers waiting for a card to become ready, by cardId. */
   private readonly waiters = new Map<string, Array<() => void>>()
@@ -68,5 +81,87 @@ export class BrowserController {
       arr.push(wake)
       this.waiters.set(cardId, arr)
     })
+  }
+
+  // ── Tier-B (CDP) driver — implements BrowserDriver ─────────────────────────
+
+  /** Read the page via the shared in-page driver, run through CDP Runtime.evaluate
+   *  (main-side, works while stacked/backgrounded). Throws if CDP is unavailable
+   *  so the bus can fall back to the renderer path. */
+  async read(cardId: string): Promise<BrowserSnapshot> {
+    const wc = await this.cdp(cardId)
+    const res = await wc.debugger.sendCommand('Runtime.evaluate', {
+      expression: READ_SCRIPT,
+      returnByValue: true,
+    })
+    if (res?.exceptionDetails) throw new Error('browser read failed in page')
+    return res.result.value as BrowserSnapshot
+  }
+
+  /** Perform an action with real, trusted input. The ref is resolved to on-screen
+   *  coordinates in-page, then the click/keystroke is dispatched as a CDP Input.*
+   *  event (background-capable). A stale ref is a normal failure, not a throw. */
+  async act(cardId: string, action: BrowserAction): Promise<{ ok: boolean; message: string }> {
+    const wc = await this.cdp(cardId)
+    if (action.kind === 'scroll') {
+      await wc.debugger.sendCommand('Runtime.evaluate', {
+        expression: scrollScript(action.direction),
+        returnByValue: true,
+      })
+      return { ok: true, message: `scrolled ${action.direction}` }
+    }
+    const resolved = await wc.debugger.sendCommand('Runtime.evaluate', {
+      expression: resolveRefScript(action.ref),
+      returnByValue: true,
+    })
+    const box = resolved?.result?.value as { x: number; y: number } | null
+    if (!box) {
+      return { ok: false, message: `stale-ref: no element ${action.ref} on the page — read again first` }
+    }
+    if (action.kind === 'click') {
+      await this.clickAt(wc, box.x, box.y)
+      return { ok: true, message: `clicked ${action.ref}` }
+    }
+    // type: focus (+optional clear) in-page, then real keystrokes
+    await wc.debugger.sendCommand('Runtime.evaluate', {
+      expression: focusRefScript(action.ref, action.clear),
+      returnByValue: true,
+    })
+    if (action.text) await wc.debugger.sendCommand('Input.insertText', { text: action.text })
+    if (action.submit) await this.pressEnter(wc)
+    return { ok: true, message: `typed into ${action.ref}` }
+  }
+
+  /** A PNG screenshot via CDP (data URL). */
+  async screenshot(cardId: string): Promise<string> {
+    const wc = await this.cdp(cardId)
+    const res = await wc.debugger.sendCommand('Page.captureScreenshot', { format: 'png' })
+    if (!res?.data) throw new Error('screenshot returned no data')
+    return `data:image/png;base64,${res.data}`
+  }
+
+  /** Ensure the card's guest is ready and its debugger attached; returns its
+   *  WebContents. Throws if there's no live guest or the debugger can't attach
+   *  (e.g. DevTools holds the session) — the caller falls back to Tier A. */
+  private async cdp(cardId: string): Promise<WebContents> {
+    await this.ensureReady(cardId)
+    const wcId = this.webContentsIdFor(cardId)
+    if (wcId == null) throw new Error(`browser ${cardId} has no live web contents`)
+    const wc = webContents.fromId(wcId)
+    if (!wc || wc.isDestroyed()) throw new Error(`browser ${cardId} web contents is gone`)
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+    return wc
+  }
+
+  private async clickAt(wc: WebContents, x: number, y: number): Promise<void> {
+    const base = { x, y, button: 'left', clickCount: 1 }
+    await wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
+    await wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
+  }
+
+  private async pressEnter(wc: WebContents): Promise<void> {
+    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }
+    await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...key })
+    await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
   }
 }

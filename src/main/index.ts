@@ -249,6 +249,8 @@ app.whenReady().then(() => {
       spine.decide(askId, decision)
       send('ask-decided', askId) // clear the renderer's toast (as the phone path does)
     },
+    // Tier-B CDP browser driving (falls back to the renderer path on failure).
+    browser: browserController,
   })
   // Echo every agent's finished turn into the supervision chat the instant its
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just

@@ -11,7 +11,7 @@
 //   • `notifyAsk()`        — an agent's permission ask fired    (priority 'next')
 // The hooks are the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
-import { makeMainBus, type DispatchCommand, type ResultFor } from './mainBus'
+import { makeMainBus, type BrowserDriver, type DispatchCommand, type ResultFor } from './mainBus'
 import type { CommandBus } from './contract'
 import { TRACER_TRAVEL_MS } from '../../shared/types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -41,6 +41,9 @@ export interface OrchestratorDeps {
   getReply: (cardId: string) => string | null
   /** Decide a held permission ask (main-owned — no renderer round-trip). */
   decideAsk: (askId: string, decision: 'allow' | 'deny') => void
+  /** Tier-B CDP browser driver (BrowserController) — the bus drives browsers
+   *  through this, falling back to the renderer path when CDP is unavailable. */
+  browser: BrowserDriver
   /** Voice the orchestrator's turn — receives every typed event; routes the
    *  assistant lines to TTS. Beside the typed event, not a channel-string sniff. */
   speak?: (e: OrchestratorEvent) => void
@@ -283,6 +286,13 @@ export class Orchestrator {
     getReply: (cardId) => this.deps.getReply(cardId),
     decideAsk: (askId, decision) => this.deps.decideAsk(askId, decision),
     signalTarget: (t) => this.signalTarget(t),
+    // Lazy arrows like the rest: this.deps isn't assigned when this field inits,
+    // so defer each call to the live driver.
+    browser: {
+      read: (id) => this.deps.browser.read(id),
+      act: (id, a) => this.deps.browser.act(id, a),
+      screenshot: (id) => this.deps.browser.screenshot(id),
+    },
   })
 
   /** The live CommandBus — shared with the agent-facing browser MCP server, which

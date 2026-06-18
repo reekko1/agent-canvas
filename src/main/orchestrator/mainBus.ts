@@ -7,12 +7,25 @@
 import { TRACER_TRAVEL_MS } from '../../shared/types'
 import type { CommandBus, World } from './contract'
 import type {
+  BrowserAction,
+  BrowserSnapshot,
   OrchestratorActionResult,
   OrchestratorCommand,
   OrchestratorConfirmResult,
   OrchestratorTarget,
   RemoteState,
 } from '../../shared/types'
+
+/** The Tier-B (CDP, main-side) browser path. Implemented by BrowserController;
+ *  injected so this module stays Electron-free (and harness-safe). Methods THROW
+ *  when CDP is unavailable (no live guest, can't attach, DevTools holding the
+ *  session) — the bus catches and falls back to the Tier-A renderer path. A
+ *  logical outcome like a stale ref is a normal `{ ok:false }`, not a throw. */
+export interface BrowserDriver {
+  read(cardId: string): Promise<BrowserSnapshot>
+  act(cardId: string, action: BrowserAction): Promise<{ ok: boolean; message: string }>
+  screenshot(cardId: string): Promise<string>
+}
 
 /** A renderer-dispatched command minus the correlation id (the manager adds it).
  *  Distributive so the discriminated cmd↔payload pairing survives (a plain Omit
@@ -48,6 +61,9 @@ export interface MainBusDeps {
   decideAsk: (askId: string, decision: 'allow' | 'deny') => void
   /** Fire the action's comet at the target card. */
   signalTarget: (target: OrchestratorTarget) => void
+  /** The Tier-B CDP browser path (primary); the bus falls back to dispatching to
+   *  the renderer (Tier A) when these throw. */
+  browser: BrowserDriver
 }
 
 function delay(ms: number): Promise<void> {
@@ -68,10 +84,48 @@ function landed(): Promise<void> {
  *  keystroke the TUI reads as submit. */
 const SUBMIT_SETTLE_MS = 120
 
+/** Set CANVAS_BROWSER_STRICT_CDP=1 to make the Tier-B path fail LOUD instead of
+ *  silently falling back to Tier A — the verification mode for confirming CDP
+ *  actually works. Off by default (the fallback is real production resilience). */
+const STRICT_CDP = !!process.env.CANVAS_BROWSER_STRICT_CDP
+
 /** Build the live CommandBus backed by the running app (see MainBusDeps). */
 export function makeMainBus(deps: MainBusDeps): CommandBus {
   const findCard = (id: string): RemoteState['cards'][number] | undefined =>
     deps.getState()?.cards.find((c) => c.id === id)
+
+  // Which transport a browser card is being driven by, logged only on change so
+  // steady state is quiet but you can SEE whether CDP is live (and why it fell
+  // back). The whole point: a silent fallback must never masquerade as CDP.
+  const transport = new Map<string, 'cdp' | 'tier-a'>()
+  const noteTransport = (cardId: string, mode: 'cdp' | 'tier-a', reason?: string): void => {
+    if (transport.get(cardId) === mode) return
+    transport.set(cardId, mode)
+    if (mode === 'cdp') console.log(`[browser] ${cardId}: driving via CDP (Tier B)`)
+    else console.warn(`[browser] ${cardId}: CDP unavailable → Tier-A fallback — ${reason}`)
+  }
+  /** Drive a browser op: try Tier-B (CDP), log which path won. On CDP failure,
+   *  rethrow LOUD in strict mode (the verification pass), else log + run the
+   *  Tier-A fallback. The single place the transport decision lives. */
+  const drive = async <T>(
+    cardId: string,
+    cdpOp: () => Promise<T>,
+    fallbackOp: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      const out = await cdpOp()
+      noteTransport(cardId, 'cdp')
+      return out
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e)
+      if (STRICT_CDP) {
+        console.error(`[browser] ${cardId}: CDP failed (strict mode, no fallback) — ${reason}`)
+        throw e
+      }
+      noteTransport(cardId, 'tier-a', reason)
+      return await fallbackOp()
+    }
+  }
 
   return {
     listWorld: async (): Promise<World> => {
@@ -174,17 +228,30 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
       if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
-      // Observation — no comet/landed latency; the agent loop reads frequently.
-      const r = await deps.dispatch({ cmd: 'readBrowser', payload: { cardId } })
-      return { ok: !!r.ok, message: r.message ?? (r.ok ? `read ${card.name}` : 'failed'), snapshot: r.snapshot }
+      // Tier B (CDP, main-side) first; Tier-A renderer path on failure. No
+      // comet/landed — the agent loop reads frequently.
+      return drive(
+        cardId,
+        async () => ({ ok: true, message: `read ${card.name}`, snapshot: await deps.browser.read(cardId) }),
+        async () => {
+          const r = await deps.dispatch({ cmd: 'readBrowser', payload: { cardId } })
+          return { ok: !!r.ok, message: r.message ?? (r.ok ? `read ${card.name}` : 'failed'), snapshot: r.snapshot }
+        },
+      )
     },
 
     screenshotBrowser: async (cardId) => {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
       if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
-      const r = await deps.dispatch({ cmd: 'screenshotBrowser', payload: { cardId } })
-      return { ok: !!r.ok, message: r.message ?? (r.ok ? `captured ${card.name}` : 'failed'), image: r.image }
+      return drive(
+        cardId,
+        async () => ({ ok: true, message: `captured ${card.name}`, image: await deps.browser.screenshot(cardId) }),
+        async () => {
+          const r = await deps.dispatch({ cmd: 'screenshotBrowser', payload: { cardId } })
+          return { ok: !!r.ok, message: r.message ?? (r.ok ? `captured ${card.name}` : 'failed'), image: r.image }
+        },
+      )
     },
 
     actBrowser: async (cardId, action) => {
@@ -194,8 +261,15 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       // A mutation — fly the comet and land it with the narration, like navigate.
       deps.signalTarget({ kind: 'send', cardId })
       await landed()
-      const r = await deps.dispatch({ cmd: 'actBrowser', payload: { cardId, action } })
-      return { ok: !!r.ok, message: r.message ?? (r.ok ? `acted on ${card.name}` : 'failed') }
+      // Tier B (real, background-capable input via CDP) first; Tier-A on failure.
+      return drive(
+        cardId,
+        () => deps.browser.act(cardId, action),
+        async () => {
+          const r = await deps.dispatch({ cmd: 'actBrowser', payload: { cardId, action } })
+          return { ok: !!r.ok, message: r.message ?? (r.ok ? `acted on ${card.name}` : 'failed') }
+        },
+      )
     },
 
     sendToAgent: async (cardId, message) => {

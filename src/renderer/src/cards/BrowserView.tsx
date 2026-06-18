@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { WebviewTag } from 'electron'
 import { ArrowLeft, ArrowRight, RotateCw } from 'lucide-react'
 import { registerBrowser } from './browserBridge'
-import { READ_SCRIPT, buildActionScript } from './browserDriver'
+import { READ_SCRIPT, buildActionScript } from '@shared/browserDriver'
 
 /// The card's live web view: the browser analogue of TerminalView. Owns an
 /// Electron <webview> guest (its own process, the `persist:browser` session) and

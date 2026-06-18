@@ -1,15 +1,18 @@
-// The Tier-A browser driver: self-contained JavaScript injected into a browser
-// card's <webview> guest via `webview.executeJavaScript(...)` to produce a
-// BrowserSnapshot (read) and perform actions (click/type/scroll). It runs in the
-// guest page's own context — pure DOM, no access to app code — and returns
-// JSON-cloneable values across the process boundary.
+// The browser driver: self-contained JavaScript injected into a browser card's
+// page to produce a BrowserSnapshot (read) and perform actions. It runs in the
+// guest's own context — pure DOM, no app code — and returns JSON-cloneable
+// values. Shared because BOTH transports use it: the renderer Tier-A path via
+// `webview.executeJavaScript` (fallback), and main's Tier-B CDP path via
+// `Runtime.evaluate` (primary). It lives in `shared` precisely so the one driver
+// is the single source for both — the module itself has no DOM/Electron
+// dependency (it is just strings + pure builders).
 //
 // `ref` is the set-of-marks index, stamped onto each interactive element as a
 // `data-canvas-ref` attribute during read; actions resolve it back with a plain
 // attribute selector. Refs are snapshot-scoped — a read clears prior refs first,
 // so an action after a DOM mutation that dropped its element returns 'stale-ref'.
-// See BROWSER_AGENCY_PLAN.md §2 for the contract these strings must satisfy.
-import type { BrowserAction } from '@shared/types'
+// See BROWSER_AGENCY_PLAN.md §2 for the contract these strings satisfy.
+import type { BrowserAction } from './types'
 
 /** Injected read: returns a BrowserSnapshot for the guest's current page. */
 export const READ_SCRIPT = `(function () {
@@ -100,7 +103,8 @@ export const READ_SCRIPT = `(function () {
   }
 })()`
 
-/** Injected action: resolves the ref and performs the click/type/scroll. */
+/** Tier-A action (renderer fallback): resolves the ref and performs the action
+ *  entirely in-page via synthetic DOM events. */
 export function buildActionScript(action: BrowserAction): string {
   return `(function (action) {
   if (action.kind === 'scroll') {
@@ -136,4 +140,47 @@ export function buildActionScript(action: BrowserAction): string {
   }
   return { ok: false, message: 'unknown action' }
 })(${JSON.stringify(action)})`
+}
+
+// ── Tier-B (CDP) helpers ─────────────────────────────────────────────────────
+// Main resolves the ref to coordinates / focuses it in-page via Runtime.evaluate,
+// then issues the actual click/keystroke as a real, trusted Input.* event over
+// CDP — which (unlike sendInputEvent) works while the app is in the background.
+
+/** Resolve a ref to its on-screen centre after scrolling it into view.
+ *  Returns `{x, y}` (CSS px, viewport-relative) or `null` if the ref is stale. */
+export function resolveRefScript(ref: string): string {
+  const sel = JSON.stringify(`[data-canvas-ref="${ref}"]`)
+  return `(function () {
+  var el = document.querySelector(${sel})
+  if (!el) return null
+  if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'center' })
+  var r = el.getBoundingClientRect()
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+})()`
+}
+
+/** Focus a ref (the trusted keystrokes that follow go to it), optionally clearing
+ *  it first. Returns `false` if the ref is stale. */
+export function focusRefScript(ref: string, clear?: boolean): string {
+  const sel = JSON.stringify(`[data-canvas-ref="${ref}"]`)
+  return `(function () {
+  var el = document.querySelector(${sel})
+  if (!el) return false
+  if (el.focus) el.focus()
+  if (${clear ? 'true' : 'false'}) {
+    if (el.isContentEditable) el.textContent = ''
+    else if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })) }
+  }
+  return true
+})()`
+}
+
+/** Scroll the page ~one viewport in a direction. */
+export function scrollScript(direction: 'up' | 'down'): string {
+  return `(function () {
+  var dy = (window.innerHeight || 600) * 0.8 * (${direction === 'up' ? -1 : 1})
+  window.scrollBy({ top: dy })
+  return true
+})()`
 }

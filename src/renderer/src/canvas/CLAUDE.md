@@ -11,12 +11,12 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 
 ## Components
 
-- **Canvas.tsx** — the root. Owns `nodes` (all cards, one flat mounted layer),
-  wires every hook, computes the master/stack partition + rects, renders cards +
-  diff sheet + toolbars + toasts, and handles orchestrator commands/tracers.
-  During a canvas switch it also derives a transient `leavingLayout` (the
-  receding board's slots) so the deck cross-fade can fade the old board out from
-  where it sat.
+- **Canvas.tsx** — the root. Owns `nodes` (all cards, one flat mounted layer)
+  and the browser recency map, wires every hook, computes the master/stack
+  partition + rects + the dormant-browser set, renders cards + diff sheet +
+  toolbars + toasts, and handles orchestrator commands/tracers. During a canvas
+  switch it also derives a transient `leavingLayout` (the receding board's slots)
+  so the deck cross-fade can fade the old board out from where it sat.
 - **CardContextMenu.tsx** — right-click-a-card menu: Rename / Close card.
   Dismisses on click-away or Esc.
 - **ProjectToolbar.tsx** — top canvas switcher: a dropdown naming the active
@@ -79,7 +79,8 @@ Each published canvas carries an `active` flag (`p.id === activeProjectId`) so
 the phone knows which project is foregrounded on the desktop; `activeProjectId`
 is in the content-compare deps, so a switch alone republishes. A browser row
 reads as its live page (title, else `hostOf(url)`) and ships its current `url`
-so the orchestrator can answer "what page are we on".
+(so the orchestrator can answer "what page are we on") plus its `ownerId` +
+`reason` — main's agent MCP resolves "my browser" from the owner link.
 
 **Auto-update** — `useAutoUpdate` mirrors electron-updater status from main
 (events merge so the captured version survives version-less progress ticks);
@@ -106,21 +107,47 @@ only fires in packaged builds.
   `useCardMeta`, `useActivityFeed`, and `useHeldAsks` each subscribe
   independently. Meta lives on the nodes; the other hooks keep their own shadows.
 - **Orchestrator IPC.** Main dispatches `OrchestratorCommand`s
-  (spawn/rename/kill/focus/confirm + spawnBrowser/navigateBrowser) over
+  (spawn/rename/kill/focus/confirm + the browser set) over
   `onOrchestratorCommand`; Canvas runs them against live project state and
   replies by id via `orchestratorResult`. A ref holds the latest closure so the
   listener subscribes once. `onOrchestratorTarget` fires a tracer comet from the
   chat bar to the acted-on card. `spawnBrowser` rides the same reveal dance as
-  `spawnAgent`; `navigateBrowser` bumps the node's `goto` nonce (the nav request
-  the webview watches) and promotes the card so the navigation is visible.
+  `spawnAgent` (and stamps the node's `ownerCardId`/`reason`); `navigateBrowser`
+  bumps the node's `goto` nonce (the nav request the webview watches) and
+  promotes the card so the navigation is visible.
+- **Browser see-and-control.** `readBrowser`/`screenshotBrowser`/`actBrowser`
+  reach the card's live page via the per-card `BrowserHandle` from
+  `cards/browserBridge` (`getBrowser(cardId)`, registered by the webview) rather
+  than threading refs through nodes — reply with the page `snapshot` / PNG
+  `image`, or act's ok/message. Reads and screenshots are **silent** (no
+  promote); an act mutates the page so it promotes the card. `setBrowserReason`
+  edits the stated provenance shown on the poster. All four no-op with an error
+  reply if the card isn't a browser or its guest isn't mounted yet.
 - **Browser cards.** A third kind: an in-DOM webview, no tmux/pty/spine session.
   The master runs a live web view (address bar + back/fwd/reload), stacked cards
   show a blur snapshot. The webview reports navigation/title/favicon/snapshot
   back through `onNavigate`, which folds the patch into the node so chrome, face,
   and persistence track it. Close is **session-less**: `onCloseCard` and
   `deleteProject` skip `killCard` for `browser-`-prefixed ids (no session to
-  kill, and killing logs a missing-session error). Only the last `url` persists
-  (reload-on-restore); live title/favicon/snapshot are deliberately transient.
+  kill, and killing logs a missing-session error). Only `url`, `ownerCardId`,
+  and `reason` persist (reload-on-restore); live title/favicon/snapshot are
+  deliberately transient.
+- **Browser lifecycle coupling.** A browser an agent requested carries its
+  owner's id (`ownerCardId`, set on `spawnBrowser`, rehydrated by `restoreItem`
+  and persisted by `useWorkspace` so `request_browser` stays idempotent across
+  restart). `onCloseCard` takes those owned browsers along when the owner closes
+  — no orphan windows. Provenance also surfaces in the UI: a browser passes its
+  owner's `ownerName` (window-bar chip) + `onFlyToOwner` (promote the owner),
+  and an agent poster shows `browserThumb` (its owned browser's snapshot), both
+  from an `ownedBrowserByAgent` map (first owner wins).
+- **Webview budget / eviction.** Webview guests are costly (GL/process, shared
+  with terminals under Chromium's ~16-context ceiling), so only `BROWSER_BUDGET`
+  (6) stay live; the rest go **dormant** (guest dropped, snapshot face shown),
+  passed as `dormant` to each CardNode. The set is app-wide (every browser holds
+  resources regardless of which canvas parks it) and recency-ranked: a monotonic
+  `bumpBrowser` counter ranks each browser on promote/spawn/wake, the active
+  master always wins, and the lowest-ranked past the budget evict. `onBrowserWake`
+  (main asks to revive a dormant browser to drive it) just bumps it back live.
 - **Diff sheet** is not a node — a built-in overlay keyed by active project id,
   watching `active.dir`, re-pointing on canvas switch; collapse parks it, close
   tears it down.

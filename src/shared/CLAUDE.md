@@ -34,10 +34,32 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     it operates on by default.
   - Orchestrator: `OrchestratorMode` / `OrchestratorEvent` /
     `OrchestratorCommand` / `OrchestratorTarget` and their result types. Browser
-    cards ride the same command seam as agents (`spawnBrowser`/`navigateBrowser`
-    alongside spawn/focus/rename/kill).
+    cards ride the same command seam as agents — `spawnBrowser`/`navigateBrowser`
+    plus the agency verbs `readBrowser`/`screenshotBrowser`/`actBrowser`/
+    `setBrowserReason` — alongside spawn/focus/rename/kill;
+    `OrchestratorActionResult` carries the `snapshot`/`image` they return.
+  - Browser agency: `BrowserElement` / `BrowserSnapshot` (the pinned
+    observation contract — `ref` is opaque so the backend can swap how it
+    resolves) and `BrowserAction` (`click`/`type`/`scroll`/`select`/`history`).
+    `CardRecord` and `RemoteState.cards` carry `ownerCardId`/`ownerId` +
+    `reason` (persisted browser ownership: which agent requested it and why).
   - `CanvasApi` — the full interface the preload bridge implements and the
-    renderer consumes (the IPC contract in one place).
+    renderer consumes (the IPC contract in one place). Browser readiness rides
+    here too: `browserReady` (renderer→main: a `<webview>` is dom-ready, with
+    its `webContentsId`, or torn down) and `onBrowserWake` (main→renderer:
+    revive a dormant/evicted browser so it can be driven).
+- **browserDriver.ts** — the single in-page driver for browser-card agency:
+  self-contained JS that runs in the guest's own DOM to produce a
+  `BrowserSnapshot` (`READ_SCRIPT`) and to act on it. Shared because BOTH
+  transports use it — the renderer Tier-A path via `webview.executeJavaScript`
+  (`buildActionScript`) and main's Tier-B CDP path via `Runtime.evaluate`
+  (`resolveRefScript`/`focusRefScript`/`scrollScript`/`selectScript`/
+  `historyScript`). `ref` is an opaque, snapshot-scoped set-of-marks index
+  stamped as a `data-canvas-ref` attribute on read and resolved back by a plain
+  attribute selector; a read clears prior refs first, so a post-mutation action
+  returns `stale-ref`. Note the dependency-free rule still holds: the **strings
+  run in a DOM**, but the module is just strings + pure builders (no DOM/Electron
+  import) — the canonical "dependency-free, runs anywhere" file.
 - **time.ts** — relative-time formatting helpers (`relativeFromSeconds`, the
   `MINUTE`/`HOUR`/`DAY` thresholds). Epoch-seconds in, `"now"`/`"5m"`/`"2h"`/`"Nd"`
   out, with an `overflow` hook for past-a-day formatting.

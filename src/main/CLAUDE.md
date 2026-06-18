@@ -27,7 +27,12 @@ Each has its own CLAUDE.md — read it before working in that area.
   creates the hardened `BrowserWindow` (contextIsolation + sandbox on, preload bridge,
   `webviewTag` on for browser cards), locks down host navigation/popups, intercepts
   whole-app zoom, grants mic permission for push-to-talk, instantiates the singletons, and
-  registers all `ipcMain.handle`/`.on` handlers. Holds two small bits of local state:
+  registers all `ipcMain.handle`/`.on` handlers. Among the singletons is a `BrowserController`
+  (Tier-B CDP driver, passed to the orchestrator as its `browser` dep; its `wake` asks the
+  renderer to revive an evicted browser) whose readiness map is fed by the `browser-ready`
+  handler; it also starts the `AgentBrowserMcp` loopback server on the spine's stable
+  `browserMcpPort` (sharing the spine token + state + the controller's `ensureReady`) so cards
+  can drive browsers via `--mcp-config`. Holds two small bits of local state:
   `nextItem` (card-id counter) and `pendingPrompts` (initial prompts queued for a card before
   its pty spawns, delivered one-shot by `ensure-card`).
 - **ptys.ts** — `PtyRegistry`, one `node-pty` per card keyed by `cardId`. Spawns from a
@@ -54,9 +59,11 @@ Each has its own CLAUDE.md — read it before working in that area.
   when the renderer mounts the card, fed by `spine.launch`.
 - **Card kinds:** `agent` (tmux/pty/spine session) and `shell`, plus `browser` — an in-DOM
   `<webview>` guest with no pty/tmux/spine session at all. `new-browser` only mints the id
-  (`browser-` prefix, like `card-`/`shell-`); the renderer owns the url, and the orchestrator
-  opens/navigates browsers over the command seam. Browser-card guests run in their own
-  process/session, carry no preload, and so can't reach the `CanvasApi` bridge.
+  (`browser-` prefix, like `card-`/`shell-`); the renderer owns the url, and browsers are now
+  see-and-controllable — both the orchestrator (Tier-B CDP via `BrowserController`) and agent
+  cards (the `AgentBrowserMcp` server) drive them over the command seam, gated on a readiness
+  map fed by the `browser-ready` IPC. Browser-card guests run in their own process/session,
+  carry no preload, and so can't reach the `CanvasApi` bridge.
 - **Persistence:** main-process state lives under `SPINE_DIR` (`~/.agentcanvas-web`); the
   workspace snapshot is the only file owned by this directory's code.
 

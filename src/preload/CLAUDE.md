@@ -25,7 +25,9 @@ The API exposed on `window.canvas` groups by concern:
   `onQuestionDecided`, `openExternal`, `onUpdateStatus`, `quitAndInstall`.
 - **Orchestrator** — `sendOrchestratorPrompt`, `onOrchestratorEvent`,
   `onOrchestratorCommand`, `onOrchestratorTarget`, `orchestratorResult`,
-  `setOrchestratorMode`.
+  `setOrchestratorMode`, plus browser-card driving: `browserReady` (a guest
+  reached dom-ready / was torn down — feeds main's readiness map) and
+  `onBrowserWake` (revive a dormant/evicted browser so it can be driven).
 - **Voice** — availability (`voiceAvailable`, `saveVoiceKey`, `onVoiceAvailable`),
   push-to-talk STT (`startSpeech`, `sendSpeechAudio`, `finishSpeech`,
   `cancelSpeech`, `onSpeechPartial`, `onSpeechFinal`, `onSpeechError`), and TTS

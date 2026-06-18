@@ -64,6 +64,9 @@ export interface MainBusDeps {
   /** The Tier-B CDP browser path (primary); the bus falls back to dispatching to
    *  the renderer (Tier A) when these throw. */
   browser: BrowserDriver
+  /** Tell the renderer to play the scan-line flourish on a browser card — fired
+   *  when its page is screenshotted, as see-it-happening feedback. */
+  notifyBrowserScan: (cardId: string) => void
 }
 
 function delay(ms: number): Promise<void> {
@@ -244,6 +247,9 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
       if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      // See-it-happening feedback: play the scan sweep on the card as the capture
+      // runs (covers both the CDP and Tier-A paths — emitted before drive).
+      deps.notifyBrowserScan(cardId)
       return drive(
         cardId,
         async () => ({ ok: true, message: `captured ${card.name}`, image: await deps.browser.screenshot(cardId) }),

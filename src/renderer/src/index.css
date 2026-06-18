@@ -336,3 +336,60 @@
 @media (prefers-reduced-motion: reduce) {
   .deck-enter, .deck-leave { animation: none; }
 }
+
+/* Browser scan — a scan-line sweeping down a browser card when its page is
+   screenshotted (browser_screenshot). Inspired by the comet-landing grid ripple
+   (Tracer.tsx): a fine cyan grid lit only within a moving wavefront — but linear
+   (a horizontal band sweeping top→bottom) instead of radial. A RENDERER overlay
+   over the card surface, NEVER injected into the guest page, so it's feedback
+   only and never lands in the capture. Cyan is the app's "AI is doing something"
+   accent (cf. orchestrator / voice glow + the ripple), distinct from the status
+   palette — it reads as activity, not an attention signal. One long sweep
+   top→bottom per capture (CardNode's one-shot state, keyed by the scan nonce so
+   a rapid re-capture replays it). */
+@keyframes browser-scan {
+  0%   { mask-position: 0 -45%; -webkit-mask-position: 0 -45%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { mask-position: 0 145%; -webkit-mask-position: 0 145%; opacity: 0; }
+}
+.browser-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 20; /* above the live view and the stacked face */
+  pointer-events: none;
+  overflow: hidden;
+}
+.browser-scan::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* The grid (static, aligned to the card) — same 1px cyan lattice + glow as the
+     ripple — over a faint cyan fill so the band has body, not just lines. */
+  background-color: rgb(34 211 238 / 0.06);
+  background-image:
+    linear-gradient(rgb(34 211 238 / 0.8) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(34 211 238 / 0.8) 1px, transparent 1px);
+  background-size: 26px 26px;
+  filter: drop-shadow(0 0 4px rgb(34 211 238 / 0.7));
+  /* The wavefront: reveal only a horizontal band, brightest at its leading
+     (lower) edge, then sweep that band down the card (mask-position animates). */
+  mask-image: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.15) 38%, #000 80%, #000 92%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.15) 38%, #000 80%, #000 92%, transparent);
+  mask-size: 100% 42%;
+  -webkit-mask-size: 100% 42%;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  /* One long top→bottom sweep per capture. Duration is coupled to CardNode's
+     unmount timeout — keep that ≥ this. */
+  animation: browser-scan 1.9s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+/* Reduced motion: hold the grid band mid-card, no sweep (mounted only ~1.2s, so
+   it flashes once and unmounts). */
+@media (prefers-reduced-motion: reduce) {
+  .browser-scan::before {
+    animation: none;
+    mask-position: 0 50%;
+    -webkit-mask-position: 0 50%;
+  }
+}

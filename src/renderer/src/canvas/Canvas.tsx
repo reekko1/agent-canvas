@@ -136,6 +136,11 @@ export function Canvas() {
     setBrowserRecency((prev) => new Map(prev).set(cardId, (recencyTick.current += 1)))
   }, [])
 
+  // Per-browser scan pulse: a nonce bumped each time a card's page is captured
+  // (browser_screenshot), passed to CardNode to (re)play the one-shot scan sweep.
+  const [scanPulse, setScanPulse] = useState<Map<string, number>>(() => new Map())
+  const scanTick = useRef(0)
+
   const makeProjectId = useCallback(
     () => `proj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     [],
@@ -646,6 +651,14 @@ export function Canvas() {
   // Main needs a dormant browser driven — bump it to most-recent so the budget
   // brings it back live (its guest remounts and reloads).
   useEffect(() => window.canvas.onBrowserWake((cardId) => bumpBrowser(cardId)), [bumpBrowser])
+  // A browser's page was screenshotted — bump its pulse to play the scan sweep.
+  useEffect(
+    () =>
+      window.canvas.onBrowserScan((cardId) =>
+        setScanPulse((prev) => new Map(prev).set(cardId, (scanTick.current += 1))),
+      ),
+    [],
+  )
 
   // ---- Master-stack layout (active project only; others stay parked) ----
   const active = proj.active
@@ -850,6 +863,7 @@ export function Canvas() {
                 n.data.ownerCardId ? () => promoteCard(n.data.ownerCardId!) : undefined
               }
               browserThumb={ownedBrowserByAgent.get(n.id)?.data.snapshot}
+              scanNonce={scanPulse.get(n.id) ?? 0}
               title={shellTitles[n.id]}
             />
           </div>

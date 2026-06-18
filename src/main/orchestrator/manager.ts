@@ -44,6 +44,8 @@ export interface OrchestratorDeps {
   /** Tier-B CDP browser driver (BrowserController) — the bus drives browsers
    *  through this, falling back to the renderer path when CDP is unavailable. */
   browser: BrowserDriver
+  /** Tell the renderer to play the scan flourish on a browser card (screenshot). */
+  notifyBrowserScan: (cardId: string) => void
   /** Voice the orchestrator's turn — receives every typed event; routes the
    *  assistant lines to TTS. Beside the typed event, not a channel-string sniff. */
   speak?: (e: OrchestratorEvent) => void
@@ -293,6 +295,7 @@ export class Orchestrator {
       act: (id, a) => this.deps.browser.act(id, a),
       screenshot: (id) => this.deps.browser.screenshot(id),
     },
+    notifyBrowserScan: (id) => this.deps.notifyBrowserScan(id),
   })
 
   /** The live CommandBus — shared with the agent-facing browser MCP server, which

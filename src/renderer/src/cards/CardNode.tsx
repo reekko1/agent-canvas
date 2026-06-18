@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Bot, Globe, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { basenameOf } from '@/lib/utils'
@@ -32,6 +33,7 @@ export function CardNode({
   ownerName,
   onFlyToOwner,
   browserThumb,
+  scanNonce,
   title,
 }: {
   id: string
@@ -48,6 +50,9 @@ export function CardNode({
   /** For an agent that owns a browser: a thumbnail of what that browser shows,
    *  surfaced on its poster ("what my agent is looking at"). */
   browserThumb?: string
+  /** A nonce bumped each time this browser's page is screenshotted — replays the
+   *  one-shot scan sweep. 0 = never scanned. */
+  scanNonce?: number
   /** Live shell-pane title bits (command + cwd) from the global useShellTitles
    *  poll — undefined for agent cards and for a shell before its first poll. */
   title?: ShellTitle
@@ -69,6 +74,18 @@ export function CardNode({
   const displayName = isBrowser
     ? data.name || data.title || hostOf(data.url)
     : (!isShell && data.name) || folderName
+
+  // One-shot scan sweep: show the overlay for the sweep's duration whenever the
+  // screenshot nonce advances (keyed by nonce below so a rapid re-capture
+  // replays it). Self-clears so it's absent the rest of the time.
+  const [scanning, setScanning] = useState(false)
+  useEffect(() => {
+    if (!scanNonce) return
+    setScanning(true)
+    // Must outlast the .browser-scan sweep (1.9s in index.css) or it cuts off.
+    const t = setTimeout(() => setScanning(false), 2000)
+    return () => clearTimeout(t)
+  }, [scanNonce])
 
   return (
     <div
@@ -184,6 +201,11 @@ export function CardNode({
             )}
           </button>
         )}
+        {/* One-shot scan sweep when this browser's page is screenshotted — a
+            renderer overlay above the live view AND the stacked face, never in
+            the guest (so it's feedback, not part of the capture). Keyed by nonce
+            so a rapid re-capture restarts the sweep. */}
+        {isBrowser && scanning && <div key={scanNonce} className="browser-scan" aria-hidden />}
       </div>
     </div>
   )

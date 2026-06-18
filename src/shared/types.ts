@@ -585,6 +585,9 @@ export interface CanvasApi {
   /** Main asks the renderer to wake a dormant (evicted) browser so it can be
    *  driven — the renderer makes it live again (mounting its guest). */
   onBrowserWake(cb: (cardId: string) => void): () => void
+  /** Main signals that a browser card's page was screenshotted — the renderer
+   *  plays a one-shot scan sweep on that card (feedback, not in the capture). */
+  onBrowserScan(cb: (cardId: string) => void): () => void
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
   setOrchestratorMode(mode: OrchestratorMode): void
   // MARK: Voice — push-to-talk speech-to-text and spoken orchestrator replies.

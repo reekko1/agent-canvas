@@ -254,6 +254,8 @@ app.whenReady().then(() => {
     },
     // Tier-B CDP browser driving (falls back to the renderer path on failure).
     browser: browserController,
+    // Play the scan-line flourish on a browser card when its page is captured.
+    notifyBrowserScan: (cardId) => send('browser-scan', cardId),
   })
   // Echo every agent's finished turn into the supervision chat the instant its
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just

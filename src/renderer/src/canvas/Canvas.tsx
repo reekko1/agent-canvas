@@ -319,8 +319,15 @@ export function Canvas() {
     proj.createProject(name, dir)
   }, [proj.createProject])
 
+  // The live stack scroll, mirrored to a ref so the switch handler can snapshot
+  // it the instant before resetting — the receding board fades from where it
+  // actually sat, not from scroll 0.
+  const scrollRef = useRef(0)
+  const leaveScrollRef = useRef(0)
+
   const switchProject = useCallback(
     (id: string) => {
+      leaveScrollRef.current = scrollRef.current
       setStackScroll(0)
       proj.switchProject(id)
     },
@@ -484,6 +491,28 @@ export function Canvas() {
 
   const maxScroll = Math.max(0, stackContentHeight(stackCards.length) - (winH - TOP_STRIP - PAD))
   const scroll = Math.min(stackScroll, maxScroll)
+  scrollRef.current = scroll
+
+  // During a deck-restack switch, the outgoing canvas's cards keep rendering at
+  // their old master/stack slots (frozen at the scroll they had) while they
+  // recede and fade — so we lay them out independently of the now-active board.
+  // Null whenever no switch is in flight or the leaving canvas is gone (deleted).
+  const leavingLayout = useMemo(() => {
+    const leavingId = proj.switching?.leaving
+    const leaving = leavingId ? proj.projects.find((p) => p.id === leavingId) : undefined
+    if (!leaving) return null
+    const ordered = leaving.cardIds.filter((id) => cardNodes.some((n) => n.id === id))
+    const masterId = ordered.find((id) => id === leaving.focusedCardId) ?? ordered[0] ?? null
+    const stack = ordered.filter((id) => id !== masterId)
+    const m = masterRect(winW, winH, stack.length > 0)
+    const rects = new Map<string, Rect>()
+    if (masterId) rects.set(masterId, m)
+    stack.forEach((id, i) => {
+      const s = stackSlot(winW, i)
+      rects.set(id, { ...s, y: s.y - leaveScrollRef.current })
+    })
+    return { rects, masterId }
+  }, [proj.switching?.leaving, proj.projects, cardNodes, winW, winH])
 
   const rectFor = (cardId: string): Rect => {
     if (cardId === masterCard?.id) return mRect
@@ -553,11 +582,19 @@ export function Canvas() {
       {cardNodes.map((n) => {
         const inActive = activeSet.has(n.id)
         const isMaster = inActive && masterCard?.id === n.id
-        const r = inActive ? rectFor(n.id) : PARKED
+        // The receding board: cards of the canvas being switched away from, kept
+        // visible at their old slots for the deck cross-fade, then dropped.
+        const leavingRect = !inActive ? leavingLayout?.rects.get(n.id) : undefined
+        const isLeavingMaster = leavingRect && leavingLayout?.masterId === n.id
+        const visible = inActive || !!leavingRect
+        const r = inActive ? rectFor(n.id) : (leavingRect ?? PARKED)
+        // The rising board fades up and forward (deck-enter); the receding board
+        // sinks back and fades (deck-leave). Only while a switch is in flight.
+        const deck = proj.switching ? (inActive ? ' deck-enter' : leavingRect ? ' deck-leave' : '') : ''
         return (
           <div
             key={n.id}
-            className="absolute left-0 top-0"
+            className={`absolute left-0 top-0${deck}`}
             onContextMenu={
               inActive
                 ? (e) => {
@@ -578,8 +615,10 @@ export function Canvas() {
               ]
                 .filter(Boolean)
                 .join(', '),
-              visibility: inActive ? 'visible' : 'hidden',
-              zIndex: isMaster ? 10 : 1,
+              visibility: visible ? 'visible' : 'hidden',
+              // Rising board sits above the receding one so it reads as coming
+              // forward; within each, the master outranks its stack.
+              zIndex: isMaster ? 10 : isLeavingMaster ? 2 : leavingRect ? 0 : 1,
             }}
           >
             <CardNode id={n.id} data={n.data} stacked={!isMaster} title={shellTitles[n.id]} />

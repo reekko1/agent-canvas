@@ -312,3 +312,27 @@
     opacity: 0.55;
   }
 }
+
+/* Deck restack — the canvas-switch transition. Switching projects swaps one
+   board for another like cards in a deck: the outgoing board recedes a touch
+   and fades (1 -> 1.02), while the incoming board rises forward from behind
+   (0.96 -> 1) and fades in over it. Driven entirely by the deck-enter /
+   deck-leave classes, applied for the switch window then removed (see
+   useProjects' `switching`). The standalone `scale` property is used — not
+   `transform` — so the deck scale composes with each card's inline
+   `transform: translate()` positioning (which the layout snaps, transition-free,
+   during the switch frame). `both` fill holds the end state until the class is
+   removed, so cards never flash back before they're hidden/settled. */
+@keyframes deck-enter {
+  from { scale: 0.96; opacity: 0; }
+  to   { scale: 1; opacity: 1; }
+}
+@keyframes deck-leave {
+  from { scale: 1; opacity: 1; }
+  to   { scale: 1.02; opacity: 0; }
+}
+.deck-enter { animation: deck-enter 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.deck-leave { animation: deck-leave 300ms cubic-bezier(0.4, 0, 1, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .deck-enter, .deck-leave { animation: none; }
+}

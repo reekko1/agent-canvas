@@ -14,6 +14,9 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 - **Canvas.tsx** — the root. Owns `nodes` (all cards, one flat mounted layer),
   wires every hook, computes the master/stack partition + rects, renders cards +
   diff sheet + toolbars + toasts, and handles orchestrator commands/tracers.
+  During a canvas switch it also derives a transient `leavingLayout` (the
+  receding board's slots) so the deck cross-fade can fade the old board out from
+  where it sat.
 - **CardContextMenu.tsx** — right-click-a-card menu: Rename / Close card.
   Dismisses on click-away or Esc.
 - **ProjectToolbar.tsx** — top canvas switcher: a dropdown naming the active
@@ -41,9 +44,12 @@ when decided remotely); `usePendingAsks` wraps it for permission gates
 
 **Projects / workspace** — `useProjects` owns the project list + active id +
 master focus and all mutations (attach/detach/promote/switch/create/delete/
-rename/restore); cards are global and never move between canvases. `useWorkspace`
-is restore-once + 300ms-debounced persist; drops ghost cards no project
-references and re-hydrates plans for reattached agent sessions.
+rename/restore); cards are global and never move between canvases. Every
+active-canvas change funnels through one private `setActive`, which snaps the
+layout (`animate` gate) and arms `switching` — the `{ leaving, entering }`
+deck-restack window (auto-cleared after `DECK_MS`, null from/to the empty state).
+`useWorkspace` is restore-once + 300ms-debounced persist; drops ghost cards no
+project references and re-hydrates plans for reattached agent sessions.
 
 **Card meta** — `useCardMeta` is the renderer end of the spine: folds card
 events / pty exits into each card's `meta` on the nodes, and re-hydrates todos
@@ -79,6 +85,13 @@ only fires in packaged builds.
   projects or promoting only flips visibility (`visibility:hidden`) and the
   `transform`/size — so a card's xterm and scrollback survive switches. Inactive
   cards park off-screen at `PARKED` but stay sized so FitAddon stays valid.
+- **Deck-restack switch.** A canvas switch cross-fades like swapping cards in a
+  deck: the rising board fades up/forward (`deck-enter`), the receding one sinks
+  back/fades (`deck-leave`) — driven by classes in `index.css`, gated by
+  `proj.switching`. Cards never leave the flat layer (xterm survives); the
+  receding board's cards just keep rendering at `leavingLayout`'s slots until the
+  window clears. The deck scale uses the standalone CSS `scale` property (not
+  `transform`) so it composes with each card's snapped `translate()` position.
 - **Master-stack focus.** The active project's `focusedCardId` is the master;
   the rest are the stack, ordered by `cardIds`. Promotion demotes the old master
   to the top of the stack. The partition is memoized; `rectFor` does O(1)
@@ -119,3 +132,7 @@ only fires in packaged builds.
   `x <= -10000` as "not laid out".
 - Engaging a card's terminal releases both its held asks and questions (they fall
   through to the CLI's own dialogs).
+- **Deck transition timing:** `DECK_MS` (in `useProjects`) must outlast the
+  300ms CSS animation so the `deck-enter`/`deck-leave` classes don't drop before
+  the keyframes finish. The receding stack is frozen at the pre-switch scroll via
+  `leaveScrollRef` (snapshotted the instant before `setStackScroll(0)`).

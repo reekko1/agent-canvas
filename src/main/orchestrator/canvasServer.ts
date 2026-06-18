@@ -13,6 +13,11 @@ const failResult = (message: string) => ({
   isError: true,
 })
 
+/** Read-only canvas tools — safe to auto-run. Single source of truth: the gate
+ *  builds orchestrator.ts's READ_ONLY from this, and the `readOnlyHint` annotations
+ *  on list_world / get_agent_reply below mirror it (keep the two in sync). */
+export const READ_ONLY_TOOLS = ['list_world', 'get_agent_reply'] as const
+
 /** Build the `canvas` MCP server backed by a CommandBus implementation. */
 export function buildCanvasServer(bus: CommandBus) {
   const listWorld = tool(

@@ -1,6 +1,6 @@
-// An in-memory CommandBus for exercising the orchestrator without the real app.
-// Slice 2 replaces this with a `mainBus` reading live RemoteState + dispatching
-// to the renderer. The seeded world mimics two canvases with a blocked agent.
+// An in-memory CommandBus double for exercising the orchestrator without the real
+// app — used by the offline harness (harness.ts). The live bus is mainBus.ts. The
+// seeded world mimics two canvases with a blocked agent.
 import type {
   ActionResult,
   AgentReplyResult,

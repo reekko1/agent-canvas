@@ -1,7 +1,8 @@
-// Drives the orchestrator in the main process. Owns the real CommandBus
-// (`list_world` projects the latest RemoteState; mutations and confirms are
-// dispatched to the renderer over a correlation-id channel and awaited) AND the
-// persistent streaming-input session.
+// Drives the orchestrator in the main process. Owns the persistent streaming-input
+// session and the renderer command channel (`dispatch` + the correlation-id pending
+// map), and wires up the live bus (mainBus.ts) and speech-pacing. Most mutations
+// dispatch to the renderer and await it; agent I/O (send/reply) and ask decisions
+// are main-owned and bypass that round-trip.
 //
 // The session is one long-lived Agent SDK `query()` fed by an async generator
 // (`input()`) that drains a shared queue. Three producers push into that queue:
@@ -10,14 +11,12 @@
 //   • `notifyAsk()`        — an agent's permission ask fired    (priority 'next')
 // The hooks are the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
+import { makeMainBus, type DispatchCommand, type ResultFor } from './mainBus'
 import { TRACER_TRAVEL_MS } from '../../shared/types'
-import type { CommandBus, World } from './contract'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
-  OrchestratorActionResult,
   OrchestratorCommand,
   OrchestratorCommandResult,
-  OrchestratorConfirmResult,
   OrchestratorEvent,
   OrchestratorMode,
   OrchestratorTarget,
@@ -31,12 +30,6 @@ const REPLY_CLIP = 500
 /** The ` on canvas "X"` qualifier the fleet-event prompts share (empty when the
  *  card isn't on a named canvas). */
 const onCanvas = (name?: string): string => (name ? ` on canvas "${name}"` : '')
-
-/** The reply shape the renderer sends back for a given command: `confirm` is a
- *  gate decision, every mutation an action result. */
-type ResultFor<C extends OrchestratorCommand['cmd']> = C extends 'confirm'
-  ? OrchestratorConfirmResult
-  : OrchestratorActionResult
 
 export interface OrchestratorDeps {
   send: (channel: string, ...args: unknown[]) => void
@@ -231,123 +224,39 @@ export class Orchestrator {
     return this.deps.getState()?.cards.find((c) => c.id === id)
   }
 
-  private dispatch<C extends OrchestratorCommand['cmd']>(
-    cmd: C,
-    payload: Extract<OrchestratorCommand, { cmd: C }>['payload'],
+  private dispatch<C extends DispatchCommand>(
+    command: C,
     timeoutMs = 30_000,
-  ): Promise<ResultFor<C>> {
+  ): Promise<ResultFor<C['cmd']>> {
     const id = this.nextId++
-    this.deps.send('orchestrator-command', { id, cmd, payload } as OrchestratorCommand)
-    return new Promise<ResultFor<C>>((resolve) => {
+    this.deps.send('orchestrator-command', { id, ...command } as OrchestratorCommand)
+    return new Promise<ResultFor<C['cmd']>>((resolve) => {
       this.pending.set(id, resolve as (r: OrchestratorCommandResult) => void)
       // The renderer might never reply (window gone) — don't wedge the turn. A
       // missing confirm reply denies; a missing mutation reply reports failure.
       setTimeout(() => {
         if (!this.pending.delete(id)) return
         resolve(
-          (cmd === 'confirm'
+          (command.cmd === 'confirm'
             ? { allow: false }
-            : { ok: false, message: 'no response from the app' }) as ResultFor<C>,
+            : { ok: false, message: 'no response from the app' }) as ResultFor<C['cmd']>,
         )
       }, timeoutMs)
     })
   }
 
-  private readonly bus: CommandBus = {
-    listWorld: async (): Promise<World> => {
-      const s = this.deps.getState()
-      if (!s) return { canvases: [], cards: [], approvals: [], needsYou: 0 }
-      return {
-        canvases: s.canvases.map((c) => ({
-          id: c.id,
-          name: c.name,
-          attention: c.attention,
-          dirty: c.dirty,
-          branch: c.branch,
-        })),
-        cards: s.cards.map((c) => ({
-          id: c.id,
-          name: c.name,
-          kind: c.kind,
-          status: c.status,
-          task: c.task,
-          canvasId: c.projectId,
-          canvasName: c.projectName,
-        })),
-        approvals: s.approvals.map((a) => ({
-          id: a.id,
-          name: a.name,
-          detail: a.detail,
-          canvasId: a.projectId,
-        })),
-        needsYou: s.needsYou,
-      }
-    },
-
-    focusCanvas: async (canvasId) => {
-      const r = await this.dispatch('focusCanvas', { canvasId })
-      return { ok: !!r.ok, message: r.message ?? (r.ok ? 'switched' : 'failed') }
-    },
-
-    spawnAgent: async (input) => {
-      const r = await this.dispatch('spawnAgent', { ...input })
-      if (r.ok && r.cardId) this.signalTarget({ kind: 'spawn', cardId: r.cardId })
-      return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'spawned' : 'failed') }
-    },
-
-    sendToAgent: async (cardId, message) => {
-      const card = this.findCard(cardId)
-      if (!card) return { ok: false, message: `no agent with id ${cardId}` }
-      if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
-      // The comet delivers the message: fly first, inject when it lands. Keystroke
-      // injection into the agent's terminal; Enter (\r) submits the line. Claude
-      // queues input when busy, so this is safe at any status.
-      this.signalTarget({ kind: 'send', cardId })
-      await this.landed()
-      this.deps.writeToCard(cardId, message.endsWith('\r') ? message : `${message}\r`)
-      return {
-        ok: true,
-        message: card.status === 'running' ? `queued for ${card.name} (busy)` : `sent to ${card.name}`,
-      }
-    },
-
-    getAgentReply: async (cardId) => {
-      const card = this.findCard(cardId)
-      if (!card) return { ok: false, message: `no agent with id ${cardId}` }
-      const reply = this.deps.getReply(cardId)
-      if (!reply) return { ok: true, message: `${card.name} hasn't finished a turn yet — no reply captured` }
-      return { ok: true, reply, message: `last reply from ${card.name}` }
-    },
-
-    renameAgent: async (cardId, name) => {
-      this.signalTarget({ kind: 'rename', cardId })
-      await this.landed()
-      const r = await this.dispatch('renameAgent', { cardId, name })
-      return { ok: !!r.ok, message: r.message ?? (r.ok ? 'renamed' : 'failed') }
-    },
-
-    killCard: async (cardId) => {
-      const card = this.findCard(cardId)
-      if (!card) return { ok: false, message: `no card with id ${cardId}` }
-      // The comet flies to the still-present card, then it closes on landing.
-      this.signalTarget({ kind: 'kill', cardId })
-      await this.landed()
-      const r = await this.dispatch('killCard', { cardId })
-      return { ok: !!r.ok, message: r.message ?? (r.ok ? `closed ${card.name}` : 'failed') }
-    },
-
-    approveAsk: async (askId, decision) => {
-      const ask = this.deps.getState()?.approvals.find((a) => a.id === askId)
-      if (!ask) return { ok: false, message: `no pending ask with id ${askId}` }
-      // Signal before deciding — the renderer resolves the asking card from its
-      // still-present ask list, the comet flies, and the decision commits on landing.
-      this.signalTarget({ kind: 'approve', askId })
-      await this.landed()
-      // Main-owned decision — straight to spine.decide, no renderer round-trip.
-      this.deps.decideAsk(askId, decision)
-      return { ok: true, message: `${decision === 'allow' ? 'approved' : 'denied'} ${ask.name}'s request` }
-    },
-  }
+  // The live CommandBus lives in mainBus.ts; the manager just supplies the seams
+  // it needs (renderer dispatch, state, main-owned agent I/O, the comet signal).
+  // Deps are lazy arrows: this field initializes before `this.deps` is assigned,
+  // so each access must be deferred to call time.
+  private readonly bus = makeMainBus({
+    getState: () => this.deps.getState(),
+    dispatch: (command) => this.dispatch(command),
+    writeToCard: (cardId, data) => this.deps.writeToCard(cardId, data),
+    getReply: (cardId) => this.deps.getReply(cardId),
+    decideAsk: (askId, decision) => this.deps.decideAsk(askId, decision),
+    signalTarget: (t) => this.signalTarget(t),
+  })
 
   private readonly gate = async (
     toolName: string,
@@ -367,7 +276,7 @@ export class Orchestrator {
     // forbids it from approving on its own judgement).
     if (this.mode !== 'manual') return { allow: true }
     // manual → a human decides; give it minutes, not the 30s machine round-trip.
-    const r = await this.dispatch('confirm', { toolName, input }, 5 * 60_000)
+    const r = await this.dispatch({ cmd: 'confirm', payload: { toolName, input } }, 5 * 60_000)
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
   }
 
@@ -380,11 +289,5 @@ export class Orchestrator {
    *  tracer from the chat bar to that card. */
   private signalTarget(target: OrchestratorTarget): void {
     this.deps.send('orchestrator-target', target)
-  }
-
-  /** Resolve when the comet would reach the card — the action commits here, so its
-   *  effect lands with the dot instead of ahead of it. */
-  private landed(): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, TRACER_TRAVEL_MS))
   }
 }

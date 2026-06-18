@@ -1,8 +1,9 @@
 // The orchestrator's view of the app, and the actions it can take.
 //
-// This is the seam between the Agent SDK tools and the app. Slice 1 implements
-// it with an in-memory stub (`stubBus.ts`); Slice 2 swaps in a `mainBus` that
-// reads the live `RemoteState` and dispatches mutations to the renderer.
+// This is the seam between the Agent SDK tools and the app. Two implementations
+// satisfy it: mainBus.ts (the live bus — projects the latest RemoteState and
+// dispatches mutations to the renderer) and stubBus.ts (an in-memory double for
+// the offline harness).
 //
 // Imports use a relative path (not the `@shared` alias) so the standalone tsx
 // harness resolves it without tsconfig-path support.

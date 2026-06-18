@@ -35,6 +35,11 @@ export class BrowserController implements BrowserDriver {
   /** Resolvers waiting for a card to become ready, by cardId. */
   private readonly waiters = new Map<string, Array<() => void>>()
 
+  /** `wake` asks the renderer to bring a dormant (evicted) browser back to life so
+   *  it can be driven — without it, ensureReady would wait forever on a guest the
+   *  renderer chose not to mount. Injected by the host (index.ts). */
+  constructor(private readonly opts: { wake?: (cardId: string) => void } = {}) {}
+
   /** The renderer reported a guest reached dom-ready (or re-navigated). Records
    *  its WebContents id and wakes anyone awaiting readiness. */
   markReady(cardId: string, webContentsId: number): void {
@@ -62,6 +67,9 @@ export class BrowserController implements BrowserDriver {
    *  (e.g. the card never mounted). Replaces the old fixed settle delay. */
   ensureReady(cardId: string, timeoutMs = 8000): Promise<void> {
     if (this.states.get(cardId)?.ready) return Promise.resolve()
+    // Not ready — it may be newly spawned (mounting) or evicted (dormant). Nudge
+    // the renderer to wake it; harmless for one that's already on its way up.
+    this.opts.wake?.(cardId)
     return new Promise<void>((resolve, reject) => {
       const remove = (): void => {
         const arr = this.waiters.get(cardId)

@@ -56,6 +56,7 @@ const api: CanvasApi = {
   orchestratorResult: (id, result) => ipcRenderer.send('orchestrator-result', id, result),
   browserReady: (cardId, webContentsId) =>
     ipcRenderer.send('browser-ready', cardId, webContentsId),
+  onBrowserWake: (cb) => subscribe('browser-wake', cb),
   setOrchestratorMode: (mode) => ipcRenderer.send('orchestrator-mode', mode),
   voiceAvailable: () => ipcRenderer.invoke('voice-available'),
   saveVoiceKey: (key) => ipcRenderer.invoke('voice-save-key', key),

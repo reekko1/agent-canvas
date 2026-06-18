@@ -30,6 +30,7 @@ export function BrowserView({
   goto,
   hidden,
   interactive,
+  dormant,
   onNavigate,
 }: {
   cardId: string
@@ -44,6 +45,11 @@ export function BrowserView({
   /** False while stacked: the address bar is inert and the promote button owns
    *  the cursor (clicks fall through to promote, never into the page). */
   interactive: boolean
+  /** Evicted to free resources (webview budget): the guest is NOT mounted at all
+   *  (its process/GL context released); the snapshot face covers the card. The
+   *  guest re-mounts and reloads `url` when this clears (a wake). Only ever set on
+   *  non-master browsers, which are already covered by their face. */
+  dormant: boolean
   onNavigate: (
     cardId: string,
     patch: { url?: string; title?: string; favicon?: string; snapshot?: string },
@@ -61,6 +67,11 @@ export function BrowserView({
   // can keep denying uncontrolled BrowserWindows. Inline listeners infer their
   // event types from the WebviewTag overloads and die with the element on unmount.
   useEffect(() => {
+    // Dormant (evicted): mount no guest at all — the snapshot face covers the
+    // card. Re-running this effect when `dormant` clears (a wake) recreates the
+    // guest and reloads `url`; in-page state (scroll/forms) is lost, login is not
+    // (shared persist:browser partition).
+    if (dormant) return
     const view = document.createElement('webview') as unknown as WebviewTag
     view.setAttribute('partition', 'persist:browser')
     view.style.width = '100%'
@@ -119,8 +130,9 @@ export function BrowserView({
       view.remove() // drops the guest process and its listeners with it
       viewRef.current = null
     }
-    // Mount once — the guest must survive every stacked/master toggle.
-  }, [cardId])
+    // Re-mounts only on identity change or a dormancy flip — a stacked/master
+    // toggle (hidden) keeps the same guest, so the page survives.
+  }, [cardId, dormant])
 
   // Capture a thumbnail the moment the card is demoted from master (hidden flips
   // false → true). The guest keeps a live offscreen surface while CSS-hidden, so

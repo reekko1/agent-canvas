@@ -31,7 +31,10 @@ const spine = new Spine()
 const ptys = new PtyRegistry()
 const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
-const browserController = new BrowserController()
+const browserController = new BrowserController({
+  // Ask the renderer to wake a dormant (evicted) browser so it can be driven.
+  wake: (cardId) => send('browser-wake', cardId),
+})
 let orchestrator: Orchestrator | null = null
 let voice: SonioxVoice | null = null
 let nextItem = 1

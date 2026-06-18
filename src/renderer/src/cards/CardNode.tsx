@@ -28,11 +28,15 @@ export function CardNode({
   id,
   data,
   stacked,
+  dormant,
   title,
 }: {
   id: string
   data: CardData
   stacked: boolean
+  /** Browser card evicted by the webview budget — its guest is unmounted (the
+   *  snapshot face shows). Always implies `stacked` (the master is never evicted). */
+  dormant?: boolean
   /** Live shell-pane title bits (command + cwd) from the global useShellTitles
    *  poll — undefined for agent cards and for a shell before its first poll. */
   title?: ShellTitle
@@ -126,6 +130,8 @@ export function CardNode({
             // the guest stays mounted so the page survives.
             hidden={stacked}
             interactive={!stacked}
+            // Evicted by the budget: the guest is dropped entirely (face covers it).
+            dormant={!!dormant}
             onNavigate={data.onNavigate}
           />
         ) : (

@@ -580,6 +580,9 @@ export interface CanvasApi {
    *  or was torn down (`null`). Feeds main's readiness map so browser tools wait
    *  on a real signal instead of a fixed delay, and Tier-B CDP knows the id. */
   browserReady(cardId: string, webContentsId: number | null): void
+  /** Main asks the renderer to wake a dormant (evicted) browser so it can be
+   *  driven — the renderer makes it live again (mounting its guest). */
+  onBrowserWake(cb: (cardId: string) => void): () => void
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
   setOrchestratorMode(mode: OrchestratorMode): void
   // MARK: Voice — push-to-talk speech-to-text and spoken orchestrator replies.

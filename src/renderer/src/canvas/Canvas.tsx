@@ -78,6 +78,12 @@ function useWindowSize(): { w: number; h: number } {
   return size
 }
 
+/// How many browser <webview> guests stay live at once. The rest are evicted to
+/// dormant (guest dropped, GL/process freed, snapshot face shown) and woken on
+/// demand. Caps per-webview cost so a big fleet doesn't choke — kept well under
+/// Chromium's ~16-WebGL-context ceiling, which browsers share with terminals.
+const BROWSER_BUDGET = 6
+
 /// The canvas: a fixed-viewport master-stack of agent cards, one project (a
 /// named canvas, pinned to a dir) shown at a time. Every card across every
 /// project stays mounted in one flat layer — switching projects only flips
@@ -120,6 +126,16 @@ export function Canvas() {
   const { w: winW, h: winH } = useWindowSize()
   const PlusIcon = useIcon('plus')
 
+  // Browser webview budget: recency rank per browser (higher = more recent),
+  // bumped on promote / spawn / wake. A monotonic counter (not a clock) gives
+  // stable ordering; the lowest-ranked browsers past the budget go dormant.
+  const [browserRecency, setBrowserRecency] = useState<Map<string, number>>(() => new Map())
+  const recencyTick = useRef(0)
+  const bumpBrowser = useCallback((cardId: string) => {
+    if (!cardId.startsWith('browser-')) return
+    setBrowserRecency((prev) => new Map(prev).set(cardId, (recencyTick.current += 1)))
+  }, [])
+
   const makeProjectId = useCallback(
     () => `proj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     [],
@@ -152,8 +168,9 @@ export function Canvas() {
     (cardId: string) => {
       setStackScroll(0)
       proj.promote(cardId)
+      bumpBrowser(cardId) // a promoted browser is most-recently-used → stays live
     },
-    [proj.promote],
+    [proj.promote, bumpBrowser],
   )
 
   const onCloseCard = useCallback(
@@ -510,6 +527,7 @@ export function Canvas() {
         node.data.reason = reason
         setNodes((ns) => [...ns, node])
         proj.attachCardTo(target.id, r.cardId)
+        bumpBrowser(r.cardId) // a freshly opened browser starts live, not evicted
         if (proj.activeProjectId !== target.id) switchProject(target.id)
         // Same reveal dance as spawnAgent — invisible until the comet lands.
         setPendingReveal((s) => new Set(s).add(r.cardId))
@@ -625,6 +643,9 @@ export function Canvas() {
   }
   useEffect(() => window.canvas.onOrchestratorCommand((cmd) => orchCommandRef.current(cmd)), [])
   useEffect(() => window.canvas.onOrchestratorTarget((t) => fireTargetRef.current(t)), [])
+  // Main needs a dormant browser driven — bump it to most-recent so the budget
+  // brings it back live (its guest remounts and reloads).
+  useEffect(() => window.canvas.onBrowserWake((cardId) => bumpBrowser(cardId)), [bumpBrowser])
 
   // ---- Master-stack layout (active project only; others stay parked) ----
   const active = proj.active
@@ -645,6 +666,20 @@ export function Canvas() {
     return { activeSet, cardNodes, orderedActive, masterCard, stackCards, stackIndex }
   }, [nodes, active?.cardIds, active?.focusedCardId])
   const hasStack = stackCards.length > 0
+
+  // The webview budget: keep the BROWSER_BUDGET most-recent browser guests live
+  // (the active master always wins), evict the rest to dormant. App-wide — every
+  // browser holds resources regardless of which canvas it's parked on.
+  const dormantBrowsers = useMemo(() => {
+    const ids = cardNodes.flatMap((n) => (n.data.kind === 'browser' ? [n.id] : []))
+    if (ids.length <= BROWSER_BUDGET) return new Set<string>()
+    const ranked = [...ids].sort((a, b) => {
+      const ra = a === masterCard?.id ? Infinity : (browserRecency.get(a) ?? 0)
+      const rb = b === masterCard?.id ? Infinity : (browserRecency.get(b) ?? 0)
+      return rb - ra
+    })
+    return new Set(ranked.slice(BROWSER_BUDGET))
+  }, [cardNodes, masterCard?.id, browserRecency])
   const mRect = masterRect(winW, winH, hasStack)
   // The diff side sheet overlays the right half — independent of the layout.
   const sheetW = Math.min(900, Math.max(520, Math.round(winW * 0.5)))
@@ -784,7 +819,13 @@ export function Canvas() {
               zIndex: isMaster ? 10 : isLeavingMaster ? 2 : leavingRect ? 0 : 1,
             }}
           >
-            <CardNode id={n.id} data={n.data} stacked={!isMaster} title={shellTitles[n.id]} />
+            <CardNode
+              id={n.id}
+              data={n.data}
+              stacked={!isMaster}
+              dormant={dormantBrowsers.has(n.id)}
+              title={shellTitles[n.id]}
+            />
           </div>
         )
       })}

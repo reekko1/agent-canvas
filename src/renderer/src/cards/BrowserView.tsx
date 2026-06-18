@@ -92,7 +92,17 @@ export function BrowserView({
       setNav((n) => ({ ...n, loading: false }))
       syncNav()
     })
-    view.addEventListener('dom-ready', syncNav)
+    // dom-ready is the readiness signal: the DOM is parsed and the guest has a
+    // WebContents id. Report it up so browser tools wait on this instead of a
+    // fixed delay (and Tier-B CDP learns the id). Re-fires on each navigation.
+    view.addEventListener('dom-ready', () => {
+      syncNav()
+      try {
+        window.canvas.browserReady(cardId, view.getWebContentsId())
+      } catch {
+        // getWebContentsId throws before attach — the next dom-ready will report.
+      }
+    })
 
     hostRef.current!.appendChild(view)
     viewRef.current = view
@@ -105,6 +115,7 @@ export function BrowserView({
     })
     return () => {
       unregister()
+      window.canvas.browserReady(cardId, null) // the guest is going away
       view.remove() // drops the guest process and its listeners with it
       viewRef.current = null
     }

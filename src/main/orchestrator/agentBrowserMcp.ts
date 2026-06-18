@@ -25,11 +25,13 @@ export interface AgentBrowserMcpDeps {
   getState: () => RemoteState | null
   /** Shared with the hook sink: cards authenticate with the spine token. */
   token: string
+  /** Resolve once a browser card's guest is mounted and dom-ready — replaces the
+   *  old fixed settle after spawning, so the first read can't outrun the webview. */
+  ensureReady: (cardId: string) => Promise<void>
 }
 
 const text = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] })
 const fail = (message: string) => ({ content: [{ type: 'text' as const, text: message }], isError: true })
-const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Read and JSON-parse a request body (best-effort; {} on empty/malformed). */
 function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -115,7 +117,7 @@ export class AgentBrowserMcp {
   /** Build a per-request MCP server whose tools are bound to the calling card. */
   private buildServer(cardId: string): McpServer {
     const server = new McpServer({ name: 'browser', version: '0.1.0' })
-    const { bus, getState } = this.deps
+    const { bus, getState, ensureReady } = this.deps
 
     const ownedBrowser = (): RemoteState['cards'][number] | undefined =>
       getState()?.cards.find((c) => c.kind === 'browser' && c.ownerId === cardId)
@@ -143,7 +145,10 @@ export class AgentBrowserMcp {
           const caller = getState()?.cards.find((c) => c.id === cardId)
           const r = await bus.openBrowser({ canvasId: caller?.projectId, url, ownerCardId: cardId, reason })
           if (!r.ok || !r.cardId) return fail(r.message)
-          await delay(700) // let the webview guest mount before the first read
+          // Wait for the guest to actually mount + reach dom-ready, so the agent's
+          // first browser_read can't outrun the webview. Tolerate a timeout — the
+          // card exists; a first read will just report "not ready" and retry.
+          await ensureReady(r.cardId).catch(() => {})
           return text({ browserId: r.cardId, url: url ?? 'about:blank', reason, reused: false })
         } catch (e) {
           return fail(e instanceof Error ? e.message : String(e))

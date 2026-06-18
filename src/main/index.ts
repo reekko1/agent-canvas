@@ -11,6 +11,7 @@ import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import { Orchestrator } from './orchestrator/manager'
 import { AgentBrowserMcp } from './orchestrator/agentBrowserMcp'
+import { BrowserController } from './orchestrator/browserController'
 import { SonioxVoice, validateSonioxKey } from './voice/soniox'
 import { storeSonioxKey } from './voice/keyStore'
 import type {
@@ -30,6 +31,7 @@ const spine = new Spine()
 const ptys = new PtyRegistry()
 const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
+const browserController = new BrowserController()
 let orchestrator: Orchestrator | null = null
 let voice: SonioxVoice | null = null
 let nextItem = 1
@@ -260,6 +262,7 @@ app.whenReady().then(() => {
     bus: orchestrator.commandBus,
     getState: () => spine.remote.getLatestState(),
     token: spine.token,
+    ensureReady: (cardId) => browserController.ensureReady(cardId),
   })
   agentBrowserMcp.start(spine.browserMcpPort, (port) => {
     spine.attachBrowserMcp(port)
@@ -426,6 +429,15 @@ ipcMain.on('orchestrator-prompt', (_e, prompt: string) => void orchestrator?.run
 ipcMain.on('orchestrator-result', (_e, id: number, result: OrchestratorCommandResult) =>
   orchestrator?.resolveCommand(id, result),
 )
+// A browser card's guest reached dom-ready (number id) or was torn down (null) —
+// feeds the readiness map that browser tools await instead of a fixed delay.
+ipcMain.on('browser-ready', (_e, cardId: string, webContentsId: number | null) => {
+  if (typeof webContentsId === 'number' && webContentsId >= 0) {
+    browserController.markReady(cardId, webContentsId)
+  } else {
+    browserController.markGone(cardId)
+  }
+})
 // Set the orchestrator's autonomy mode (manual / supervising / autopilot).
 ipcMain.on('orchestrator-mode', (_e, mode: OrchestratorMode) => orchestrator?.setMode(mode))
 

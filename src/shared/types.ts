@@ -576,6 +576,10 @@ export interface CanvasApi {
   onOrchestratorTarget(cb: (target: OrchestratorTarget) => void): () => void
   /** Reply to an OrchestratorCommand by id. */
   orchestratorResult(id: number, result: OrchestratorCommandResult): void
+  /** A browser card's <webview> reached dom-ready (carrying its WebContents id)
+   *  or was torn down (`null`). Feeds main's readiness map so browser tools wait
+   *  on a real signal instead of a fixed delay, and Tier-B CDP knows the id. */
+  browserReady(cardId: string, webContentsId: number | null): void
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
   setOrchestratorMode(mode: OrchestratorMode): void
   // MARK: Voice — push-to-talk speech-to-text and spoken orchestrator replies.

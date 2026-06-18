@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Bot, Globe, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { basenameOf } from '@/lib/utils'
+import { basenameOf, hostOf } from '@/lib/utils'
 import type { ShellTitle } from '@/canvas/useShellTitles'
 import { STATUS_COLORS, type CardData } from './meta'
 import { TerminalView } from './TerminalView'
@@ -9,16 +9,6 @@ import { BrowserView } from './BrowserView'
 import { PosterFace } from './PosterFace'
 import { ShellFace } from './ShellFace'
 import { BrowserFace } from './BrowserFace'
-
-/** The host of a browser card's url — its default chrome label. */
-function hostOf(url?: string): string {
-  if (!url) return 'New tab'
-  try {
-    return new URL(url).host || url
-  } catch {
-    return url
-  }
-}
 
 /// One agent on the canvas: status-tinted chrome around a live terminal. As
 /// the master it shows the terminal; in the stack a compact poster overlays
@@ -72,7 +62,7 @@ export function CardNode({
   // Agents show their (renameable) name; a browser shows its page title/host;
   // shells follow the pane folder.
   const displayName = isBrowser
-    ? data.name || data.title || hostOf(data.url)
+    ? data.name || data.title || (hostOf(data.url) ?? 'New tab')
     : (!isShell && data.name) || folderName
 
   // One-shot scan sweep: show the overlay for the sweep's duration whenever the

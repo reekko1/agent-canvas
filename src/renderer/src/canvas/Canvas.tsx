@@ -131,10 +131,23 @@ export function Canvas() {
   // stable ordering; the lowest-ranked browsers past the budget go dormant.
   const [browserRecency, setBrowserRecency] = useState<Map<string, number>>(() => new Map())
   const recencyTick = useRef(0)
+  // Keyed on the id prefix (not the node's `kind`) on purpose: this fires for a
+  // freshly spawned browser before its node is in `nodesRef`, and from promote
+  // where only the id is in hand. The recency map stays browser-only by skipping
+  // non-`browser-` ids; the authoritative `kind` drives the session-aware paths.
   const bumpBrowser = useCallback((cardId: string) => {
     if (!cardId.startsWith('browser-')) return
     setBrowserRecency((prev) => new Map(prev).set(cardId, (recencyTick.current += 1)))
   }, [])
+
+  /** A card is a browser by its authoritative `kind` — the discriminant the rest
+   *  of the canvas keys on. Used for the session-less close path (a browser has no
+   *  tmux/pty to kill, and killing one logs a missing-session error). */
+  const isBrowserCard = useCallback(
+    (id: string): boolean =>
+      nodesRef.current.some((n) => n.id === id && n.type === 'card' && n.data.kind === 'browser'),
+    [],
+  )
 
   // Per-browser scan pulse: a nonce bumped each time a card's page is captured
   // (browser_screenshot), passed to CardNode to (re)play the one-shot scan sweep.
@@ -189,14 +202,14 @@ export function Canvas() {
         .map((n) => n.id)
       const closing = [cardId, ...owned]
       // Browser cards have no tmux/pty session — there's nothing to kill, and
-      // killing would log a missing-session error (ids carry the kind prefix).
+      // killing would log a missing-session error. Skip them by their kind.
       closing.forEach((id) => {
-        if (!id.startsWith('browser-')) void window.canvas.killCard(id)
+        if (!isBrowserCard(id)) void window.canvas.killCard(id)
       })
       setNodes((ns) => ns.filter((n) => !closing.includes(n.id)))
       closing.forEach((id) => proj.detachCard(id))
     },
-    [proj.detachCard],
+    [proj.detachCard, isBrowserCard],
   )
 
   /** A browser card's webview reported new state (navigation, title, favicon, or
@@ -218,12 +231,12 @@ export function Canvas() {
       const ids = proj.projects.find((p) => p.id === id)?.cardIds ?? []
       // Browser cards have no session to kill (see onCloseCard).
       ids.forEach((cardId) => {
-        if (!cardId.startsWith('browser-')) void window.canvas.killCard(cardId)
+        if (!isBrowserCard(cardId)) void window.canvas.killCard(cardId)
       })
       setNodes((ns) => ns.filter((n) => !ids.includes(n.id)))
       proj.deleteProject(id)
     },
-    [proj.projects, proj.deleteProject],
+    [proj.projects, proj.deleteProject, isBrowserCard],
   )
 
   const makeCard = useCallback(

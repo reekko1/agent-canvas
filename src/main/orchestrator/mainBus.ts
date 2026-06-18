@@ -5,9 +5,10 @@
 // ask decisions, which never touch the renderer), and fires the delivering comet
 // so each action lands with its narration. The offline counterpart is stubBus.ts.
 import { TRACER_TRAVEL_MS } from '../../shared/types'
-import type { CommandBus, World } from './contract'
+import { renderOpenCanvas, type CommandBus, type World } from './contract'
 import type {
   BrowserAction,
+  BrowserActionResult,
   BrowserSnapshot,
   OrchestratorActionResult,
   OrchestratorCommand,
@@ -23,7 +24,7 @@ import type {
  *  logical outcome like a stale ref is a normal `{ ok:false }`, not a throw. */
 export interface BrowserDriver {
   read(cardId: string): Promise<BrowserSnapshot>
-  act(cardId: string, action: BrowserAction): Promise<{ ok: boolean; message: string }>
+  act(cardId: string, action: BrowserAction): Promise<BrowserActionResult>
   screenshot(cardId: string): Promise<string>
 }
 
@@ -97,6 +98,18 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
   const findCard = (id: string): RemoteState['cards'][number] | undefined =>
     deps.getState()?.cards.find((c) => c.id === id)
 
+  /** Resolve a card that must be a browser, or the failure result to return. The
+   *  single owner of the "no card / not a browser" guard the browser methods share
+   *  (mirrors agentBrowserMcp's `needBrowser`); messages preserved verbatim. */
+  const requireBrowser = (
+    cardId: string,
+  ): RemoteState['cards'][number] | { ok: false; message: string } => {
+    const card = findCard(cardId)
+    if (!card) return { ok: false, message: `no card with id ${cardId}` }
+    if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+    return card
+  }
+
   // Which transport a browser card is being driven by, logged only on change so
   // steady state is quiet but you can SEE whether CDP is live (and why it fell
   // back). The whole point: a silent fallback must never masquerade as CDP.
@@ -166,29 +179,29 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       const s = deps.getState()
       const active = s?.canvases.find((c) => c.active)
       if (!active) return '[Open canvas] none.'
-      const cards = s!.cards.filter((c) => c.projectId === active.id)
-      const asks = s!.approvals.filter((a) => a.projectId === active.id)
-      const cardLines = cards.map((c) => {
-        const bits = [`${c.name} (${c.id}) — ${c.kind}/${c.status}`]
-        if (c.task) bits.push(`task: ${c.task}`)
-        if (c.kind === 'browser' && c.url) bits.push(`at ${c.url}`)
-        if (c.kind === 'shell' && c.running) bits.push(`running ${c.running}`)
-        return '  - ' + bits.join(' · ')
+      return renderOpenCanvas({
+        name: active.name,
+        id: active.id,
+        branch: active.branch,
+        dirty: active.dirty,
+        cards: s!.cards
+          .filter((c) => c.projectId === active.id)
+          .map((c) => ({
+            name: c.name,
+            id: c.id,
+            kind: c.kind,
+            status: c.status,
+            task: c.task,
+            url: c.url,
+            running: c.running,
+          })),
+        asks: s!.approvals
+          .filter((a) => a.projectId === active.id)
+          .map((a) => ({ name: a.name, detail: a.detail, id: a.id })),
+        others: s!.canvases
+          .filter((c) => !c.active)
+          .map((c) => ({ name: c.name, id: c.id, attention: c.attention })),
       })
-      const others = s!.canvases
-        .filter((c) => !c.active)
-        .map((c) => `${c.name} (${c.id})${c.attention !== 'none' ? ` [${c.attention}]` : ''}`)
-      return [
-        `[Open canvas] ${active.name} (${active.id})` +
-          (active.branch ? ` · ${active.branch}${active.dirty ? ` +${active.dirty}` : ''}` : ''),
-        cards.length ? `cards:\n${cardLines.join('\n')}` : 'cards: none',
-        asks.length
-          ? `blocked: ${asks.map((a) => `${a.name} — ${a.detail} (${a.id})`).join('; ')}`
-          : '',
-        others.length ? `other canvases (list_world for their cards): ${others.join(', ')}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
     },
 
     focusCanvas: async (canvasId) => {
@@ -209,17 +222,15 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
     },
 
     setBrowserReason: async (cardId, reason) => {
-      const card = findCard(cardId)
-      if (!card) return { ok: false, message: `no card with id ${cardId}` }
-      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const card = requireBrowser(cardId)
+      if ('ok' in card) return card
       const r = await deps.dispatch({ cmd: 'setBrowserReason', payload: { cardId, reason } })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? 'updated' : 'failed') }
     },
 
     navigateBrowser: async (cardId, url) => {
-      const card = findCard(cardId)
-      if (!card) return { ok: false, message: `no card with id ${cardId}` }
-      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const card = requireBrowser(cardId)
+      if ('ok' in card) return card
       // Fly the comet to the card, then load on landing (with the narration).
       deps.signalTarget({ kind: 'send', cardId })
       await landed()
@@ -228,9 +239,8 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
     },
 
     readBrowser: async (cardId) => {
-      const card = findCard(cardId)
-      if (!card) return { ok: false, message: `no card with id ${cardId}` }
-      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const card = requireBrowser(cardId)
+      if ('ok' in card) return card
       // Tier B (CDP, main-side) first; Tier-A renderer path on failure. No
       // comet/landed — the agent loop reads frequently.
       return drive(
@@ -244,9 +254,8 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
     },
 
     screenshotBrowser: async (cardId) => {
-      const card = findCard(cardId)
-      if (!card) return { ok: false, message: `no card with id ${cardId}` }
-      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const card = requireBrowser(cardId)
+      if ('ok' in card) return card
       // See-it-happening feedback: play the scan sweep on the card as the capture
       // runs (covers both the CDP and Tier-A paths — emitted before drive).
       deps.notifyBrowserScan(cardId)
@@ -261,9 +270,8 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
     },
 
     actBrowser: async (cardId, action) => {
-      const card = findCard(cardId)
-      if (!card) return { ok: false, message: `no card with id ${cardId}` }
-      if (card.kind !== 'browser') return { ok: false, message: `${card.name} is not a browser` }
+      const card = requireBrowser(cardId)
+      if ('ok' in card) return card
       // A mutation — fly the comet and land it with the narration, like navigate.
       deps.signalTarget({ kind: 'send', cardId })
       await landed()

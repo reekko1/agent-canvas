@@ -16,7 +16,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 import type { CommandBus } from './contract'
-import type { RemoteState } from '../../shared/types'
+import { UNKNOWN_CARD, type RemoteState } from '../../shared/types'
+import { dataUrlToImageContent, failResult, okResult } from './mcpResults'
 
 export interface AgentBrowserMcpDeps {
   /** The live command bus — shared with the orchestrator. */
@@ -30,10 +31,8 @@ export interface AgentBrowserMcpDeps {
   ensureReady: (cardId: string) => Promise<void>
 }
 
-const text = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] })
-const fail = (message: string) => ({ content: [{ type: 'text' as const, text: message }], isError: true })
-
-/** Read and JSON-parse a request body (best-effort; {} on empty/malformed). */
+/** Read and JSON-parse a request body (best-effort; resolves undefined on
+ *  empty/malformed — the transport accepts an absent body). */
 function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
@@ -121,7 +120,7 @@ export class AgentBrowserMcp {
 
     const ownedBrowser = (): RemoteState['cards'][number] | undefined =>
       getState()?.cards.find((c) => c.kind === 'browser' && c.ownerId === cardId)
-    const noCard = !cardId || cardId === 'unknown'
+    const noCard = !cardId || cardId === UNKNOWN_CARD
 
     server.registerTool(
       'request_browser',
@@ -134,24 +133,24 @@ export class AgentBrowserMcp {
         },
       },
       async ({ reason, url }) => {
-        if (noCard) return fail('No calling card id — cannot resolve which agent is requesting.')
+        if (noCard) return failResult('No calling card id — cannot resolve which agent is requesting.')
         try {
           const owned = ownedBrowser()
           if (owned) {
             await bus.setBrowserReason(owned.id, reason)
             if (url) await bus.navigateBrowser(owned.id, url)
-            return text({ browserId: owned.id, url: url ?? owned.url ?? 'about:blank', reason, reused: true })
+            return okResult({ browserId: owned.id, url: url ?? owned.url ?? 'about:blank', reason, reused: true })
           }
           const caller = getState()?.cards.find((c) => c.id === cardId)
           const r = await bus.openBrowser({ canvasId: caller?.projectId, url, ownerCardId: cardId, reason })
-          if (!r.ok || !r.cardId) return fail(r.message)
+          if (!r.ok || !r.cardId) return failResult(r.message)
           // Wait for the guest to actually mount + reach dom-ready, so the agent's
           // first browser_read can't outrun the webview. Tolerate a timeout — the
           // card exists; a first read will just report "not ready" and retry.
           await ensureReady(r.cardId).catch(() => {})
-          return text({ browserId: r.cardId, url: url ?? 'about:blank', reason, reused: false })
+          return okResult({ browserId: r.cardId, url: url ?? 'about:blank', reason, reused: false })
         } catch (e) {
-          return fail(e instanceof Error ? e.message : String(e))
+          return failResult(e instanceof Error ? e.message : String(e))
         }
       },
     )
@@ -171,9 +170,9 @@ export class AgentBrowserMcp {
       },
       async () => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.readBrowser(b.id)
-        return r.ok && r.snapshot ? text(r.snapshot) : fail(r.message)
+        return r.ok && r.snapshot ? okResult(r.snapshot) : failResult(r.message)
       },
     )
 
@@ -185,9 +184,9 @@ export class AgentBrowserMcp {
       },
       async ({ url }) => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.navigateBrowser(b.id, url)
-        return r.ok ? text(r) : fail(r.message)
+        return r.ok ? okResult(r) : failResult(r.message)
       },
     )
 
@@ -199,9 +198,9 @@ export class AgentBrowserMcp {
       },
       async ({ ref }) => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.actBrowser(b.id, { kind: 'click', ref })
-        return r.ok ? text(r) : fail(r.message)
+        return r.ok ? okResult(r) : failResult(r.message)
       },
     )
 
@@ -217,11 +216,11 @@ export class AgentBrowserMcp {
           submit: z.boolean().optional().describe('Press Enter after typing'),
         },
       },
-      async ({ ref, text: value, clear, submit }) => {
+      async ({ ref, text, clear, submit }) => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
-        const r = await bus.actBrowser(b.id, { kind: 'type', ref, text: value, clear, submit })
-        return r.ok ? text(r) : fail(r.message)
+        if ('error' in b) return failResult(b.error)
+        const r = await bus.actBrowser(b.id, { kind: 'type', ref, text, clear, submit })
+        return r.ok ? okResult(r) : failResult(r.message)
       },
     )
 
@@ -233,9 +232,9 @@ export class AgentBrowserMcp {
       },
       async ({ direction }) => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.actBrowser(b.id, { kind: 'scroll', direction })
-        return r.ok ? text(r) : fail(r.message)
+        return r.ok ? okResult(r) : failResult(r.message)
       },
     )
 
@@ -251,9 +250,9 @@ export class AgentBrowserMcp {
       },
       async ({ ref, value }) => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.actBrowser(b.id, { kind: 'select', ref, value })
-        return r.ok ? text(r) : fail(r.message)
+        return r.ok ? okResult(r) : failResult(r.message)
       },
     )
 
@@ -267,9 +266,9 @@ export class AgentBrowserMcp {
       },
       async ({ action }) => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.actBrowser(b.id, { kind: 'history', action })
-        return r.ok ? text(r) : fail(r.message)
+        return r.ok ? okResult(r) : failResult(r.message)
       },
     )
 
@@ -282,12 +281,10 @@ export class AgentBrowserMcp {
       },
       async () => {
         const b = needBrowser()
-        if ('error' in b) return fail(b.error)
+        if ('error' in b) return failResult(b.error)
         const r = await bus.screenshotBrowser(b.id)
-        if (!r.ok || !r.image) return fail(r.message)
-        const m = /^data:(.+?);base64,(.*)$/.exec(r.image)
-        if (!m) return fail('screenshot was not a base64 data URL')
-        return { content: [{ type: 'image' as const, data: m[2], mimeType: m[1] }] }
+        if (!r.ok || !r.image) return failResult(r.message)
+        return dataUrlToImageContent(r.image) ?? failResult('screenshot was not a base64 data URL')
       },
     )
 

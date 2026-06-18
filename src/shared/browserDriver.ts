@@ -104,7 +104,11 @@ export const READ_SCRIPT = `(function () {
 })()`
 
 /** Tier-A action (renderer fallback): resolves the ref and performs the action
- *  entirely in-page via synthetic DOM events. */
+ *  entirely in-page via synthetic DOM events. The scroll/history/select branches
+ *  below deliberately mirror the standalone Tier-B helpers (scrollScript /
+ *  historyScript / selectScript) — same logic, but this tier is one self-contained
+ *  IIFE returning `{ ok, message }` while Tier B returns bare values for CDP to
+ *  interleave, so the duplication is owned, not extracted. Keep the two in sync. */
 export function buildActionScript(action: BrowserAction): string {
   return `(function (action) {
   if (action.kind === 'scroll') {

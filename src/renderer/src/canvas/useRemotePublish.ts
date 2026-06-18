@@ -1,24 +1,13 @@
 import { useEffect, useRef } from 'react'
 import type { Project, RemoteState, RepoIdentity } from '@shared/types'
 import { isLoud } from '@/cards/meta'
-import { basenameOf } from '@/lib/utils'
+import { basenameOf, hostOf } from '@/lib/utils'
 import type { CanvasNode } from './nodes'
 import type { ActivityNotification } from './useActivityFeed'
 import type { PendingAsk } from './usePendingAsks'
 import type { PendingQuestion } from './usePendingQuestions'
 import type { AttentionLevel } from './useProjectAttention'
 import type { ShellTitle } from './useShellTitles'
-
-/** The host of a browser card's url (e.g. "mail.google.com") — a readable
- *  fallback name when the page title hasn't loaded yet. */
-function hostOf(url?: string): string | undefined {
-  if (!url) return undefined
-  try {
-    return new URL(url).host || undefined
-  } catch {
-    return url
-  }
-}
 
 /// Mirror the attention state to the remote panel. Riding the same renderer
 /// state as the in-app surfaces (cards' meta, the toast asks/questions, the

@@ -22,7 +22,7 @@ import {
   selectScript,
   historyScript,
 } from '../../shared/browserDriver'
-import type { BrowserAction, BrowserSnapshot } from '../../shared/types'
+import type { BrowserAction, BrowserActionResult, BrowserSnapshot } from '../../shared/types'
 import type { BrowserDriver } from './mainBus'
 
 interface BrowserState {
@@ -111,7 +111,7 @@ export class BrowserController implements BrowserDriver {
   /** Perform an action with real, trusted input. The ref is resolved to on-screen
    *  coordinates in-page, then the click/keystroke is dispatched as a CDP Input.*
    *  event (background-capable). A stale ref is a normal failure, not a throw. */
-  async act(cardId: string, action: BrowserAction): Promise<{ ok: boolean; message: string }> {
+  async act(cardId: string, action: BrowserAction): Promise<BrowserActionResult> {
     const wc = await this.cdp(cardId)
     // No-ref ops run as a plain in-page evaluate (no coordinates needed).
     if (action.kind === 'scroll') {

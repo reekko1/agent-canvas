@@ -3,15 +3,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import type { CommandBus } from './contract'
-
-const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-const okResult = (data: unknown) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(data) }],
-})
-const failResult = (message: string) => ({
-  content: [{ type: 'text' as const, text: message }],
-  isError: true,
-})
+import { dataUrlToImageContent, errText, failResult, okResult } from './mcpResults'
 
 /** Read-only canvas tools — safe to auto-run. Single source of truth: the gate
  *  builds orchestrator.ts's READ_ONLY from this, and the `readOnlyHint` annotations
@@ -130,9 +122,7 @@ export function buildCanvasServer(bus: CommandBus) {
       try {
         const r = await bus.screenshotBrowser(args.cardId)
         if (!r.ok || !r.image) return failResult(r.message)
-        const m = /^data:(.+?);base64,(.*)$/.exec(r.image)
-        if (!m) return failResult('screenshot was not a base64 data URL')
-        return { content: [{ type: 'image' as const, data: m[2], mimeType: m[1] }] }
+        return dataUrlToImageContent(r.image) ?? failResult('screenshot was not a base64 data URL')
       } catch (e) {
         return failResult(`browser_screenshot failed: ${errText(e)}`)
       }

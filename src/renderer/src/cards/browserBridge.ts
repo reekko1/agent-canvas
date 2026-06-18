@@ -9,9 +9,11 @@
 // decoupled seam instead of prop drilling.
 //
 // This is the renderer half of the shared BrowserController (BROWSER_AGENCY_PLAN
-// §2): Tier A drives the webview tag directly here; a future Tier B would move
-// the same handle to main over CDP without changing this surface.
-import type { BrowserAction, BrowserSnapshot } from '@shared/types'
+// §2): Tier A drives the webview tag directly here. Tier B now ships too —
+// main's BrowserController drives the page over CDP (background-capable input) —
+// so this handle is the Tier-A fallback the bus reaches for when CDP is
+// unavailable (no live guest, can't attach), not a future tier.
+import type { BrowserAction, BrowserActionResult, BrowserSnapshot } from '@shared/types'
 
 export interface BrowserHandle {
   /** A PNG data URL of the current page (works while the card is stacked). */
@@ -19,7 +21,7 @@ export interface BrowserHandle {
   /** The set-of-marks observation of the current page. */
   read(): Promise<BrowserSnapshot>
   /** Perform a mutating action; resolves with an ok/message result. */
-  act(action: BrowserAction): Promise<{ ok: boolean; message: string }>
+  act(action: BrowserAction): Promise<BrowserActionResult>
 }
 
 const handles = new Map<string, BrowserHandle>()

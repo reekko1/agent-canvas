@@ -2,6 +2,7 @@
 // app — used by the offline harness (harness.ts). The live bus is mainBus.ts. The
 // seeded world mimics two canvases with a blocked agent.
 import type { BrowserAction } from '../../shared/types'
+import { renderOpenCanvas } from './contract'
 import type {
   ActionResult,
   AgentReplyResult,
@@ -41,28 +42,21 @@ export function makeStubBus(): CommandBus {
     async openCanvas(): Promise<string> {
       const cv = world.canvases.find((c) => c.id === active)
       if (!cv) return '[Open canvas] none.'
-      const cards = world.cards.filter((c) => c.canvasId === cv.id)
-      const asks = world.approvals.filter((a) => a.canvasId === cv.id)
-      const cardLines = cards.map((c) => {
-        const bits = [`${c.name} (${c.id}) — ${c.kind}/${c.status}`]
-        if (c.task) bits.push(`task: ${c.task}`)
-        if (c.kind === 'browser' && c.url) bits.push(`at ${c.url}`)
-        return '  - ' + bits.join(' · ')
+      return renderOpenCanvas({
+        name: cv.name,
+        id: cv.id,
+        branch: cv.branch,
+        dirty: cv.dirty,
+        cards: world.cards
+          .filter((c) => c.canvasId === cv.id)
+          .map((c) => ({ name: c.name, id: c.id, kind: c.kind, status: c.status, task: c.task, url: c.url })),
+        asks: world.approvals
+          .filter((a) => a.canvasId === cv.id)
+          .map((a) => ({ name: a.name, detail: a.detail, id: a.id })),
+        others: world.canvases
+          .filter((c) => c.id !== cv.id)
+          .map((c) => ({ name: c.name, id: c.id, attention: c.attention })),
       })
-      const others = world.canvases
-        .filter((c) => c.id !== cv.id)
-        .map((c) => `${c.name} (${c.id})${c.attention !== 'none' ? ` [${c.attention}]` : ''}`)
-      return [
-        `[Open canvas] ${cv.name} (${cv.id})` +
-          (cv.branch ? ` · ${cv.branch}${cv.dirty ? ` +${cv.dirty}` : ''}` : ''),
-        cards.length ? `cards:\n${cardLines.join('\n')}` : 'cards: none',
-        asks.length
-          ? `blocked: ${asks.map((a) => `${a.name} — ${a.detail} (${a.id})`).join('; ')}`
-          : '',
-        others.length ? `other canvases (list_world for their cards): ${others.join(', ')}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
     },
 
     async focusCanvas(canvasId: string): Promise<ActionResult> {

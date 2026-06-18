@@ -151,6 +151,12 @@ export type GitActionRequest =
 /// tmux/pty session at all (neutral chrome, never speaks to the spine).
 export type CardKind = 'agent' | 'shell' | 'browser'
 
+/** The card-id sentinel a card sends when it has none — the `${CANVAS_CARD_ID:-…}`
+ *  default the spine bakes into each card's browser MCP headers (claudeAdapter
+ *  `stageBrowserMcp`) and the value the agent browser MCP guard treats as "no
+ *  card". Shared so the two ends can't drift apart. */
+export const UNKNOWN_CARD = 'unknown'
+
 // MARK: Multi-project persistence
 //
 // Card identity is GLOBAL — one tmux session, one CardRecord — while layout is
@@ -436,6 +442,14 @@ export type BrowserAction =
   | { kind: 'select'; ref: string; value: string }
   | { kind: 'history'; action: 'back' | 'forward' | 'reload' }
 
+/** The result of a browser act — the shared ok/message contract relayed along the
+ *  whole act seam (renderer handle → bus → CDP driver). Named so all three ends
+ *  add a field in one place instead of three hand-kept inline literals. */
+export interface BrowserActionResult {
+  ok: boolean
+  message: string
+}
+
 /** A command the orchestrator (main) asks the renderer to execute, correlated by
  *  `id`. Discriminated on `cmd` so each payload is typed at both ends of the IPC
  *  seam — the producer (`manager.dispatch`) and the renderer's handler. */
@@ -460,7 +474,9 @@ export type OrchestratorCommand =
   | { id: number; cmd: 'actBrowser'; payload: { cardId: string; action: BrowserAction } }
   | { id: number; cmd: 'confirm'; payload: { toolName: string; input: Record<string, unknown> } }
 
-/** The renderer's reply to a mutation command (focus/spawn/rename/kill). */
+/** The renderer's reply to any non-`confirm` OrchestratorCommand — the mutations
+ *  (focus/spawn/rename/kill, browser open/navigate/act) plus the browser reads,
+ *  which populate `snapshot`/`image`. */
 export interface OrchestratorActionResult {
   ok: boolean
   message: string

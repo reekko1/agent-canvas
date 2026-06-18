@@ -44,6 +44,54 @@ export interface World {
   needsYou: number
 }
 
+/** Normalized inputs for the `[Open canvas]` snapshot — each bus projects its own
+ *  state (live RemoteState vs the stub World) into this shape, and the shared
+ *  formatter below renders the one text format both inject each turn. */
+export interface OpenCanvasView {
+  name: string
+  id: string
+  branch?: string
+  dirty?: number
+  cards: {
+    name: string
+    id: string
+    kind: CardKind
+    status: CardStatus
+    task?: string
+    url?: string
+    running?: string
+  }[]
+  asks: { name: string; detail: string; id: string }[]
+  others: { name: string; id: string; attention: AttentionLevel }[]
+}
+
+/** Render the per-turn open-canvas snapshot. The single owner of the format so the
+ *  live bus and the offline stub can't drift (a drift would weaken the harness as
+ *  a wiring check). Field-source differences stay in each bus's projection. */
+export function renderOpenCanvas(v: OpenCanvasView): string {
+  const cardLines = v.cards.map((c) => {
+    const bits = [`${c.name} (${c.id}) — ${c.kind}/${c.status}`]
+    if (c.task) bits.push(`task: ${c.task}`)
+    if (c.kind === 'browser' && c.url) bits.push(`at ${c.url}`)
+    if (c.kind === 'shell' && c.running) bits.push(`running ${c.running}`)
+    return '  - ' + bits.join(' · ')
+  })
+  const others = v.others.map(
+    (c) => `${c.name} (${c.id})${c.attention !== 'none' ? ` [${c.attention}]` : ''}`,
+  )
+  return [
+    `[Open canvas] ${v.name} (${v.id})` +
+      (v.branch ? ` · ${v.branch}${v.dirty ? ` +${v.dirty}` : ''}` : ''),
+    v.cards.length ? `cards:\n${cardLines.join('\n')}` : 'cards: none',
+    v.asks.length
+      ? `blocked: ${v.asks.map((a) => `${a.name} — ${a.detail} (${a.id})`).join('; ')}`
+      : '',
+    others.length ? `other canvases (list_world for their cards): ${others.join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 export interface ActionResult {
   ok: boolean
   message: string
@@ -109,8 +157,8 @@ export interface CommandBus {
   readBrowser(cardId: string): Promise<BrowserReadResult>
   /** Capture a PNG screenshot of a browser card's page (data URL). */
   screenshotBrowser(cardId: string): Promise<BrowserShotResult>
-  /** Perform an action (click/type/scroll) on a browser card's page, keyed on an
-   *  element `ref` from the latest readBrowser. */
+  /** Perform an action (click/type/scroll/select/history) on a browser card's
+   *  page, keyed on an element `ref` from the latest readBrowser. */
   actBrowser(cardId: string, action: BrowserAction): Promise<ActionResult>
   /** Deliver a message (instruction / follow-up) to a running agent. */
   sendToAgent(cardId: string, message: string): Promise<ActionResult>

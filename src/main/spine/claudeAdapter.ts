@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { AgentTodo, CardEvent, Question, QuestionAnswers } from '../../shared/types'
+import { UNKNOWN_CARD, type AgentTodo, type CardEvent, type Question, type QuestionAnswers } from '../../shared/types'
 import * as events from './claudeEvents'
 import { CANVAS_SKILLS, PLUGIN_NAME, PLUGIN_VERSION } from './skills'
 
@@ -111,7 +111,7 @@ export class ClaudeAdapter {
           type: 'http',
           url: `http://127.0.0.1:${port}/mcp`,
           headers: {
-            'X-Canvas-Card': '${CANVAS_CARD_ID:-unknown}',
+            'X-Canvas-Card': `\${CANVAS_CARD_ID:-${UNKNOWN_CARD}}`,
             'X-Canvas-Token': token,
           },
         },

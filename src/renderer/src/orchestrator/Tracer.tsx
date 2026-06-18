@@ -19,11 +19,17 @@ export interface TracerSpec {
   from: { x: number; y: number }
   to: { x: number; y: number }
   color: string
+  /** The target card's viewport rect — when present, a grid ripple energizes the
+   *  window as the comet lands. Omitted for targets we can't resolve to a card. */
+  rect?: { x: number; y: number; w: number; h: number }
+  /** The card's corner radius, so the ripple clips to the same rounded frame. */
+  radius?: number
 }
 
 const TRAVEL = TRACER_TRAVEL_MS / 1000 // seconds for the comet to travel the arc
 const LINGER = 0.35 // ring bloom + fade after it lands
 const TRAIL = 7 // tail dots behind the head
+const RIPPLE = 0.62 // grid wavefront sweep across the landed-on window
 
 /** Sample a quadratic bezier into keyframe arrays, so the pulse can ride the same
  *  arc the line draws — no CSS motion-path needed. */
@@ -44,7 +50,85 @@ function arcSamples(
   return { xs, ys }
 }
 
-function Tracer({ from, to, color, onDone }: TracerSpec & { onDone: () => void }): React.JSX.Element {
+/** A futuristic grid wavefront that energizes the window the comet lands on: a
+ *  fine grid, lit only in an expanding ring that sweeps out from the impact point,
+ *  over a brief radial flash — all clipped to the card's rounded frame. */
+function GridRipple({
+  rect,
+  radius,
+  color,
+}: {
+  rect: { x: number; y: number; w: number; h: number }
+  radius: number
+  color: string
+}): React.JSX.Element {
+  const cx = rect.w / 2
+  const cy = rect.h / 2
+  const max = Math.hypot(rect.w, rect.h) / 2 + 8 // reach the far corner, then some
+  const BAND = 70 // thickness of the lit wavefront
+  // `--rip` (a unitless number framer-motion interpolates) is the wavefront radius;
+  // the mask reveals only a band of grid around it, so the grid streaks outward.
+  const mask =
+    `radial-gradient(circle at ${cx}px ${cy}px,` +
+    ` rgba(0,0,0,0) calc(var(--rip) * 1px - ${BAND}px),` +
+    ` #000 calc(var(--rip) * 1px - ${BAND * 0.45}px),` +
+    ` #000 calc(var(--rip) * 1px),` +
+    ` rgba(0,0,0,0) calc(var(--rip) * 1px + 8px))`
+  const common = { duration: RIPPLE, delay: TRAVEL - 0.05 }
+  return (
+    <motion.div
+      className="pointer-events-none fixed overflow-hidden"
+      style={
+        {
+          left: rect.x,
+          top: rect.y,
+          width: rect.w,
+          height: rect.h,
+          borderRadius: radius,
+          zIndex: 54, // above the card, below the comet (z-55)
+          '--rip': 0,
+        } as React.CSSProperties
+      }
+      initial={{ '--rip': 0 } as Record<string, number>}
+      animate={{ '--rip': max } as Record<string, number>}
+      transition={{ ...common, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {/* The grid, masked to the wavefront band so it reads as an expanding pulse. */}
+      <motion.div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `linear-gradient(${color} 1px, transparent 1px), linear-gradient(90deg, ${color} 1px, transparent 1px)`,
+          backgroundSize: '24px 24px',
+          filter: `drop-shadow(0 0 4px ${color})`,
+          maskImage: mask,
+          WebkitMaskImage: mask,
+        }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0.85, 0.85, 0] }}
+        transition={{ ...common, times: [0, 0.12, 0.7, 1] }}
+      />
+      {/* A soft radial flash at the impact point — the window "charging" on contact. */}
+      <motion.div
+        className="absolute inset-0"
+        style={{
+          background: `radial-gradient(circle at ${cx}px ${cy}px, ${color}, transparent 55%)`,
+        }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0.28, 0] }}
+        transition={{ duration: 0.45, delay: TRAVEL - 0.05, ease: 'easeOut' }}
+      />
+    </motion.div>
+  )
+}
+
+function Tracer({
+  from,
+  to,
+  color,
+  rect,
+  radius,
+  onDone,
+}: TracerSpec & { onDone: () => void }): React.JSX.Element {
   // Bow the arc above the higher endpoint so it reads as reaching up and over.
   const ctrl = useMemo(
     () => ({ x: (from.x + to.x) / 2, y: Math.min(from.y, to.y) - 80 }),
@@ -59,7 +143,9 @@ function Tracer({ from, to, color, onDone }: TracerSpec & { onDone: () => void }
   }, [onDone])
 
   return (
-    <svg className="pointer-events-none fixed inset-0 z-[55]" width="100%" height="100%" style={{ overflow: 'visible' }}>
+    <>
+      {rect && <GridRipple rect={rect} radius={radius ?? 16} color={color} />}
+      <svg className="pointer-events-none fixed inset-0 z-[55]" width="100%" height="100%" style={{ overflow: 'visible' }}>
       {/* The tail: dots riding the same arc as the head but each launched a beat
           later, so they lag behind it; shrinking and dimming down the tail. Each
           stays invisible until its delayed start, so the comet streaks rather than
@@ -110,7 +196,8 @@ function Tracer({ from, to, color, onDone }: TracerSpec & { onDone: () => void }
         animate={{ r: [4, 30], opacity: [0, 0.75, 0] }}
         transition={{ duration: LINGER + 0.25, delay: TRAVEL - 0.05, ease: 'easeOut' }}
       />
-    </svg>
+      </svg>
+    </>
   )
 }
 

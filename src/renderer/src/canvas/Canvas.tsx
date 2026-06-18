@@ -749,7 +749,11 @@ export function Canvas() {
         return
       }
       const to = { x: r.x + r.w / 2, y: r.y + r.h / 2 }
-      setTracers((ts) => [...ts, { id: tracerSeq.current++, from, to, color }])
+      // Carry the card's frame so a grid ripple can energize it on impact, clipped
+      // to its rounded corners (agents are rounded-2xl, shells/browsers rounded-lg).
+      const radius = cardNodes.find((n) => n.id === cardId)?.data.kind === 'agent' ? 16 : 8
+      const rect = { x: r.x, y: r.y, w: r.w, h: r.h }
+      setTracers((ts) => [...ts, { id: tracerSeq.current++, from, to, color, rect, radius }])
       // A spawned card materializes when its delivering comet lands.
       if (t.kind === 'spawn') setTimeout(() => reveal(cardId), TRACER_TRAVEL_MS)
     }

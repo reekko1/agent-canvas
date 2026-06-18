@@ -1,6 +1,6 @@
 # orchestrator (main)
 
-The natural-language orchestrator: a long-lived Claude Agent SDK `query()` running in the main process whose only tools are an in-process `canvas` MCP server. The user talks to it from the chat bar; it drives the app (focus canvases, spawn/rename/kill cards, message agents, clear permission asks) through a small command bus, narrating each action in a voice that's also spoken via TTS. Read-only tools auto-run; mutating tools pass through a host gate.
+The natural-language orchestrator: a long-lived Claude Agent SDK `query()` running in the main process whose only tools are an in-process `canvas` MCP server. The user talks to it from the chat bar; it drives the app (focus canvases, spawn/rename/kill cards, message agents, open/navigate browser cards, clear permission asks) through a small command bus, narrating each action in a voice that's also spoken via TTS. Read-only tools auto-run; mutating tools pass through a host gate.
 
 ## Files
 
@@ -16,7 +16,9 @@ The natural-language orchestrator: a long-lived Claude Agent SDK `query()` runni
 
 A chat prompt enters via `Orchestrator.run()`, which enqueues an `SDKUserMessage` and wakes the input generator. That generator (`input()`) feeds the one long-lived `query()`; the session stays open between turns, idling until the next enqueue. The model narrates, then calls a `canvas` tool. `canUseTool` first awaits `beforeTool` (speech-pacing — holds the tool until its narration has been spoken), then either auto-allows (read-only) or asks the `gate`. Allowed tool calls run against the `CommandBus`.
 
-In production the bus is **mainBus**. `list_world` reads from the cached `RemoteState`. Renderer-owned mutations (focus/spawn/rename/kill) go through `deps.dispatch`, which sends an `orchestrator-command` IPC with a correlation id and awaits the renderer's reply via the pending map (30s timeout → failure result). Main-owned actions (`send_to_agent` via keystroke injection, `get_agent_reply`, `approve_ask`) bypass the renderer entirely. Every mutation fires `signalTarget` (a comet from chat bar to card) and `await landed()` so the effect commits when the comet arrives.
+In production the bus is **mainBus**. `list_world` reads from the cached `RemoteState`. Renderer-owned mutations (focus/spawn/rename/kill, plus browser open/navigate) go through `deps.dispatch`, which sends an `orchestrator-command` IPC with a correlation id and awaits the renderer's reply via the pending map (30s timeout → failure result). Main-owned actions (`send_to_agent` via keystroke injection, `get_agent_reply`, `approve_ask`) bypass the renderer entirely. Every mutation fires `signalTarget` (a comet from chat bar to card) and `await landed()` so the effect commits when the comet arrives.
+
+**Browser cards** are a third card kind: in-app web views with no agent/tmux session, so the model can't message them or read their content. `open_browser` (renderer `spawnBrowser` command) creates one, optionally at a starting url; `navigate_browser` (renderer `navigateBrowser`) points an existing one at a new url — mainBus guards that the target card is `kind === 'browser'` and signals/lands the comet before dispatching. The orchestrator's only window into a browser's state is the `WorldCard.url` that `list_world` now projects (current page), with the card name reflecting the page title. The system prompt tells the model not to `send_to_agent`/`get_agent_reply` a browser.
 
 Two other producers push into the same queue as heartbeats — nothing is polled: `notifyAgentReply()` (an agent's Stop hook fired) and `notifyAsk()` (an agent hit a permission request). Both inject `[fleet event]` messages for awareness only; the system prompt forbids acting on them without a standing user instruction.
 

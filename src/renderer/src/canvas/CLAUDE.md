@@ -1,8 +1,8 @@
 # canvas (renderer)
 
 The canvas is the renderer's master-stack workspace: a fixed-viewport layer of
-agent/shell cards organized into **projects** (named canvases, each pinned to a
-folder). One project shows at a time; its focused card runs large as the master
+agent/shell/browser cards organized into **projects** (named canvases, each
+pinned to a folder). One project shows at a time; its focused card runs large as the master
 while the rest sit as compact poster cards in a scrollable right column. Diffs
 open as a right-edge side sheet. Layout is fully derived (never persisted) — only
 the card registry, the projects that order them, and which is active are saved.
@@ -32,7 +32,8 @@ hooks it composes, and IPC goes through `window.canvas.*`.
   plus `masterRect`, `stackSlot`, `stackWidth`, `stackContentHeight`. Every rect
   derives from these + window size + which card is master.
 - **nodes.ts** — the `CanvasNode` type: a single `{ id, type: 'card', data }`
-  shape (shells are cards with `data.kind === 'shell'`). The diff is NOT a node.
+  shape (shells are cards with `data.kind === 'shell'`, browsers with
+  `'browser'`). The diff is NOT a node.
 
 ## Hooks
 
@@ -74,6 +75,8 @@ only shells are polled (agents speak via status/task).
 **Remote** — `useRemotePublish` projects the whole renderer state (canvases,
 cards, approvals, questions, feed, needs-you) to the phone panel, grouped by
 project id, behind a JSON content-compare so position-only churn doesn't hit IPC.
+A browser row reads as its live page (title, else `hostOf(url)`) and ships its
+current `url` so the orchestrator can answer "what page are we on".
 
 **Auto-update** — `useAutoUpdate` mirrors electron-updater status from main
 (events merge so the captured version survives version-less progress ticks);
@@ -100,10 +103,21 @@ only fires in packaged builds.
   `useCardMeta`, `useActivityFeed`, and `useHeldAsks` each subscribe
   independently. Meta lives on the nodes; the other hooks keep their own shadows.
 - **Orchestrator IPC.** Main dispatches `OrchestratorCommand`s
-  (spawn/rename/kill/focus/confirm) over `onOrchestratorCommand`; Canvas runs
-  them against live project state and replies by id via `orchestratorResult`. A
-  ref holds the latest closure so the listener subscribes once. `onOrchestratorTarget`
-  fires a tracer comet from the chat bar to the acted-on card.
+  (spawn/rename/kill/focus/confirm + spawnBrowser/navigateBrowser) over
+  `onOrchestratorCommand`; Canvas runs them against live project state and
+  replies by id via `orchestratorResult`. A ref holds the latest closure so the
+  listener subscribes once. `onOrchestratorTarget` fires a tracer comet from the
+  chat bar to the acted-on card. `spawnBrowser` rides the same reveal dance as
+  `spawnAgent`; `navigateBrowser` bumps the node's `goto` nonce (the nav request
+  the webview watches) and promotes the card so the navigation is visible.
+- **Browser cards.** A third kind: an in-DOM webview, no tmux/pty/spine session.
+  The master runs a live web view (address bar + back/fwd/reload), stacked cards
+  show a blur snapshot. The webview reports navigation/title/favicon/snapshot
+  back through `onNavigate`, which folds the patch into the node so chrome, face,
+  and persistence track it. Close is **session-less**: `onCloseCard` and
+  `deleteProject` skip `killCard` for `browser-`-prefixed ids (no session to
+  kill, and killing logs a missing-session error). Only the last `url` persists
+  (reload-on-restore); live title/favicon/snapshot are deliberately transient.
 - **Diff sheet** is not a node — a built-in overlay keyed by active project id,
   watching `active.dir`, re-pointing on canvas switch; collapse parks it, close
   tears it down.
@@ -116,7 +130,8 @@ only fires in packaged builds.
   fns passed to `useHeldAsks` stable.
 - **Layout is never persisted** — only `{ cards, projects, activeProjectId }`.
   Status is never persisted either, so a glyph can't lie after relaunch
-  (reattach-not-resume).
+  (reattach-not-resume). A browser card persists its last `url` (re-loaded on
+  restore); its title/favicon/snapshot are not.
 - **`useWorkspace` ordering:** `setNodes` must run BEFORE `onRestore` — React 18
   doesn't batch async-callback updates, so a project must not reference a
   not-yet-mounted card.

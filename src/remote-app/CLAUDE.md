@@ -5,7 +5,7 @@ A standalone phone web client for triaging a coding-agent fleet from a handset o
 ## Files
 
 - `index.html` — PWA shell: viewport-fit/apple-mobile meta tags, manifest + apple-touch-icon links, the header (title, needs-you badge, offline pill, "Enable alerts" button), and the `#canvases` / `#feed` mount points. Loads `main.ts` as a module.
-- `main.ts` — the panel itself: polls `/state`, groups cards/approvals/questions under their canvas (loudest first), renders tiles, and wires tap actions (answer, allow/deny, pick option, open terminal). Owns CSRF-token fetch/retry and the push subscribe flow.
+- `main.ts` — the panel itself: polls `/state`, groups cards/approvals/questions under their canvas (loudest first), renders tiles, and wires tap actions (answer, allow/deny, pick option, open terminal). Owns CSRF-token fetch/retry and the push subscribe flow. Tile rendering branches on `kind`: agents carry the status HUD and show their task; shells and browsers are neutral chrome with no HUD (no agent to speak for them). Shells show their foreground command (idle when bare); browsers show their current url (the page title is in the card name). A browser is session-less, so its tile is **not tappable** — no `term` action is emitted, since there's no tmux session to mirror.
 - `term.ts` — `openTerminal(cardId, name)`: a full-screen xterm overlay bridged to a card's tmux session over the `/term` WebSocket, plus a soft-keyboard accessory bar (sticky Ctrl, Esc/Tab/^C/arrows, scroll).
 - `style.css` — all styling (dark palette, mobile-first). No Tailwind, no CSS vars shared with desktop.
 - `vite-env.d.ts` — Vite client type reference only.

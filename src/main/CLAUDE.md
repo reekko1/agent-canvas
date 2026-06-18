@@ -24,11 +24,12 @@ Each has its own CLAUDE.md — read it before working in that area.
 ## Files
 - **index.ts** — the entry module. Sets up the auto-updater (logs to `<logs>/updater.log`,
   resolves releases via the GitHub Atom feed, polls every 6h until an update is staged),
-  creates the hardened `BrowserWindow` (contextIsolation + sandbox on, preload bridge),
-  locks down navigation/popups, grants mic permission for push-to-talk, instantiates the
-  singletons, and registers all `ipcMain.handle`/`.on` handlers. Holds two small bits of
-  local state: `nextItem` (card-id counter) and `pendingPrompts` (initial prompts queued for
-  a card before its pty spawns, delivered one-shot by `ensure-card`).
+  creates the hardened `BrowserWindow` (contextIsolation + sandbox on, preload bridge,
+  `webviewTag` on for browser cards), locks down host navigation/popups, intercepts
+  whole-app zoom, grants mic permission for push-to-talk, instantiates the singletons, and
+  registers all `ipcMain.handle`/`.on` handlers. Holds two small bits of local state:
+  `nextItem` (card-id counter) and `pendingPrompts` (initial prompts queued for a card before
+  its pty spawns, delivered one-shot by `ensure-card`).
 - **ptys.ts** — `PtyRegistry`, one `node-pty` per card keyed by `cardId`. Spawns from a
   `LaunchSpec` (file/args/cwd/env produced by `spine.launch`), forwards data/exit to the
   renderer, and resizes. Killing a pty here only **detaches the tmux client**; ending the
@@ -51,6 +52,11 @@ Each has its own CLAUDE.md — read it before working in that area.
 - **pty vs tmux:** a card's pty (ptys.ts) is just the local terminal client; the actual agent
   session lives in a tmux session managed by the spine. The pty spawns lazily on `ensure-card`
   when the renderer mounts the card, fed by `spine.launch`.
+- **Card kinds:** `agent` (tmux/pty/spine session) and `shell`, plus `browser` — an in-DOM
+  `<webview>` guest with no pty/tmux/spine session at all. `new-browser` only mints the id
+  (`browser-` prefix, like `card-`/`shell-`); the renderer owns the url, and the orchestrator
+  opens/navigates browsers over the command seam. Browser-card guests run in their own
+  process/session, carry no preload, and so can't reach the `CanvasApi` bridge.
 - **Persistence:** main-process state lives under `SPINE_DIR` (`~/.agentcanvas-web`); the
   workspace snapshot is the only file owned by this directory's code.
 
@@ -61,8 +67,14 @@ Each has its own CLAUDE.md — read it before working in that area.
 - Subsystems are module-level singletons in `index.ts`; there is no DI container. Adding a new
   IPC route means registering it here and adding it to `CanvasApi` + preload.
 - Renderer hardening is pinned explicitly (sandbox/contextIsolation/no nodeIntegration) and
-  navigation/popups are denied — don't relax these. External links go only through the
-  `open-external` IPC (https-only) → `shell.openExternal`.
+  host navigation/popups are denied — don't relax these. External links go only through the
+  `open-external` IPC (https-only) → `shell.openExternal`. Browser-card `<webview>` guests are
+  *exempted* from the navigation lock (they're a real browser) — the check keys on
+  `contents.getType() === 'webview'`, so the lock still binds the host frame.
+- Whole-app zoom (Cmd/Ctrl +/-/0) is intercepted via `before-input-event` on *every* web
+  contents — host and webview guests alike — and redirected to the host renderer's zoom level
+  (clamped). Owning it directly keeps a focused browser card from swallowing the shortcut and
+  zooming only its own page (which the default menu zoom role would do).
 - The updater intentionally sets `allowPrerelease = true` to use the cookie-insensitive Atom
   feed; release.sh never publishes prereleases, so this never pulls a real pre-release.
 - Voice and orchestrator no-op gracefully when their keys/env are absent (`SONIOX_API_KEY`,

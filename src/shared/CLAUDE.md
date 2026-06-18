@@ -10,6 +10,9 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
 
 - **types.ts** — the canonical cross-process type definitions. The most
   important shapes:
+  - `CardKind` — discriminant for what a card holds: `agent` (watched CLI),
+    `shell` (bare `$SHELL`), or `browser` (an in-app `<webview>` with no
+    tmux/pty/spine session — neutral chrome, never speaks to the spine).
   - `CardStatus` — the agent/shell lifecycle states (`idle` → `running` →
     `waiting`/`done`/`stalled`/`blocked`/`error`).
   - `CardEvent` + `TodoChange`/`AgentTodo` — one semantic update extracted from a
@@ -18,13 +21,17 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     release); `QuestionAskInfo` / `Question` / `QuestionOption` /
     `QuestionAnswers` — a held AskUserQuestion (choose options, not allow/deny).
   - `CardRecord` / `Project` / `MultiProjectSnapshot` — multi-project
-    persistence (global card registry + per-project layout).
+    persistence (global card registry + per-project layout). A browser card's
+    `url` is the only kind-specific field persisted (reload-on-restore; the live
+    snapshot is transient and never stored).
   - Git: `GitChange` / `GitSnapshot` / `RepoIdentity` / `GitActionRequest` /
     `GitActionResult`.
   - Remote panel: `RemoteState` / `AttentionLevel` + readiness shapes
     (`AppReadiness`, `RemoteReadiness`), `UpdateStatus`.
   - Orchestrator: `OrchestratorMode` / `OrchestratorEvent` /
-    `OrchestratorCommand` / `OrchestratorTarget` and their result types.
+    `OrchestratorCommand` / `OrchestratorTarget` and their result types. Browser
+    cards ride the same command seam as agents (`spawnBrowser`/`navigateBrowser`
+    alongside spawn/focus/rename/kill).
   - `CanvasApi` — the full interface the preload bridge implements and the
     renderer consumes (the IPC contract in one place).
 - **time.ts** — relative-time formatting helpers (`relativeFromSeconds`, the

@@ -1,0 +1,31 @@
+# spine (main)
+
+The spine launches and reattaches real `claude` CLI sessions inside tmux and ingests Claude Code hook events to drive each card's status, checklist, and final reply. It is the seam between a folder-of-work card and a live agent: it owns the tmux launch path, the loopback hook sink, the Claude Code adapter, and the held permission/question asks. It is a faithful port of the Swift Spine; the event-mapping facts were empirically verified there against real hook payloads — trust the comments.
+
+## Files
+
+- **spine.ts** — `Spine` class, the orchestration hub. Owns the sink/adapter/tmux/remote, maps `cardId` ↔ tmux session name, exposes `launch`/`kill`/`decide`/`answerQuestion`/`lastReply`, and routes every incoming hook in `handle()`. Holds `SPINE_DIR` (`~/.agentcanvas-web`) and the persisted `SpineConfig` (token + sink/remote ports).
+- **claudeAdapter.ts** — `ClaudeAdapter`, the transport/config/launch seam. Writes scoped HTTP hooks to `hooks.json` (via `--settings`, never touching user config), builds the `exec claude` command, and reads the CLI's on-disk task store. Delegates all pure mapping to claudeEvents.
+- **claudeEvents.ts** — pure event mapping; no fs/process/state. Maps CLI lifecycle events to `CardEvent`, parses/answers `AskUserQuestion`, builds permission allow/deny bodies, derives `TodoChange` from plan-tool calls. Testable in isolation.
+- **hookSink.ts** — `HookSink`, a loopback HTTP server. Each hook POSTs JSON to `/hook` with the card id in `X-Canvas-Card`; the response body is bidirectional, so a held ask keeps the connection open until the user decides.
+- **tmux.ts** — `Tmux`, the session substrate over a canvas-owned tmux server (socket `agentcanvas-web`). Probes the binary, writes a private `tmux.conf`, builds client/attach commands, and queries pane state. Pure helpers at the bottom resolve a shell's foreground command for shell-card titles.
+
+## Architecture / data flow
+
+A card maps 1:1 to a tmux session named `canvas-<cardId>` (the single source of truth is `Spine.sessionName`). `launch()` runs the tmux *client* via `new-session -A`, so the same call **reattaches** a surviving session or **creates** one running `claude` under the user's login shell (`-lc`) for a real PATH. This is reattach-not-resume: there is no `claude --resume`; the live tmux session simply outlives the app, and quitting the app only detaches the client. `killSession` (the ✕ path) is the one place an agent's life actually ends — detaching would leave it running headless, the unsupervised state the canvas exists to prevent. A bare-shell card launches just the login shell (no agent, no hooks). No tmux binary → direct pty spawn that dies with the app.
+
+Hooks arrive over HTTP. `ClaudeAdapter.installConfig` writes `hooks.json` pointing every event at `http://127.0.0.1:<sinkPort>/hook` with the spine token in `X-Canvas-Token` and `$CANVAS_CARD_ID` (set into the tmux *session* env via `-e`) in `X-Canvas-Card`. `HookSink` authenticates the token, parses the payload, and calls `onRequest`. `Spine.handle` then branches three ways: an `AskUserQuestion` (which rides the `PermissionRequest` channel) is siphoned to `onQuestion`; a real `PermissionRequest` goes to `onAsk`, held open as the decision channel; everything else is acked immediately (`respond(null)` — telemetry never blocks the agent) and mapped to a `CardEvent` emitted via `onUpdate`. A `Stop` payload's `last_assistant_message` is also captured into `replies` and surfaced via `onReply`/`lastReply` for the orchestrator's get-reply path. Held asks are resolved by id through `decide`/`answerQuestion`, or released en masse via `releaseFor` when the terminal is focused.
+
+Config/socket isolation is deliberate: dir `~/.agentcanvas-web`, tmux socket `agentcanvas-web` — side-by-side with the shipping Swift app until cutover, when these become `~/.agentcanvas` / `agentcanvas`.
+
+## Conventions & gotchas
+
+- **Spine identity must survive restarts.** tmux sessions outlive the app and read their hook URL + token *once* at launch. So the sink retries the **same** persisted port for ~10s before conceding to ephemeral (a dev hot-restart overlaps the dying process); a fresh port or token would strand every surviving agent on a dead URL. `spine.json` and `hooks.json` are `chmod 0600` — both carry the token.
+- **`installConfig` runs only after the port binds**, inside the sink's `onReady`. Cards spawn lazily, long after; if the sink isn't ready `launchCommand` falls back to bare `exec claude`.
+- **tmux session targets use `=name` (exact match)** everywhere — a bare `-t` prefix-matches, so `card-1` would kill/query `card-10`. `display-message` additionally needs the trailing colon (`=name:`) to resolve a session's active pane.
+- **Subagent events touch the counter only, never status** — they fire out of sync with the main `Stop` and would flip a finished card back to running.
+- **Tool failures stay `running`** (a failing test is the work); only `StopFailure` produces `stalled`/`error`, the guard against a card glowing "running" forever.
+- **Plan ground truth is on disk**, not the hook stream: `currentTodos` reads `~/.claude/tasks/<sessionId>/*.json` to re-hydrate a reattached card's checklist. An existing-but-empty dir reads as `null` ("no data"), never an empty plan — the CLI creates the dir before the first task file lands.
+- **tmux config is minimal by intent**: status off, zero escape-time (Esc is the claude TUI interrupt), `mouse on` for **scrollback only** (the renderer strips mouse-tracking and synthesizes wheel reports itself). The conf is re-sourced on `prepare()` so a running server picks up changes without a fleet restart.
+- **`openTerminal`** spawns a *second* tmux client (mobile mirror) via `attach-session` — never `new-session`, so a phone can't create a session; killing it just detaches.
+- **`paneCommand` is observe-only** (two reads, no mutation) — it honors the bare-shell card's no-orchestration contract, walking the pane's tty process table to find the user-typed foreground child.

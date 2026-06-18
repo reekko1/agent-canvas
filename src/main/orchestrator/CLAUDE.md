@@ -1,0 +1,35 @@
+# orchestrator (main)
+
+The natural-language orchestrator: a long-lived Claude Agent SDK `query()` running in the main process whose only tools are an in-process `canvas` MCP server. The user talks to it from the chat bar; it drives the app (focus canvases, spawn/rename/kill cards, message agents, clear permission asks) through a small command bus, narrating each action in a voice that's also spoken via TTS. Read-only tools auto-run; mutating tools pass through a host gate.
+
+## Files
+
+- **orchestrator.ts** — the loop. `runOrchestrator()` runs the SDK `query()` in streaming-input mode, holds the system prompt, wires the `canvas` MCP server, gates tools via `canUseTool`, and translates SDK messages into `OrchestratorEvent`s (streaming text deltas + tool/result/error).
+- **contract.ts** — the `CommandBus` interface plus the LLM-facing `World` projection types. The seam between the SDK tools and the app; two implementations satisfy it (mainBus, stubBus).
+- **canvasServer.ts** — `buildCanvasServer(bus)` builds the in-process MCP server. Each tool wraps one `CommandBus` method; tools surface to the model as `mcp__canvas__<name>`. Exports `READ_ONLY_TOOLS` (the single source for which tools auto-run).
+- **mainBus.ts** — the live `CommandBus`. Projects the latest `RemoteState` for `list_world`, dispatches renderer-owned mutations over a correlation-id round-trip, applies main-owned actions (agent I/O, ask decisions) directly, and fires the "comet" so each effect lands with its narration.
+- **manager.ts** — `Orchestrator` class: owns the persistent streaming session, the input queue, the renderer command channel (`dispatch` + pending map), autonomy mode, and the IPC emit/voice tap. The main-process driver around the loop.
+- **stubBus.ts** — in-memory `CommandBus` double seeding two canvases and a blocked agent, for the offline harness. No Electron.
+- **harness.ts** — standalone tsx CLI (`npm run orchestrator:harness -- "<prompt>"`) that runs the loop against the stub bus with a stdin y/N confirm gate. Sanity-checks the wiring without launching the app.
+
+## Architecture / data flow
+
+A chat prompt enters via `Orchestrator.run()`, which enqueues an `SDKUserMessage` and wakes the input generator. That generator (`input()`) feeds the one long-lived `query()`; the session stays open between turns, idling until the next enqueue. The model narrates, then calls a `canvas` tool. `canUseTool` first awaits `beforeTool` (speech-pacing — holds the tool until its narration has been spoken), then either auto-allows (read-only) or asks the `gate`. Allowed tool calls run against the `CommandBus`.
+
+In production the bus is **mainBus**. `list_world` reads from the cached `RemoteState`. Renderer-owned mutations (focus/spawn/rename/kill) go through `deps.dispatch`, which sends an `orchestrator-command` IPC with a correlation id and awaits the renderer's reply via the pending map (30s timeout → failure result). Main-owned actions (`send_to_agent` via keystroke injection, `get_agent_reply`, `approve_ask`) bypass the renderer entirely. Every mutation fires `signalTarget` (a comet from chat bar to card) and `await landed()` so the effect commits when the comet arrives.
+
+Two other producers push into the same queue as heartbeats — nothing is polled: `notifyAgentReply()` (an agent's Stop hook fired) and `notifyAsk()` (an agent hit a permission request). Both inject `[fleet event]` messages for awareness only; the system prompt forbids acting on them without a standing user instruction.
+
+Outbound, `runOrchestrator`'s `onEvent` → `Orchestrator.emit()` sends `orchestrator-event` IPC to the renderer chat and taps `deps.speak` for TTS.
+
+## Conventions & gotchas
+
+- **Auth / token source**: the loop deletes `ANTHROPIC_API_KEY` at startup so a stray key can't outrank the subscription and silently bill pay-as-you-go. The SDK then uses `CLAUDE_CODE_OAUTH_TOKEN` if exported, else the host's stored `claude login` creds. No token export needed when signed into Claude Code. Model is pinned to `claude-opus-4-8`.
+- **Built-in tools are dropped** (`tools: []`): the orchestrator only has the canvas verbs, never file/build/repo access. The system prompt repeats this — it operates the app, it is not a coding agent.
+- **Read-only single source**: `READ_ONLY_TOOLS` in canvasServer.ts feeds both the SDK `allowedTools` and the gate's `READ_ONLY` set, plus the `readOnlyHint` annotations. Keep all three in sync.
+- **Autonomy modes** (`manual` | `supervising` | `autopilot`): only `manual` gates the orchestrator's own actions (5-min human confirm). In `supervising`/`autopilot` the orchestrator has full autonomy over its own tools — the difference is only how AGENT asks are handled in `notifyAsk` (autopilot auto-approves immediately, no model wake; supervising leaves them for a human). `manual` also suppresses fleet-event wakes entirely.
+- **stub vs main bus**: stubBus is offline-only (harness); mainBus is the real seam. They diverge in behavior — e.g. stub's `send_to_agent` just echoes, main injects keystrokes and queues when busy.
+- **Relative imports, not `@shared`**: contract.ts and siblings import shared types by relative path so the standalone tsx harness resolves without tsconfig-path support.
+- **Speech-pacing lives in `beforeTool`/`canUseTool`, not the gate** — it covers every tool and is the single mechanism ordering voice and action. The gate only decides permission.
+- The input generator must never throw — a throwing generator aborts the SDK session opaquely. The session auto-restarts in `startSession`'s finally if work is still queued.
+- Streaming text is emitted token-by-token (`includePartialMessages`); a per-turn `streamed` latch falls back to the complete text block if partials never arrive (older CLI / cached turn).

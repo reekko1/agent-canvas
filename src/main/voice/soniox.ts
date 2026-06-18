@@ -13,22 +13,50 @@
 // until `terminated`. A new reply (or the user talking) cancels the current one.
 import WebSocket from 'ws'
 import { loadSonioxKey } from './keyStore'
+import type { OrchestratorEvent } from '../../shared/types'
 
 const STT_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
 const TTS_URL = 'wss://tts-rt.soniox.com/tts-websocket'
 const STT_MODEL = 'stt-rt-v5'
 const TTS_MODEL = 'tts-rt-v1'
 const TTS_VOICE = 'Grace'
-/** Mic capture rate the renderer worklet emits; STT config must match. */
-export const STT_SAMPLE_RATE = 16000
-/** TTS output rate; the renderer's player must decode at exactly this rate. */
-export const TTS_SAMPLE_RATE = 24000
+// Audio rates. The renderer declares its own matching CAPTURE_RATE/PLAYBACK_RATE
+// (voice.ts) — these are not a shared export, just this side's copy of the contract.
+const STT_SAMPLE_RATE = 16000
+const TTS_SAMPLE_RATE = 24000
 
 /** Marker tokens Soniox emits to delimit utterances — never user-visible text. */
 const MARKERS = new Set(['<fin>', '<end>'])
 
 function apiKey(): string | undefined {
   return loadSonioxKey()
+}
+
+/** The STT opening-handshake config, single-sourced so validation and a live
+ *  session state the same contract. Pass `endpointDetection` for a session
+ *  (push-to-talk drives finalization itself, so it's false); validation omits it
+ *  since it sends no audio. */
+function sttConfig(key: string, endpointDetection?: boolean): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    api_key: key,
+    model: STT_MODEL,
+    audio_format: 'pcm_s16le',
+    sample_rate: STT_SAMPLE_RATE,
+    num_channels: 1,
+  }
+  if (endpointDetection !== undefined) config.enable_endpoint_detection = endpointDetection
+  return config
+}
+
+/** Drop all listeners and close a socket, ignoring an already-closing error. */
+function closeWs(ws: WebSocket | null): void {
+  if (!ws) return
+  ws.removeAllListeners()
+  try {
+    ws.close()
+  } catch {
+    /* already closing */
+  }
 }
 
 /** Confirm a key works before storing it, by doing the STT opening handshake:
@@ -48,27 +76,12 @@ export function validateSonioxKey(key: string): Promise<{ ok: boolean; message?:
       if (settled) return
       settled = true
       clearTimeout(timer)
-      ws.removeAllListeners()
-      try {
-        ws.close()
-      } catch {
-        /* already closing */
-      }
+      closeWs(ws)
       resolve(r)
     }
     // Opened, sent config, no rejection — the key is good (server now awaits audio).
     const timer = setTimeout(() => finish({ ok: true }), 2000)
-    ws.on('open', () => {
-      ws.send(
-        JSON.stringify({
-          api_key: trimmed,
-          model: STT_MODEL,
-          audio_format: 'pcm_s16le',
-          sample_rate: STT_SAMPLE_RATE,
-          num_channels: 1,
-        }),
-      )
-    })
+    ws.on('open', () => ws.send(JSON.stringify(sttConfig(trimmed))))
     ws.on('message', (data) => {
       try {
         const res = JSON.parse(data.toString()) as { error_code?: number; error_message?: string }
@@ -107,20 +120,25 @@ export class SonioxVoice {
   private sttPending: Buffer[] = []
   private sttOpen = false
 
-  // One spoken utterance at a time. Utterances queue (FIFO); index 0 is the one
-  // currently on the wire, the rest wait so a new utterance never severs an
-  // unfinished one mid-audio. Within an utterance, text streams in live.
+  // One spoken utterance (one narrated line) at a time. Speech-pacing in the
+  // orchestrator guarantees the previous line has finished before the next tool
+  // runs and the next line begins, so there's no overlap to manage — no queue.
   private ttsSocket: WebSocket | null = null
   private ttsReady = false
   private ttsStreamId = ''
-  /** Chunks of the active utterance already sent (the rest stream as they land). */
-  private ttsSent = 0
-  /** Guards against sending text_end twice for the active utterance. */
-  private ttsEndSent = false
-  private ttsUtterances: { chunks: string[]; ended: boolean }[] = []
-  /** The utterance currently receiving chunks (the latest speakStart). */
-  private ttsBuilding: { chunks: string[]; ended: boolean } | null = null
+  /** Text that arrived before the socket finished opening. */
+  private ttsPending: string[] = []
+  /** speakEnd arrived before the socket opened — finalize once it's open. */
+  private ttsFinish = false
   private ttsSeq = 0
+
+  // --- Speech-pacing state -------------------------------------------------
+  // Holds a mutating action until the line just narrated has actually been heard,
+  // so the action (and its comet) land with the words. `playing` is fed by the
+  // renderer's TtsPlayer over IPC; `narrationPending` is set when a line is spoken.
+  private playing = false
+  private narrationPending = false
+  private readonly pacingWaiters = new Set<(playing: boolean) => void>()
 
   constructor(private readonly deps: VoiceDeps) {}
 
@@ -145,18 +163,8 @@ export class SonioxVoice {
     const ws = new WebSocket(STT_URL)
     this.stt = ws
     ws.on('open', () => {
-      ws.send(
-        JSON.stringify({
-          api_key: key,
-          model: STT_MODEL,
-          audio_format: 'pcm_s16le',
-          sample_rate: STT_SAMPLE_RATE,
-          num_channels: 1,
-          // Push-to-talk finalizes on release, so semantic endpointing only adds
-          // false triggers — we drive finalization ourselves.
-          enable_endpoint_detection: false,
-        }),
-      )
+      // Push-to-talk finalizes on release, so endpoint detection is off here.
+      ws.send(JSON.stringify(sttConfig(key, false)))
       this.sttOpen = true
       for (const buf of this.sttPending) ws.send(buf)
       this.sttPending = []
@@ -237,62 +245,21 @@ export class SonioxVoice {
     this.stt = null
     this.sttOpen = false
     this.sttPending = []
-    if (ws) {
-      ws.removeAllListeners()
-      try {
-        ws.close()
-      } catch {
-        /* already closing */
-      }
-    }
+    closeWs(ws)
   }
 
   // --- Text-to-speech ------------------------------------------------------
 
-  /** Begin a spoken utterance. If one is already playing, this one queues and
-   *  starts only after it finishes — so a new utterance never cuts off the audio
-   *  still streaming from the last one. */
+  /** Begin a spoken line: open a socket and send the voice config. Text streams in
+   *  via speakChunk; the previous line has already finished (speech-pacing), so any
+   *  lingering socket is just closed without disturbing the player. */
   speakStart(): void {
-    if (!apiKey()) return
-    const utt = { chunks: [] as string[], ended: false }
-    this.ttsBuilding = utt
-    this.ttsUtterances.push(utt)
-    if (this.ttsUtterances.length === 1) this.openTts()
-  }
-
-  /** Feed the next piece of text into the utterance being built. Streams live to
-   *  the wire when that utterance is the active one and the socket is open. */
-  speakChunk(text: string): void {
-    if (!text || !this.ttsBuilding) return
-    this.ttsBuilding.chunks.push(text)
-    this.flushTts()
-  }
-
-  /** Close the input side of the current utterance; its audio finishes and the
-   *  socket terminates on its own, after which any queued utterance starts. */
-  speakEnd(): void {
-    if (!this.ttsBuilding) return
-    this.ttsBuilding.ended = true
-    this.ttsBuilding = null
-    this.flushTts()
-  }
-
-  /** One-shot convenience — the non-streaming fallback path. */
-  speak(text: string): void {
-    const line = text.trim()
-    if (!line) return
-    this.speakStart()
-    this.speakChunk(line)
-    this.speakEnd()
-  }
-
-  /** Open a socket for the active utterance (the head of the queue). */
-  private openTts(): void {
     const key = apiKey()
-    if (!key || !this.ttsUtterances[0]) return
+    if (!key) return
+    this.closeSocket()
     this.ttsReady = false
-    this.ttsSent = 0
-    this.ttsEndSent = false
+    this.ttsPending = []
+    this.ttsFinish = false
     const streamId = `tts-${++this.ttsSeq}`
     this.ttsStreamId = streamId
     const ws = new WebSocket(TTS_URL)
@@ -311,7 +278,11 @@ export class SonioxVoice {
         }),
       )
       this.ttsReady = true
-      this.flushTts()
+      for (const t of this.ttsPending) {
+        ws.send(JSON.stringify({ text: t, text_end: false, stream_id: streamId }))
+      }
+      this.ttsPending = []
+      if (this.ttsFinish) ws.send(JSON.stringify({ text: '', text_end: true, stream_id: streamId }))
     })
     ws.on('message', (data) => {
       if (this.ttsSocket !== ws) return
@@ -322,72 +293,125 @@ export class SonioxVoice {
         return
       }
       if (res.error_code != null) {
-        this.finishTts()
+        this.closeSocket()
         return
       }
       if (res.audio) this.deps.onTtsAudio(Buffer.from(res.audio, 'base64'))
-      if (res.terminated) this.finishTts()
+      if (res.terminated) this.closeSocket()
     })
     ws.on('error', () => {
-      if (this.ttsSocket === ws) this.finishTts()
+      if (this.ttsSocket === ws) this.closeSocket()
     })
   }
 
-  /** Send whatever of the active utterance hasn't gone out yet, then text_end if
-   *  it's complete. Safe to call repeatedly — it only sends the new tail. */
-  private flushTts(): void {
-    const utt = this.ttsUtterances[0]
+  /** Feed the next piece of text into the current line. */
+  speakChunk(text: string): void {
+    if (!text) return
     const ws = this.ttsSocket
-    if (!utt || !ws || !this.ttsReady || ws.readyState !== WebSocket.OPEN) return
-    while (this.ttsSent < utt.chunks.length) {
-      ws.send(JSON.stringify({ text: utt.chunks[this.ttsSent], text_end: false, stream_id: this.ttsStreamId }))
-      this.ttsSent++
+    if (!ws) return
+    if (this.ttsReady && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ text, text_end: false, stream_id: this.ttsStreamId }))
+    } else {
+      this.ttsPending.push(text) // still opening — flushed in order on 'open'
     }
-    if (utt.ended && !this.ttsEndSent) {
+  }
+
+  /** Close the input side; the line's audio finishes and the socket terminates. */
+  speakEnd(): void {
+    const ws = this.ttsSocket
+    if (!ws) return
+    if (this.ttsReady && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ text: '', text_end: true, stream_id: this.ttsStreamId }))
-      this.ttsEndSent = true
+    } else {
+      this.ttsFinish = true
     }
   }
 
-  /** The active utterance's socket ended (terminated or errored) — drop it and
-   *  start the next queued utterance, if any. */
-  private finishTts(): void {
-    this.closeSocket()
-    this.ttsUtterances.shift()
-    if (this.ttsUtterances.length) this.openTts()
+  /** One-shot convenience — the non-streamed fallback path. */
+  speak(text: string): void {
+    const line = text.trim()
+    if (!line) return
+    this.speakStart()
+    this.speakChunk(line)
+    this.speakEnd()
   }
 
-  /** Stop speaking now (barge-in or app teardown): drop the queue, close the
-   *  socket, and tell the renderer to flush any queued audio. */
+  /** Speak a streamed orchestrator turn from its typed events: only assistant
+   *  lines are voiced — `start`/`delta`/`final` stream a line, a non-streamed
+   *  assistant line speaks at once. Marking `narrationPending` here (for both the
+   *  streamed and one-shot paths) is what keeps speech-pacing in lockstep with
+   *  what's actually spoken. */
+  speakEvent(e: OrchestratorEvent): void {
+    if (e.kind !== 'assistant') return
+    if (e.phase === 'start') {
+      this.speakStart()
+    } else if (e.phase === 'delta') {
+      this.speakChunk(e.text)
+      if (this.available && e.text) this.narrationPending = true
+    } else if (e.phase === 'final') {
+      this.speakEnd()
+    } else if (e.text) {
+      this.speak(e.text)
+      if (this.available) this.narrationPending = true
+    }
+  }
+
+  // --- Speech-pacing -------------------------------------------------------
+
+  /** The renderer's player reports the spoken reply started/stopped playing. */
+  setPlaying(playing: boolean): void {
+    this.playing = playing
+    for (const w of [...this.pacingWaiters]) w(playing)
+  }
+
+  /** Resolve once the voice has spoken the narration emitted so far — it started
+   *  playing and then drained. No-op when voice is unavailable or nothing is
+   *  pending; guarded so a TTS that never starts can't wedge a turn. */
+  awaitCaughtUp(): Promise<void> {
+    if (!this.available || !this.narrationPending) return Promise.resolve()
+    this.narrationPending = false
+    return new Promise((resolve) => {
+      let started = this.playing
+      let done = false
+      const finish = (): void => {
+        if (done) return
+        done = true
+        this.pacingWaiters.delete(handler)
+        clearTimeout(startTimer)
+        clearTimeout(capTimer)
+        resolve()
+      }
+      const handler = (playing: boolean): void => {
+        if (playing) started = true
+        else if (started) finish() // played, then drained → the line has been heard
+      }
+      this.pacingWaiters.add(handler)
+      // If audio never begins (TTS error/slow), don't hold the action hostage.
+      const startTimer = setTimeout(() => {
+        if (!started) finish()
+      }, 1000)
+      const capTimer = setTimeout(finish, 20000) // hard safety against a wedge
+    })
+  }
+
+  /** Stop speaking now (barge-in or app teardown) and flush the renderer's audio. */
   cancelSpeak(): void {
-    const had = this.ttsSocket !== null || this.ttsUtterances.length > 0
-    this.ttsUtterances = []
-    this.ttsBuilding = null
+    if (this.ttsSocket) this.deps.onTtsReset()
     this.closeSocket()
-    if (had) this.deps.onTtsReset()
   }
 
   private closeSocket(): void {
     const ws = this.ttsSocket
     this.ttsSocket = null
     this.ttsReady = false
-    this.ttsSent = 0
-    this.ttsEndSent = false
-    if (ws) {
-      ws.removeAllListeners()
-      try {
-        ws.close()
-      } catch {
-        /* already closing */
-      }
-    }
+    this.ttsPending = []
+    this.ttsFinish = false
+    closeWs(ws)
   }
 
   /** Tear down every socket at app exit. */
   dispose(): void {
     this.closeStt()
-    this.ttsUtterances = []
-    this.ttsBuilding = null
     this.closeSocket()
   }
 }

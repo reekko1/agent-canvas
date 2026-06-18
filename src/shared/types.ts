@@ -336,6 +336,24 @@ export interface OrchestratorEvent {
   phase?: 'start' | 'delta' | 'final'
 }
 
+/** How long the action comet takes to fly from the chat bar to the target card.
+ *  The action's effect is committed when the comet lands (after this), and a spawn
+ *  card is revealed then — so main and the tracer agree on the timing. */
+export const TRACER_TRAVEL_MS = 600
+
+/** Fired when the orchestrator acts on a specific agent (spawn/message/kill/
+ *  rename/approve) so the renderer can draw a tracer from the chat bar to that
+ *  card. Targets by `cardId` when known; the orchestrator's `approve` path instead
+ *  carries the `askId` (approvals don't carry a card id) and the renderer resolves
+ *  it to the asking card — but the autopilot auto-approve has the card directly and
+ *  sends `cardId`. So `approve` may arrive with either; the renderer takes whichever
+ *  is present. */
+export interface OrchestratorTarget {
+  kind: 'spawn' | 'send' | 'kill' | 'rename' | 'approve'
+  cardId?: string
+  askId?: string
+}
+
 /** A command the orchestrator (main) asks the renderer to execute, correlated by
  *  `id`. Discriminated on `cmd` so each payload is typed at both ends of the IPC
  *  seam — the producer (`manager.dispatch`) and the renderer's handler. */
@@ -457,6 +475,8 @@ export interface CanvasApi {
   onOrchestratorEvent(cb: (e: OrchestratorEvent) => void): () => void
   /** A command from the orchestrator (main) to execute against the canvas. */
   onOrchestratorCommand(cb: (cmd: OrchestratorCommand) => void): () => void
+  /** The orchestrator acted on an agent — draw a tracer to that card. */
+  onOrchestratorTarget(cb: (target: OrchestratorTarget) => void): () => void
   /** Reply to an OrchestratorCommand by id. */
   orchestratorResult(id: number, result: OrchestratorCommandResult): void
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
@@ -470,6 +490,9 @@ export interface CanvasApi {
   /** Voice became available/unavailable (e.g. after the key is saved) — lets the
    *  chat bar reveal the mic without a restart. */
   onVoiceAvailable(cb: (available: boolean) => void): () => void
+  /** Report whether the orchestrator's voice is actively playing — main paces its
+   *  agent actions so they land with the narration, not ahead of it. */
+  notifyVoicePlaying(playing: boolean): void
   /** Begin a push-to-talk utterance — opens the STT session in main. */
   startSpeech(): void
   /** Stream one chunk of mic audio (raw pcm_s16le, mono, 16 kHz). */
@@ -484,8 +507,10 @@ export interface CanvasApi {
   onSpeechFinal(cb: (text: string) => void): () => void
   /** STT failed, or no key — render as a hint. */
   onSpeechError(cb: (message: string) => void): () => void
-  /** A chunk of spoken-reply audio (raw pcm_s16le, mono, 24 kHz) to play. */
-  onTtsAudio(cb: (pcm: ArrayBuffer) => void): () => void
+  /** A chunk of spoken-reply audio (raw pcm_s16le, mono, 24 kHz) to play. Arrives
+   *  as a Uint8Array — a Node Buffer sent over IPC structured-clones to that, never
+   *  a bare ArrayBuffer. */
+  onTtsAudio(cb: (pcm: Uint8Array) => void): () => void
   /** Barge-in / new reply — drop any queued or playing TTS audio. */
   onTtsReset(cb: () => void): () => void
 }

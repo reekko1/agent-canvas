@@ -189,40 +189,12 @@ app.whenReady().then(() => {
     onTtsAudio: (pcm) => send('voice-tts-audio', pcm),
     onTtsReset: () => send('voice-tts-reset'),
   })
-  // Speak the orchestrator's own replies aloud (the `assistant` lines — its voice;
-  // `result` just echoes them and `tool` is plumbing). Wrapping `send` keeps the
-  // tap in one place and never alters what the renderer receives.
-  // A whole turn is spoken as ONE continuous utterance: the first text block opens
-  // it, later blocks append (a newline keeps them from running together), and the
-  // turn's result/error closes it. This way back-to-back blocks (e.g. a near-
-  // instant list_world between them) never cut each other's audio off mid-word.
-  let speaking = false
-  const speakSend = (channel: string, ...args: unknown[]): void => {
-    if (channel === 'orchestrator-event') {
-      const e = args[0] as { kind?: string; phase?: string; text?: string } | undefined
-      if (e?.kind === 'assistant') {
-        if (e.phase === 'start') {
-          if (!speaking) {
-            speaking = true
-            voice?.speakStart()
-          } else {
-            voice?.speakChunk('\n') // separate this block from the previous one
-          }
-        } else if (e.phase === 'delta') {
-          voice?.speakChunk(e.text ?? '')
-        } else if (!e.phase && e.text) {
-          voice?.speak(e.text) // non-streamed line — its own utterance
-        }
-        // phase 'final' (block boundary) needs nothing here.
-      } else if ((e?.kind === 'result' || e?.kind === 'error') && speaking) {
-        speaking = false
-        voice?.speakEnd()
-      }
-    }
-    send(channel, ...args)
-  }
   orchestrator = new Orchestrator({
-    send: speakSend,
+    send,
+    // The voice taps the orchestrator's typed events (speaks the assistant lines)
+    // and paces actions to playback — both owned by SonioxVoice, see voice/soniox.ts.
+    speak: (e) => voice?.speakEvent(e),
+    awaitVoiceCaughtUp: () => voice?.awaitCaughtUp() ?? Promise.resolve(),
     getState: () => spine.remote.getLatestState(),
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
@@ -412,6 +384,8 @@ ipcMain.on('voice-stt-audio', (_e, chunk: ArrayBuffer | Uint8Array) =>
 )
 ipcMain.on('voice-stt-finish', () => voice?.finishStt())
 ipcMain.on('voice-stt-cancel', () => voice?.cancelStt())
+// The renderer's TTS player reports playback start/stop; drives action pacing.
+ipcMain.on('voice-playing', (_e, playing: boolean) => voice?.setPlaying(playing))
 // Queue an initial prompt for a not-yet-spawned card (set just before mount).
 ipcMain.on('set-initial-prompt', (_e, cardId: string, prompt: string) => {
   if (typeof cardId === 'string' && typeof prompt === 'string' && prompt) {

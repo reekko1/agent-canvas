@@ -4,7 +4,7 @@
 // other config in SPINE_DIR. An exported SONIOX_API_KEY overrides the stored
 // key — an explicit, env-driven override matching the orchestrator's auth posture.
 import { safeStorage } from 'electron'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SPINE_DIR } from '../spine/spine'
 
@@ -50,14 +50,4 @@ export function storeSonioxKey(key: string): boolean {
   mkdirSync(SPINE_DIR, { recursive: true })
   writeFileSync(KEY_PATH, safeStorage.encryptString(trimmed), { mode: 0o600 })
   return true
-}
-
-/** Forget the stored key (a future settings "disconnect"). No effect on an
- *  env-provided key. */
-export function clearSonioxKey(): void {
-  try {
-    rmSync(KEY_PATH)
-  } catch {
-    /* nothing to remove */
-  }
 }

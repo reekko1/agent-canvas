@@ -132,13 +132,11 @@ export class TtsPlayer {
     return this.ctx
   }
 
-  /** Queue one chunk of spoken audio (pcm_s16le, mono, 24 kHz) for playback. */
-  push(pcm: ArrayBuffer | Uint8Array): void {
+  /** Queue one chunk of spoken audio (pcm_s16le, mono, 24 kHz) for playback. The
+   *  chunk is a Uint8Array — a Node Buffer sent over IPC arrives as that view. */
+  push(pcm: Uint8Array): void {
     const ctx = this.ensure()
-    const i16 =
-      pcm instanceof Uint8Array
-        ? new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2))
-        : new Int16Array(pcm)
+    const i16 = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2))
     if (i16.length === 0) return
     const f32 = new Float32Array(i16.length)
     for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 0x8000

@@ -10,14 +10,15 @@ import { MicCapture, TtsPlayer } from '@/orchestrator/voice'
 
 // A whisper is one thing the orchestrator said (or one prompt you sent). The
 // latest non-`you` whisper shows transiently above the pill and then fades; the
-// full run is kept, collapsed, behind the pill (click to reveal).
-type WhisperKind = OrchestratorEvent['kind'] | 'you'
+// full run is kept, collapsed, behind the pill (click to reveal). `tool` events
+// only drive the working pulse — they never become a whisper — so they're
+// excluded here, which keeps the styling tables to kinds that can actually render.
+type WhisperKind = Exclude<OrchestratorEvent['kind'], 'tool'> | 'you'
 type Entry = { id: number; kind: WhisperKind; text: string }
 
 const TONE: Record<WhisperKind, string> = {
   you: 'text-foreground',
   assistant: 'text-foreground/90',
-  tool: 'text-muted-foreground',
   result: 'text-foreground/90',
   error: 'text-red-400',
   auto: 'text-amber-400',
@@ -28,7 +29,6 @@ const TONE: Record<WhisperKind, string> = {
 const GLYPH: Record<WhisperKind, string> = {
   you: '›',
   assistant: '✶',
-  tool: '·',
   result: '✶',
   error: '✗',
   auto: '⚡',
@@ -196,7 +196,10 @@ export function OrchestratorChatBar({
     // Drive the app-wide voice glow: on/off lifts to Canvas; the live loudness
     // is written to a CSS var each frame (no React re-render in the hot path).
     player.current.listen(
-      (active) => onSpeakingChange?.(active),
+      (active) => {
+        onSpeakingChange?.(active) // edge glow
+        window.canvas.notifyVoicePlaying(active) // lets main pace actions to the voice
+      },
       (level) => document.documentElement.style.setProperty('--voice-level', level.toFixed(3)),
     )
     void window.canvas.voiceAvailable().then((ok) => {

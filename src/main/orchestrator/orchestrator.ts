@@ -37,12 +37,16 @@ export interface RunOptions {
   /** Confirm a mutating tool call. Read-only tools never reach here. */
   gate: (toolName: string, input: Record<string, unknown>) => Promise<GateDecision>
   onEvent: (e: OrchestratorEvent) => void
+  /** Speech-pacing: awaited before EVERY tool runs, so the action (and its comet)
+   *  lands with the line narrating it instead of ahead of it. No-op when there's
+   *  nothing to wait for. This is the single mechanism that orders voice + action. */
+  beforeTool?: () => Promise<void>
 }
 
 /** Drive the persistent orchestrator session, streaming events to `onEvent`.
  *  Resolves only when the input stream ends (app teardown) or the SDK errors. */
 export async function runOrchestrator(opts: RunOptions): Promise<void> {
-  const { bus, input, gate, onEvent } = opts
+  const { bus, input, gate, onEvent, beforeTool } = opts
 
   // Subscription auth: a stray ANTHROPIC_API_KEY outranks CLAUDE_CODE_OAUTH_TOKEN
   // and would silently bill pay-as-you-go. Force the subscription path by dropping
@@ -57,6 +61,9 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<PermissionResult> => {
+    // Hold every tool until the line narrating it has been heard — this alone
+    // serializes the turn to speech, so nothing else has to guard against overlap.
+    await beforeTool?.()
     if (READ_ONLY.has(toolName)) return { behavior: 'allow', updatedInput: input }
     const decision = await gate(toolName, input)
     return decision.allow
@@ -79,8 +86,9 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
       model: 'claude-opus-4-8',
       systemPrompt: SYSTEM_PROMPT,
       mcpServers: { canvas: buildCanvasServer(bus) },
-      // Read-only tool is pre-approved; mutating ones fall through to canUseTool.
-      allowedTools: ['mcp__canvas__list_world', 'mcp__canvas__get_agent_reply'],
+      // Read-only tools are pre-approved; mutating ones fall through to canUseTool.
+      // Single-sourced from READ_ONLY so the SDK and the gate can't disagree.
+      allowedTools: [...READ_ONLY],
       // Drop every built-in tool — the orchestrator only has canvas verbs.
       tools: [],
       // Stream assistant text deltas so the chat bar and TTS get them live.

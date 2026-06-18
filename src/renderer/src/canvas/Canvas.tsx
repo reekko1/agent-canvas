@@ -18,6 +18,8 @@ import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { CardNode } from '@/cards/CardNode'
 import { OrchestratorChatBar } from '@/orchestrator/ChatBar'
+import { OrchestratorTracers, TRACER_COLOR, type TracerSpec } from '@/orchestrator/Tracer'
+import { TRACER_TRAVEL_MS } from '@shared/types'
 import type { OrchestratorConfirm } from '@/orchestrator/OrchestratorConfirmToast'
 import { DiffNode } from '@/diff/DiffNode'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
@@ -26,6 +28,7 @@ import type {
   CardRecord,
   OrchestratorCommand,
   OrchestratorCommandResult,
+  OrchestratorTarget,
   PermissionAskInfo,
   QuestionAskInfo,
 } from '@shared/types'
@@ -57,6 +60,11 @@ import { VideoBackdrop } from './VideoBackdrop'
 /** Off-screen parking rect for cards in inactive projects — kept mounted and
  *  sized (so xterm/FitAddon stay valid) but `visibility:hidden`. */
 const PARKED: Rect = { x: -100000, y: 0, w: 800, h: 560 }
+
+/** Distance from the window's bottom edge up to the chat-bar pill's center — the
+ *  origin an action comet launches from. Must track the bar's `bottom-4` overlay
+ *  inset (16px) plus the pill's half-height; keep in sync if the pill resizes. */
+const CHAT_BAR_INSET = 44
 
 /** Window size, tracked so the layout re-flows on resize. */
 function useWindowSize(): { w: number; h: number } {
@@ -93,6 +101,21 @@ export function Canvas() {
   const [orchConfirm, setOrchConfirm] = useState<OrchestratorConfirm | null>(null)
   // The orchestrator is speaking aloud — drives the voice-reactive edge glow.
   const [speaking, setSpeaking] = useState(false)
+  // Live tracers fired when the orchestrator acts on an agent (chat bar → card).
+  const [tracers, setTracers] = useState<TracerSpec[]>([])
+  // Cards spawned by the orchestrator but not yet revealed — held invisible until
+  // the delivering comet lands, so a new agent materializes on impact.
+  const [pendingReveal, setPendingReveal] = useState<Set<string>>(() => new Set())
+  const reveal = (cardId: string): void =>
+    setPendingReveal((s) => {
+      if (!s.has(cardId)) return s
+      const next = new Set(s)
+      next.delete(cardId)
+      return next
+    })
+  const tracerSeq = useRef(1)
+  const rectForRef = useRef<(cardId: string) => Rect>(() => PARKED)
+  const fireTargetRef = useRef<(t: OrchestratorTarget) => void>(() => {})
   const { w: winW, h: winH } = useWindowSize()
   const PlusIcon = useIcon('plus')
 
@@ -393,6 +416,10 @@ export function Canvas() {
         setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'agent', name)])
         proj.attachCardTo(target.id, r.cardId)
         if (proj.activeProjectId !== target.id) switchProject(target.id)
+        // Hold the new card invisible until the spawn comet lands on its slot; a
+        // safety timer reveals it even if the tracer never fires (e.g. off-screen).
+        setPendingReveal((s) => new Set(s).add(r.cardId))
+        setTimeout(() => reveal(r.cardId), TRACER_TRAVEL_MS + 1500)
         reply({
           ok: true,
           cardId: r.cardId,
@@ -427,6 +454,7 @@ export function Canvas() {
     reply({ ok: false, message: 'unknown command' })
   }
   useEffect(() => window.canvas.onOrchestratorCommand((cmd) => orchCommandRef.current(cmd)), [])
+  useEffect(() => window.canvas.onOrchestratorTarget((t) => fireTargetRef.current(t)), [])
 
   // ---- Master-stack layout (active project only; others stay parked) ----
   const active = proj.active
@@ -464,6 +492,31 @@ export function Canvas() {
     const s = stackSlot(winW, i)
     return { ...s, y: s.y - scroll }
   }
+  rectForRef.current = rectFor
+
+  // Fire a tracer from the chat bar to the agent the orchestrator just acted on.
+  // `approve` arrives with an askId (approvals carry no card id), so resolve it to
+  // the asking card. A freshly spawned card may not be laid out for a frame or two,
+  // so retry briefly; a target that never becomes visible (parked on another
+  // canvas) is skipped rather than shooting a beam off-screen.
+  fireTargetRef.current = (t: OrchestratorTarget): void => {
+    const cardId = t.cardId ?? (t.askId ? asks.find((a) => a.askId === t.askId)?.cardId : undefined)
+    if (!cardId) return
+    const color = TRACER_COLOR[t.kind]
+    const from = { x: winW / 2, y: winH - CHAT_BAR_INSET } // the chat bar, bottom-center
+    const launch = (attempts: number): void => {
+      const r = rectForRef.current(cardId)
+      if (r.x <= -10000) {
+        if (attempts > 0) requestAnimationFrame(() => launch(attempts - 1))
+        return
+      }
+      const to = { x: r.x + r.w / 2, y: r.y + r.h / 2 }
+      setTracers((ts) => [...ts, { id: tracerSeq.current++, from, to, color }])
+      // A spawned card materializes when its delivering comet lands.
+      if (t.kind === 'spawn') setTimeout(() => reveal(cardId), TRACER_TRAVEL_MS)
+    }
+    launch(6)
+  }
 
   const onStackWheel = useCallback(
     (e: ReactWheelEvent<HTMLDivElement>) => {
@@ -488,6 +541,12 @@ export function Canvas() {
         <div className="voice-glow__aura" />
       </div>
 
+      {/* Tracers the orchestrator fires at an agent when it acts on one. */}
+      <OrchestratorTracers
+        tracers={tracers}
+        onDone={(id) => setTracers((ts) => ts.filter((t) => t.id !== id))}
+      />
+
       {/* One stable layer of every card across every project. The active
           project's cards take the master/stack slots; the rest stay mounted but
           parked off-screen and hidden — so no card's xterm ever unmounts. */}
@@ -511,10 +570,14 @@ export function Canvas() {
               transform: `translate(${r.x}px, ${r.y}px)`,
               width: r.w,
               height: r.h,
-              transition:
-                proj.animate && inActive
-                  ? 'transform .25s ease, width .25s ease, height .25s ease'
-                  : 'none',
+              // Held at 0 until its spawn comet lands, then fades in on impact.
+              opacity: pendingReveal.has(n.id) ? 0 : 1,
+              transition: [
+                proj.animate && inActive ? 'transform .25s ease, width .25s ease, height .25s ease' : '',
+                'opacity .35s ease',
+              ]
+                .filter(Boolean)
+                .join(', '),
               visibility: inActive ? 'visible' : 'hidden',
               zIndex: isMaster ? 10 : 1,
             }}

@@ -10,6 +10,7 @@
 //   • `notifyAsk()`        — an agent's permission ask fired    (priority 'next')
 // The hooks are the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
+import { TRACER_TRAVEL_MS } from '../../shared/types'
 import type { CommandBus, World } from './contract'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
@@ -19,6 +20,7 @@ import type {
   OrchestratorConfirmResult,
   OrchestratorEvent,
   OrchestratorMode,
+  OrchestratorTarget,
   PermissionAskInfo,
   RemoteState,
 } from '../../shared/types'
@@ -45,6 +47,13 @@ export interface OrchestratorDeps {
   getReply: (cardId: string) => string | null
   /** Decide a held permission ask (main-owned — no renderer round-trip). */
   decideAsk: (askId: string, decision: 'allow' | 'deny') => void
+  /** Voice the orchestrator's turn — receives every typed event; routes the
+   *  assistant lines to TTS. Beside the typed event, not a channel-string sniff. */
+  speak?: (e: OrchestratorEvent) => void
+  /** Resolve once the voice has finished narrating what's been said so far, so a
+   *  mutating action lands with its narration instead of ahead of it. No-op when
+   *  voice is unavailable. */
+  awaitVoiceCaughtUp?: () => Promise<void>
 }
 
 export class Orchestrator {
@@ -131,7 +140,9 @@ export class Orchestrator {
     const who = card?.name ?? 'An agent'
     // Autopilot clears the block immediately — no wake, no model, no click.
     if (this.mode === 'autopilot') {
-      this.deps.decideAsk(ask.askId, 'allow')
+      // Comet flies to the blocked agent, then it's cleared on landing.
+      this.signalTarget({ kind: 'approve', cardId: ask.cardId })
+      setTimeout(() => this.deps.decideAsk(ask.askId, 'allow'), TRACER_TRAVEL_MS)
       this.emit({ kind: 'auto', text: `auto-approved ${who}: ${ask.detail}` })
       return
     }
@@ -190,6 +201,7 @@ export class Orchestrator {
         input: this.input(),
         gate: this.gate,
         onEvent: (e) => this.emit(e),
+        beforeTool: this.deps.awaitVoiceCaughtUp,
       })
     } catch (e) {
       this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
@@ -279,6 +291,7 @@ export class Orchestrator {
 
     spawnAgent: async (input) => {
       const r = await this.dispatch('spawnAgent', { ...input })
+      if (r.ok && r.cardId) this.signalTarget({ kind: 'spawn', cardId: r.cardId })
       return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'spawned' : 'failed') }
     },
 
@@ -286,8 +299,11 @@ export class Orchestrator {
       const card = this.findCard(cardId)
       if (!card) return { ok: false, message: `no agent with id ${cardId}` }
       if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
-      // Keystroke injection into the agent's terminal; Enter (\r) submits the
-      // line. Claude queues input when busy, so this is safe at any status.
+      // The comet delivers the message: fly first, inject when it lands. Keystroke
+      // injection into the agent's terminal; Enter (\r) submits the line. Claude
+      // queues input when busy, so this is safe at any status.
+      this.signalTarget({ kind: 'send', cardId })
+      await this.landed()
       this.deps.writeToCard(cardId, message.endsWith('\r') ? message : `${message}\r`)
       return {
         ok: true,
@@ -304,6 +320,8 @@ export class Orchestrator {
     },
 
     renameAgent: async (cardId, name) => {
+      this.signalTarget({ kind: 'rename', cardId })
+      await this.landed()
       const r = await this.dispatch('renameAgent', { cardId, name })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? 'renamed' : 'failed') }
     },
@@ -311,6 +329,9 @@ export class Orchestrator {
     killCard: async (cardId) => {
       const card = this.findCard(cardId)
       if (!card) return { ok: false, message: `no card with id ${cardId}` }
+      // The comet flies to the still-present card, then it closes on landing.
+      this.signalTarget({ kind: 'kill', cardId })
+      await this.landed()
       const r = await this.dispatch('killCard', { cardId })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? `closed ${card.name}` : 'failed') }
     },
@@ -318,6 +339,10 @@ export class Orchestrator {
     approveAsk: async (askId, decision) => {
       const ask = this.deps.getState()?.approvals.find((a) => a.id === askId)
       if (!ask) return { ok: false, message: `no pending ask with id ${askId}` }
+      // Signal before deciding — the renderer resolves the asking card from its
+      // still-present ask list, the comet flies, and the decision commits on landing.
+      this.signalTarget({ kind: 'approve', askId })
+      await this.landed()
       // Main-owned decision — straight to spine.decide, no renderer round-trip.
       this.deps.decideAsk(askId, decision)
       return { ok: true, message: `${decision === 'allow' ? 'approved' : 'denied'} ${ask.name}'s request` }
@@ -328,6 +353,8 @@ export class Orchestrator {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<GateDecision> => {
+    // Speech-pacing lives in canUseTool (beforeTool) now — it covers every tool,
+    // so the gate only decides permission.
     // The orchestrator has full autonomy over its own tools in supervising and
     // autopilot — approve_ask included. If the user said "approve this", a
     // re-confirm would just ask for permission they already gave verbally. Only
@@ -346,5 +373,18 @@ export class Orchestrator {
 
   private emit(e: OrchestratorEvent): void {
     this.deps.send('orchestrator-event', e)
+    this.deps.speak?.(e) // voice tap, beside the typed event
+  }
+
+  /** Tell the renderer the orchestrator just acted on an agent, so it can draw a
+   *  tracer from the chat bar to that card. */
+  private signalTarget(target: OrchestratorTarget): void {
+    this.deps.send('orchestrator-target', target)
+  }
+
+  /** Resolve when the comet would reach the card — the action commits here, so its
+   *  effect lands with the dot instead of ahead of it. */
+  private landed(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, TRACER_TRAVEL_MS))
   }
 }

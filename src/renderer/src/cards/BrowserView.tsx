@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { WebviewTag } from 'electron'
 import { ArrowLeft, ArrowRight, RotateCw } from 'lucide-react'
 import { registerBrowser } from './browserBridge'
+import type { BrowserNavPatch } from './meta'
 import { READ_SCRIPT, buildActionScript } from '@shared/browserDriver'
 
 /// The card's live web view: the browser analogue of TerminalView. Owns an
@@ -50,10 +51,7 @@ export function BrowserView({
    *  guest re-mounts and reloads `url` when this clears (a wake). Only ever set on
    *  non-master browsers, which are already covered by their face. */
   dormant: boolean
-  onNavigate: (
-    cardId: string,
-    patch: { url?: string; title?: string; favicon?: string; snapshot?: string },
-  ) => void
+  onNavigate: (cardId: string, patch: BrowserNavPatch) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<WebviewTag | null>(null)

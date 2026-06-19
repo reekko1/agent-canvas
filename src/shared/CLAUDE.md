@@ -57,7 +57,9 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
   `historyScript`). `ref` is an opaque, snapshot-scoped set-of-marks index
   stamped as a `data-canvas-ref` attribute on read and resolved back by a plain
   attribute selector; a read clears prior refs first, so a post-mutation action
-  returns `stale-ref`. Note the dependency-free rule still holds: the **strings
+  returns `stale-ref` (the message is the shared `staleRefMessage(ref)` builder,
+  used by both tiers — browserController's CDP branches and the Tier-A action
+  script — so the re-read hint reads identically whichever path drove the action). Note the dependency-free rule still holds: the **strings
   run in a DOM**, but the module is just strings + pure builders (no DOM/Electron
   import) — the canonical "dependency-free, runs anywhere" file.
 - **time.ts** — relative-time formatting helpers (`relativeFromSeconds`, the

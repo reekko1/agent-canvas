@@ -103,6 +103,13 @@ export const READ_SCRIPT = `(function () {
   }
 })()`
 
+/** The stale-ref failure message, shared verbatim by both tiers (the Tier-A
+ *  action script below and browserController's Tier-B branches) so the re-read
+ *  hint reads identically whichever path drove the action. */
+export function staleRefMessage(ref: string): string {
+  return `stale-ref: no element ${ref} on the page — read again first`
+}
+
 /** Tier-A action (renderer fallback): resolves the ref and performs the action
  *  entirely in-page via synthetic DOM events. The scroll/history/select branches
  *  below deliberately mirror the standalone Tier-B helpers (scrollScript /
@@ -123,7 +130,7 @@ export function buildActionScript(action: BrowserAction): string {
     return { ok: true, message: action.action }
   }
   var el = document.querySelector('[data-canvas-ref="' + action.ref + '"]')
-  if (!el) return { ok: false, message: 'stale-ref: no element ' + action.ref + ' on the page — read again first' }
+  if (!el) return { ok: false, message: ${JSON.stringify(staleRefMessage('ref' in action ? action.ref : ''))} }
   if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'center' })
   if (action.kind === 'select') {
     el.value = action.value

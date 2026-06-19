@@ -322,8 +322,76 @@ export class Orchestrator {
     // forbids it from approving on its own judgement).
     if (this.mode !== 'manual') return { allow: true }
     // manual → a human decides; give it minutes, not the 30s machine round-trip.
-    const r = await this.dispatch({ cmd: 'confirm', payload: { toolName, input } }, 5 * 60_000)
+    // Build the human copy here (main owns the tool vocabulary) and ship it ready
+    // to display — the renderer no longer reverse-engineers what a verb means.
+    const r = await this.dispatch({ cmd: 'confirm', payload: this.describeGate(toolName, input) }, 5 * 60_000)
     return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
+  }
+
+  /** Turn a gated tool call into a plain-language gate ("Spawn an agent" / "on
+   *  web · fix the failing test"), resolving canvas/card/ask ids to their names
+   *  from the latest published state. Lives beside the gate — not in the renderer
+   *  — so main is the single source for what each tool means. Keep the verb cases
+   *  in sync with the tools registered in canvasServer.ts (same soft contract as
+   *  READ_ONLY_TOOLS). */
+  private describeGate(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): { title: string; detail: string } {
+    const verb = toolName.replace(/^mcp__canvas__/, '')
+    const clip = (s: string): string => (s.length > 80 ? `${s.slice(0, 80)}…` : s)
+    const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+    const state = this.deps.getState()
+    const cardName = (id: unknown): string =>
+      state?.cards.find((c) => c.id === String(id))?.name ?? String(id ?? '?')
+    const canvasName = (id: unknown): string =>
+      state?.canvases.find((c) => c.id === String(id))?.name ?? String(id ?? '?')
+    const activeName = (): string =>
+      state?.canvases.find((c) => c.active)?.name ?? 'the active canvas'
+    switch (verb) {
+      case 'spawn_agent': {
+        const where = input.canvasId ? canvasName(input.canvasId) : activeName()
+        const who = str(input.name)
+        const task = str(input.prompt)
+        return {
+          title: who ? `Spawn “${who}”` : 'Spawn an agent',
+          detail: `on ${where}${task ? ` · ${clip(task)}` : ''}`,
+        }
+      }
+      case 'open_browser': {
+        const where = input.canvasId ? canvasName(input.canvasId) : activeName()
+        const url = str(input.url)
+        return { title: 'Open a browser', detail: `on ${where}${url ? ` · ${clip(url)}` : ''}` }
+      }
+      case 'navigate_browser':
+        return { title: `Navigate ${cardName(input.cardId)}`, detail: clip(str(input.url)) }
+      case 'browser_click':
+        return { title: `Click on ${cardName(input.cardId)}`, detail: clip(str(input.ref)) }
+      case 'browser_type':
+        return { title: `Type on ${cardName(input.cardId)}`, detail: clip(str(input.text)) }
+      case 'browser_scroll':
+        return { title: `Scroll ${cardName(input.cardId)}`, detail: str(input.direction) }
+      case 'browser_select':
+        return { title: `Select on ${cardName(input.cardId)}`, detail: clip(str(input.value)) }
+      case 'browser_history':
+        return { title: `History · ${cardName(input.cardId)}`, detail: str(input.action) }
+      case 'send_to_agent':
+        return { title: `Message ${cardName(input.cardId)}`, detail: clip(str(input.message)) }
+      case 'rename_agent':
+        return { title: `Rename ${cardName(input.cardId)}`, detail: `→ ${str(input.name)}` }
+      case 'kill_card':
+        return { title: `Close ${cardName(input.cardId)}`, detail: 'ends its session — cannot be undone' }
+      case 'approve_ask': {
+        const ask = state?.approvals.find((a) => a.id === String(input.askId))
+        const who = ask?.name ?? 'agent'
+        const action = str(input.decision) === 'deny' ? 'Deny' : 'Approve'
+        return { title: `${action} ${who}’s request`, detail: ask?.detail ?? String(input.askId) }
+      }
+      case 'focus_canvas':
+        return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
+      default:
+        return { title: verb, detail: clip(JSON.stringify(input)) }
+    }
   }
 
   private emit(e: OrchestratorEvent): void {

@@ -21,6 +21,7 @@ import {
   scrollScript,
   selectScript,
   historyScript,
+  staleRefMessage,
 } from '../../shared/browserDriver'
 import type { BrowserAction, BrowserActionResult, BrowserSnapshot } from '../../shared/types'
 import type { BrowserDriver } from './mainBus'
@@ -134,7 +135,7 @@ export class BrowserController implements BrowserDriver {
         returnByValue: true,
       })
       if (r?.result?.value === false) {
-        return { ok: false, message: `stale-ref: no element ${action.ref} — read again first` }
+        return { ok: false, message: staleRefMessage(action.ref) }
       }
       return { ok: true, message: `selected ${action.value} in ${action.ref}` }
     }
@@ -144,7 +145,7 @@ export class BrowserController implements BrowserDriver {
     })
     const box = resolved?.result?.value as { x: number; y: number } | null
     if (!box) {
-      return { ok: false, message: `stale-ref: no element ${action.ref} on the page — read again first` }
+      return { ok: false, message: staleRefMessage(action.ref) }
     }
     if (action.kind === 'click') {
       await this.clickAt(wc, box.x, box.y)

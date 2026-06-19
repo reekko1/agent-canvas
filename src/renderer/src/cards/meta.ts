@@ -34,6 +34,17 @@ export interface CardMeta {
   todos?: AgentTodo[]
 }
 
+/** The state a browser card's webview reports up on navigation / retitle /
+ *  favicon change / demote snapshot. One shape shared by `CardData.onNavigate`,
+ *  `BrowserView`'s prop, and the canvas's `navigateCard` so a new field can't be
+ *  added at one site and silently dropped at the others. */
+export interface BrowserNavPatch {
+  url?: string
+  title?: string
+  favicon?: string
+  snapshot?: string
+}
+
 export interface CardData extends Record<string, unknown> {
   folder: string
   /** 'agent' = watched claude session; 'shell' = bare $SHELL, no hooks — the
@@ -75,10 +86,7 @@ export interface CardData extends Record<string, unknown> {
   /** A browser card navigated, retitled, or produced a fresh blur snapshot —
    *  folds the patch back into the node so persistence (url) and the chrome /
    *  face (title, favicon, snapshot) track the live webview. */
-  onNavigate: (
-    cardId: string,
-    patch: { url?: string; title?: string; favicon?: string; snapshot?: string },
-  ) => void
+  onNavigate: (cardId: string, patch: BrowserNavPatch) => void
 }
 
 /** Fold one spine event into a card's meta (pure — the canvas owns the state,

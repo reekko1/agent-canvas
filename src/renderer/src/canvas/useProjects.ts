@@ -6,6 +6,12 @@ import type { Project } from '@shared/types'
  *  outlast the keyframes and the cards never snap before they've settled. */
 const DECK_MS = 340
 
+/** The deck-restack transition in flight: the receding (`leaving`) and rising
+ *  (`entering`) canvases. Non-null only for the switch animation window; null
+ *  when idle or when switching from/to the empty state. Shared with
+ *  `useMasterStackLayout` so the layout hook tracks the exact same shape. */
+export type SwitchState = { leaving: string; entering: string } | null
+
 export interface ProjectsApi {
   projects: Project[]
   /** The active canvas, or null when there are none (the empty state). */
@@ -18,7 +24,7 @@ export interface ProjectsApi {
   /** The deck-restack transition in flight: the receding (`leaving`) and rising
    *  (`entering`) canvases. Non-null only for the switch animation window; null
    *  when idle or when switching from/to the empty state (no board to cross-fade). */
-  switching: { leaving: string; entering: string } | null
+  switching: SwitchState
   /** Add a card to the active project and make it the master. */
   attachCard: (cardId: string) => void
   /** Add a card to a specific project (by id) and make it that canvas's master. */
@@ -46,7 +52,7 @@ export function useProjects(makeProjectId: () => string): ProjectsApi {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [animate, setAnimate] = useState(true)
-  const [switching, setSwitching] = useState<{ leaving: string; entering: string } | null>(null)
+  const [switching, setSwitching] = useState<SwitchState>(null)
 
   const projectsRef = useRef(projects)
   projectsRef.current = projects

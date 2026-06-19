@@ -11,12 +11,28 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 
 ## Components
 
-- **Canvas.tsx** — the root. Owns `nodes` (all cards, one flat mounted layer)
-  and the browser recency map, wires every hook, computes the master/stack
-  partition + rects + the dormant-browser set, renders cards + diff sheet +
-  toolbars + toasts, and handles orchestrator commands/tracers. During a canvas
-  switch it also derives a transient `leavingLayout` (the receding board's slots)
-  so the deck cross-fade can fade the old board out from where it sat.
+- **Canvas.tsx** — the composition root. Owns `nodes` (all cards, one flat
+  mounted layer) and the small glue — card lifecycle (`makeCard`/`onCloseCard`/
+  `promoteCard`/`navigateCard`/`renameCard`), project plumbing (`addCard`/
+  `createProject`/`deleteProject`/`switchProject`), and naming/title helpers —
+  then wires every hook and renders the layer + sheet + toolbars + toasts. The
+  heavy concerns are extracted into focused hooks (layout, browser budget,
+  tracers, orchestrator bus, below) and UI chunks into their own components; the
+  root just holds the seams together and passes state down. `useMemo`s for
+  `dormantBrowsers` (from the budget hook's `selectDormant`) and
+  `ownedBrowserByAgent` live here since they straddle the partition + node set.
+- **CardLayer.tsx** — the one stable layer: maps every card to an absolutely-
+  positioned `CardNode`, applying the master/stack rect, the `pendingReveal`
+  fade, the deck-enter/leave class during a switch, and the parked-offscreen
+  state for inactive canvases (incl. the receding board's `leavingLayout` slots).
+  Pure presentation — all geometry/state arrives as props.
+- **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
+  (disabled with no active canvas) + remote-access entry.
+- **RenameDialog.tsx** — the rename-a-card modal (Electron has no
+  `window.prompt`); click-away / Esc cancel, Enter / Rename commit.
+- **DiffSheet.tsx** — the right-edge diff drawer + its collapsed edge tab; keyed
+  by active project id, watches `active.dir`. Collapse parks it, the caller
+  dropping `activeDir` tears it down.
 - **CardContextMenu.tsx** — right-click-a-card menu: Rename / Close card.
   Dismisses on click-away or Esc.
 - **ProjectToolbar.tsx** — top canvas switcher: a dropdown naming the active
@@ -85,6 +101,40 @@ reads as its live page (title, else `hostOf(url)`) and ships its current `url`
 **Auto-update** — `useAutoUpdate` mirrors electron-updater status from main
 (events merge so the captured version survives version-less progress ticks);
 only fires in packaged builds.
+
+**Layout** — `useMasterStackLayout` derives all master-stack geometry: a
+memoized partition (`stackCards`/`stackIndex`/`hasStack`/`mRect`/`scroll` stay
+internal — inputs to rectFor/onStackWheel, not returned), exposing
+`cardNodes`/`masterCard`/`orderedActive`, every card's `rectFor` (O(1) via the
+stack index), the receding board's frozen `leavingLayout` during a switch, the
+stack-column `onStackWheel`, and `sheetW`.
+Owns the `scrollRef`/`leaveScrollRef` pair and exposes `beginLeave()` (snapshot
+the leaving scroll, called by `switchProject` before `setStackScroll(0)`) and
+`rectForRef` (live rects for the tracer launcher). Exports `PARKED`.
+
+**Browser budget** — `useBrowserBudget` owns the app-wide webview eviction: the
+recency map + monotonic `bumpBrowser` (promote/spawn/wake), the kind-aware
+`isBrowserCard` (session-less close path), the per-browser `scanPulse` (+ the
+`onBrowserWake`/`onBrowserScan` IPC subscriptions), and `selectDormant(cardNodes,
+masterId)` — ranks every browser (master always wins) and returns the set past
+`BROWSER_BUDGET` (6). Reads live nodes via the passed `nodesRef`.
+
+**Tracers** — `useTracers` owns the action comets fired chat-bar→card: holds the
+`TracerSpec` list, subscribes once to `onOrchestratorTarget` (via a live ref),
+resolves a target (`cardId`, or an `askId` → the asking card) to a visible rect
+through `rectForRef`, retries briefly while a fresh card lays out, and reveals a
+spawned card when its comet lands. Owns `CHAT_BAR_INSET`.
+
+**Orchestrator** — `useOrchestratorCommands` is the renderer end of the command
+bus: subscribes once to `onOrchestratorCommand` (live ref), runs each mutation
+(focus/spawn-agent/spawn-browser/navigate/read/screenshot/act/set-reason/rename/
+kill) against live project state and replies by id via `orchestratorResult`, and
+owns the pending gate (`orchConfirm` + `resolveConfirm`) surfaced in the chat
+bar. The gate copy arrives **pre-described from main** (`manager.describeGate`,
+which owns the tool vocabulary) — the renderer just displays `{ title, detail }`.
+The browser-drive handlers don't re-check `kind` (mainBus.requireBrowser guards
+that before dispatch); they only confirm the card still exists in the live node
+set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates.
 
 ## Architecture / data flow
 

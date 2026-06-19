@@ -472,7 +472,11 @@ export type OrchestratorCommand =
   | { id: number; cmd: 'readBrowser'; payload: { cardId: string } }
   | { id: number; cmd: 'screenshotBrowser'; payload: { cardId: string } }
   | { id: number; cmd: 'actBrowser'; payload: { cardId: string; action: BrowserAction } }
-  | { id: number; cmd: 'confirm'; payload: { toolName: string; input: Record<string, unknown> } }
+  // The gate copy is built in main (manager.describeGate) where the canvas tool
+  // vocabulary lives, with ids already resolved to names — the renderer only
+  // displays it. (Was { toolName, input }, which made the renderer reverse-
+  // engineer each verb's label.)
+  | { id: number; cmd: 'confirm'; payload: { title: string; detail: string } }
 
 /** The renderer's reply to any non-`confirm` OrchestratorCommand — the mutations
  *  (focus/spawn/rename/kill, browser open/navigate/act) plus the browser reads,
@@ -480,7 +484,7 @@ export type OrchestratorCommand =
 export interface OrchestratorActionResult {
   ok: boolean
   message: string
-  /** Set by `spawnAgent` — the id of the newly created card. */
+  /** Set by `spawnAgent` / `spawnBrowser` — the id of the newly created card. */
   cardId?: string
   /** Set by `readBrowser` — the page observation. */
   snapshot?: BrowserSnapshot

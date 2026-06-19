@@ -44,6 +44,15 @@ Each has its own CLAUDE.md — read it before working in that area.
   `MultiProjectSnapshot`s; `save` debounces (~400ms) so drags don't grind the FS, `flush`
   writes synchronously on quit, and `load` normalizes the file (drops dirless projects,
   ghost cards with no canvas, fixes `activeProjectId`).
+- **issueStore.ts** — `IssueStore`, the Mastermind substrate (see `MASTERMIND.md`):
+  the `Vision → Sprint → Plan → Issue` store as an append-only JSONL event log
+  (`SPINE_DIR/issues.jsonl`) materialized in memory. Main is the single arbiter —
+  `apply` validates → reduces → appends one durable line → emits — so writes never
+  interleave and atomic claims need no transaction. `load` replays the log (ids +
+  timestamps are persisted per entry for deterministic replay); a `vision.commit`
+  runs the propagation pass (a redirection/expansion moves stale sprints to
+  REALIGNMENT_PENDING). Channels: `load-issue-store`, `issue-action` (both invoke),
+  `issue-update` (push). v1 has no agents; the renderer board is the only client.
 
 ## Architecture / data flow
 - **Lifecycle:** `app.whenReady` starts the spine, builds voice + orchestrator, creates the

@@ -9,6 +9,7 @@ import {
 import type { Project } from '@shared/types'
 import {
   PAD,
+  RIGHT_GUTTER,
   TOP_STRIP,
   masterRect,
   stackContentHeight,
@@ -119,10 +120,16 @@ export function useMasterStackLayout(params: {
   const onStackWheel = useCallback(
     (e: ReactWheelEvent<HTMLDivElement>) => {
       if (!hasStack || maxScroll <= 0) return
-      // The diff sheet overlays the stack column — don't scroll the hidden
-      // stack behind it when the wheel is over the sheet.
-      if (!diffCollapsed && (e.target as HTMLElement).closest('[data-diff-sheet]')) return
-      if (e.clientX < winW - stackWidth(winW) - PAD) return // not over the stack column
+      // A side sheet (diff, vision, or issues) overlays the stack column — don't
+      // scroll the hidden stack behind it when the wheel is over the open sheet.
+      if (
+        !diffCollapsed &&
+        (e.target as HTMLElement).closest(
+          '[data-diff-sheet],[data-vision-sheet],[data-issue-sheet]',
+        )
+      )
+        return
+      if (e.clientX < winW - stackWidth(winW) - RIGHT_GUTTER) return // not over the stack column
       setStackScroll((s) => Math.max(0, Math.min(maxScroll, s + e.deltaY)))
     },
     [hasStack, maxScroll, winW, diffCollapsed, setStackScroll],

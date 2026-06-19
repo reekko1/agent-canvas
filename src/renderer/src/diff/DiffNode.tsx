@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Minus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SheetShell } from '@/canvas/SheetShell'
 import { diffLines, type DiffLine } from './diffText'
 import type { GitActionRequest, GitChange, GitFileStatus, GitSnapshot } from '@shared/types'
 
@@ -128,53 +128,27 @@ export function DiffNode({ id, data }: { id: string; data: DiffData }) {
         : null
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border-2 border-border bg-card shadow-2xl">
-      {/* Calm, neutral chrome — status colors belong to agent cards, not diffs.
-          The trailing diffstat shows the file-change summary. */}
-      <div className="flex items-center gap-2.5 bg-muted px-3 py-1.5 font-mono text-xs text-foreground/80">
-        <span className="font-bold">{folderName}</span>
-        <span className="flex-1" />
-        {snap && !snap.isRepo && <span className="text-muted-foreground">not a repo</span>}
-        {snap?.isRepo && snap.changes.length === 0 && (
-          <span className="text-file-added">✓ clean</span>
-        )}
-        {snap?.isRepo && snap.changes.length > 0 && (
-          <span>
-            <span className="text-diff-add">+{snap.totalAdded}</span>{' '}
-            <span className="text-diff-del">−{snap.totalRemoved}</span>
-          </span>
-        )}
-        {/* Window controls: real Buttons give each its own hit target and
-            hover plate, fenced off from the diffstat by a divider so the
-            minimize and close never blur together. */}
-        <span className="mx-1 h-4 w-px bg-border" />
-        <span className="flex items-center gap-0.5">
-          {data.onCollapse && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={data.onCollapse}
-              title="Minimize"
-              aria-label="Minimize"
-            >
-              <Minus />
-            </Button>
+    <SheetShell
+      title={<span className="font-mono text-xs font-semibold text-foreground">{folderName}</span>}
+      trailing={
+        <span className="font-mono text-xs text-foreground/80">
+          {snap && !snap.isRepo && <span className="text-muted-foreground">not a repo</span>}
+          {snap?.isRepo && snap.changes.length === 0 && (
+            <span className="text-file-added">✓ clean</span>
           )}
-          {data.onClose && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => data.onClose?.(id)}
-              title="Remove diff object (the repo is untouched)"
-              aria-label="Close"
-            >
-              <X />
-            </Button>
+          {snap?.isRepo && snap.changes.length > 0 && (
+            <span>
+              <span className="text-diff-add">+{snap.totalAdded}</span>{' '}
+              <span className="text-diff-del">−{snap.totalRemoved}</span>
+            </span>
           )}
         </span>
-      </div>
-
-      <div className="flex min-h-0 flex-1 font-mono text-xs">
+      }
+      onCollapse={data.onCollapse}
+      onClose={data.onClose ? () => data.onClose?.(id) : undefined}
+    >
+      {/* Status colors belong to agent cards, not diffs — the body stays neutral. */}
+      <div className="flex h-full font-mono text-xs">
         {/* Left column: commit box + grouped file list (VS Code shape). */}
         <div className="flex w-[34%] min-w-[200px] flex-col border-r">
           <div className="flex flex-col gap-1.5 border-b p-2">
@@ -263,7 +237,7 @@ export function DiffNode({ id, data }: { id: string; data: DiffData }) {
           )}
         </div>
       </div>
-    </div>
+    </SheetShell>
   )
 }
 

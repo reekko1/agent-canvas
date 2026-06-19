@@ -43,6 +43,12 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     resolves) and `BrowserAction` (`click`/`type`/`scroll`/`select`/`history`).
     `CardRecord` and `RemoteState.cards` carry `ownerCardId`/`ownerId` +
     `reason` (persisted browser ownership: which agent requested it and why).
+  - Issue store (Mastermind substrate, see `MASTERMIND.md`): `Vision` /
+    `VisionVersion` (immutable, append-only) / `Sprint` (with `SprintState`) /
+    `Plan` / `Issue` records, the `IssueActionRequest` mutation union +
+    `IssueActionResult`, and the `IssueSnapshot` read-projection. Everything is
+    per-project (per canvas): each canvas has its own vision, versions, sprints,
+    plans, and issues — one north star per product/repo.
   - `CanvasApi` — the full interface the preload bridge implements and the
     renderer consumes (the IPC contract in one place). Browser readiness rides
     here too: `browserReady` (renderer→main: a `<webview>` is dom-ready, with

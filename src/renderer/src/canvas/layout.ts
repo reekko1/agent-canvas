@@ -11,6 +11,11 @@ export const PAD = 12
  *  with roughly the same gap on the inside (~14px) as the toolbar has to the
  *  window edge (~12px), so the toolbar reads as centered in its own channel. */
 export const LEFT_GUTTER = 76
+/** Right inset mirroring LEFT_GUTTER — the channel the floating right toolbar
+ *  (the diff/issues sheet toggles) lives in. The stack column and the side
+ *  sheets stop at `W - RIGHT_GUTTER` so neither ever slides under the rail,
+ *  exactly as LEFT_GUTTER keeps the master clear of the left rail. */
+export const RIGHT_GUTTER = 76
 /** The stack column takes this fraction of the window width, clamped. */
 export const STACK_FRACTION = 0.3
 export const STACK_MIN = 320
@@ -35,7 +40,10 @@ export function stackWidth(W: number): number {
 /** The master slot rect — full content area when there's no stack, otherwise
  *  the left region beside the stack column. */
 export function masterRect(W: number, H: number, hasStack: boolean): Rect {
-  const right = hasStack ? W - stackWidth(W) - GAP : W - PAD
+  // Both arms clear RIGHT_GUTTER: with a stack the column itself is shifted left
+  // by (RIGHT_GUTTER - PAD), so the master's right edge follows; without one the
+  // master simply stops at the gutter instead of PAD.
+  const right = hasStack ? W - stackWidth(W) - GAP - (RIGHT_GUTTER - PAD) : W - RIGHT_GUTTER
   return { x: LEFT_GUTTER, y: TOP_STRIP, w: right - LEFT_GUTTER, h: H - TOP_STRIP - PAD }
 }
 
@@ -43,7 +51,9 @@ export function masterRect(W: number, H: number, hasStack: boolean): Rect {
 export function stackSlot(W: number, i: number): Rect {
   const sw = stackWidth(W)
   return {
-    x: W - sw + PAD,
+    // Shifted left from the window edge by RIGHT_GUTTER (was PAD) so the column
+    // clears the right rail; its inner card width is unchanged.
+    x: W - sw - RIGHT_GUTTER + 2 * PAD,
     y: TOP_STRIP + i * (STACK_CARD_H + GAP),
     w: sw - PAD - PAD,
     h: STACK_CARD_H,

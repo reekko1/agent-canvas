@@ -501,6 +501,275 @@ export interface OrchestratorConfirmResult {
  *  the command: `confirm` yields a gate decision, the mutations an action result. */
 export type OrchestratorCommandResult = OrchestratorActionResult | OrchestratorConfirmResult
 
+// MARK: Issue store (Mastermind substrate)
+//
+// Main-owned reactive store for the Vision → Sprint → Plan → Issue chain (see
+// MASTERMIND.md). Main is the single arbiter: every mutation funnels through
+// IssueStore.apply, which runs synchronously to completion, so writes never
+// interleave and atomic claims are free. Projected two ways — to the visible
+// renderer board (IPC) and, in a later milestone, to agents (MCP). The whole
+// chain is per-project (per canvas): each canvas has its OWN vision, versions,
+// sprints, plans, issues, and distance — one north star per product/repo. In v1
+// there are NO agents: every place an agent will eventually act (gate verdicts,
+// propagation adjudication, gap / distance assessment) is a manual human action
+// behind a seam an agent later assumes — the store never knows whether a human
+// or an agent called it.
+
+/// How a vision edit bears on downstream work — the diff's classification IS a
+/// planning directive. `clarification` invalidates nothing; `redirection` may
+/// strand in-flight sprints; `expansion` may spawn new ones. In v1 the human
+/// sets this on commit; later an auditor verifies it.
+export type VisionEditClass = 'clarification' | 'redirection' | 'expansion'
+
+/// One immutable, committed state of a canvas's vision — append-only, never
+/// mutated in place ("git for intent"). `body` is a self-contained snapshot, not
+/// a delta, so any version is judgeable standalone. `n` is the monotonic version
+/// number; `rationale` is WHY it changed (the steering context the propagation
+/// pass reasons over). Author is always the human (agents may propose, never commit).
+export interface VisionVersion {
+  id: string
+  /** The project (canvas) this version belongs to. */
+  projectId: string
+  /** Monotonic version number (1-based), per project; the diff between n-1 and n drives propagation. */
+  n: number
+  /** The full vision body at this point (markdown) — a snapshot, not a delta. */
+  body: string
+  principles: string[]
+  antiVision: string[]
+  /** Why it changed — the steering rationale the propagation pass reasons over. */
+  rationale: string
+  class: VisionEditClass
+  author: 'human'
+  committedAt: number // epoch ms
+}
+
+/// A canvas's vision pointer — its north star. One per project; `currentVersion`
+/// names the latest VisionVersion id for that project (null before its first
+/// commit). The versions themselves live in IssueSnapshot.
+export interface Vision {
+  projectId: string
+  currentVersion: string | null
+}
+
+/// Where a sprint sits in its lifecycle — the mastermind's "what to do next"
+/// input. Gate transitions are MANUAL (human) in v1; an agent assumes them
+/// later. `REALIGNMENT_PENDING` is the propagation-pass landing state: a vision
+/// bump marked this sprint stale and a human (later: an auditor) must re-verdict.
+export type SprintState =
+  | 'DRAFT'
+  | 'PLAN_REVIEW'
+  | 'APPROVED'
+  | 'DECOMPOSED'
+  | 'EXECUTING'
+  | 'OUTCOME_REVIEW'
+  | 'DONE'
+  | 'REALIGNMENT_PENDING'
+
+/// One outcome-bounded plan — the unit the mastermind reasons over. Outcome-based,
+/// NOT time-based: no end-date, no velocity, no time-box. `visionVersionRef` PINS
+/// the version it was conceived under (mid-plan version races are reconciled by
+/// the propagation pass, not by locking).
+export interface Sprint {
+  id: string
+  /** The project (canvas) this sprint advances — scopes the board per-repo. */
+  projectId: string
+  /** The pinned VisionVersion id this sprint was conceived under (provenance chain). */
+  visionVersionRef: string
+  /** The outcome / definition-of-done — done when verified, never when time elapses. */
+  outcome: string
+  /** Which part of the vision gap this sprint closes (gate #0 conception). */
+  gapRationale: string
+  state: SprintState
+  /** Set when a vision bump moved this sprint to REALIGNMENT_PENDING — the diff
+   *  the human (later: auditor) judges, plus the state to restore on "still aligned". */
+  realignment?: {
+    fromVisionVersion: string
+    toVisionVersion: string
+    priorState: SprintState
+    /** Human-authored verdict in v1 (the manual seam for the agent propagation pass). */
+    note?: string
+  }
+  createdAt: number
+}
+
+/// The sprint's approved blueprint: stack, structure, deps DAG. Approved (gate #1)
+/// before any decomposition into issues. `approved` flips on the manual gate.
+export interface Plan {
+  id: string
+  sprintRef: string
+  overview: string
+  stack: string[]
+  /** Prose description of the structure/architecture the lead proposes. */
+  structure: string
+  /** The plan-level dependency graph as adjacency: node id → ids it depends on. */
+  deps: Record<string, string[]>
+  nonGoals: string[]
+  /** Gate #1 verdict — MANUAL human approval in v1; an auditor verdict later. */
+  approved: boolean
+  createdAt: number
+}
+
+/// What an issue IS — a task (executable unit), an audit-gate node (a gate #0–#4
+/// checkpoint rendered as a distinct board node), or a decision (a needs-decision
+/// escalation to the human).
+export type IssueKind = 'task' | 'audit-gate' | 'decision'
+
+/// An issue's work lifecycle. `ready` = all deps satisfied, claimable. A worker
+/// owns one at a time; closed when done AND audited. In v1 a human flips these.
+export type IssueStatus =
+  | 'backlog'
+  | 'ready'
+  | 'claimed'
+  | 'in_progress'
+  | 'blocked'
+  | 'in_review'
+  | 'done'
+
+/// An audit verdict on an issue (gate output). APPROVED clears it; ISSUES carries
+/// findings, each adjudicated `clear-fix` (dispatch a fixer) or `needs-decision`
+/// (escalate to human). In v1 the human posts these; an auditor agent does later.
+export interface IssueVerdict {
+  id: string
+  verdict: 'APPROVED' | 'ISSUES'
+  findings: string
+  disposition?: 'clear-fix' | 'needs-decision'
+  /** Who posted it — 'human' in v1; an auditor card id later. */
+  author: string
+  postedAt: number
+}
+
+/// A free-text note on an issue (worker progress, blocker report).
+export interface IssueComment {
+  id: string
+  author: string
+  body: string
+  postedAt: number
+}
+
+/// The lead's decomposition of an approved plan into executable DAG nodes. Traces
+/// up to a plan → sprint → vision. Closed when done AND audited. `deps` are other
+/// issue ids (the DAG edges); `owner` is the worker card id (links a card — WHO —
+/// to an issue — WHAT). `intentRef` pins the vision version (inherited from the
+/// sprint) for the per-issue delta on a bump.
+export interface Issue {
+  id: string
+  planRef: string
+  title: string
+  description: string
+  /** Acceptance criteria — what "done" is checked against (gate #3). */
+  verify: string
+  status: IssueStatus
+  /** Owning worker card id, or null when unclaimed. Atomic claim sets this. */
+  owner: string | null
+  /** Phase/group label for ordering the DAG into waves. */
+  phase?: string
+  /** Issue ids this one depends on (the DAG edges). */
+  deps: string[]
+  labels: string[]
+  kind: IssueKind
+  verdicts: IssueVerdict[]
+  comments: IssueComment[]
+  /** The vision version this issue was built for (inherited from its sprint). */
+  intentRef: string
+  createdAt: number
+}
+
+/// A qualitative gap judgment — distance to the vision is ASSESSED, never
+/// computed (a recurring independent judgment, not a number). Human-authored in
+/// v1 (`assessedBy: 'human'`); a recurring auditor agent fills the same slot later.
+export interface DistanceAssessment {
+  /** The project (canvas) this judgment is about. */
+  projectId: string
+  note: string
+  assessedBy: string
+  at: number
+}
+
+/// Every mutation the issue store accepts — the discriminated union mirrored at
+/// the IPC seam (cf. GitActionRequest / OrchestratorCommand). Main validates each
+/// against current state, applies atomically, appends to the log, and emits a
+/// change. In v1 these all originate from the renderer (human); later the MCP
+/// server emits the same union, role-scoped per the org chart. (`issue.create`
+/// names its field `issueKind` to avoid colliding with the union's `kind` tag.)
+export type IssueActionRequest =
+  // Vision (per-canvas, human-write-only; commit appends an immutable VisionVersion)
+  | {
+      kind: 'vision.commit'
+      projectId: string
+      body: string
+      principles: string[]
+      antiVision: string[]
+      rationale: string
+      class: VisionEditClass
+    }
+  // Distance (per-canvas, assessed, recurring)
+  | { kind: 'vision.assessDistance'; projectId: string; note: string; assessedBy: string }
+  // Sprint
+  | { kind: 'sprint.create'; projectId: string; outcome: string; gapRationale: string }
+  | { kind: 'sprint.setState'; id: string; state: SprintState }
+  | { kind: 'sprint.resolveRealignment'; id: string; outcome: 'aligned' | 'remove'; note?: string }
+  | { kind: 'sprint.remove'; id: string }
+  // Plan
+  | {
+      kind: 'plan.create'
+      sprintRef: string
+      overview: string
+      stack: string[]
+      structure: string
+      deps: Record<string, string[]>
+      nonGoals: string[]
+    }
+  | { kind: 'plan.approve'; id: string } // gate #1 — manual in v1
+  // Issue
+  | {
+      kind: 'issue.create'
+      planRef: string
+      title: string
+      description: string
+      verify: string
+      issueKind: IssueKind
+      phase?: string
+      deps?: string[]
+      labels?: string[]
+    }
+  | { kind: 'issue.setStatus'; id: string; status: IssueStatus }
+  | { kind: 'issue.claim'; id: string; owner: string } // atomic test-and-set on owner
+  | { kind: 'issue.release'; id: string }
+  | { kind: 'issue.setDeps'; id: string; deps: string[] }
+  | {
+      kind: 'issue.postVerdict'
+      id: string
+      verdict: 'APPROVED' | 'ISSUES'
+      findings: string
+      disposition?: 'clear-fix' | 'needs-decision'
+      author: string
+    }
+  | { kind: 'issue.comment'; id: string; author: string; body: string }
+
+/// The reply to one issue action — `ok` plus a message on rejection (e.g. an
+/// illegal state transition or a claim on an already-owned issue) and the new
+/// entity's id on a create.
+export interface IssueActionResult {
+  ok: boolean
+  message?: string
+  /** The created entity's id (sprint/plan/issue/version create actions). */
+  id?: string
+}
+
+/// The materialized read-projection main pushes to the renderer (the visible
+/// board). Like RemoteState, a whole-state snapshot — every collection is flat,
+/// keyed by `projectId`, and the renderer filters to the active canvas then trees
+/// it by vision → sprint → plan → issue. `distance` is the recurring judgment
+/// timeline (newest last).
+export interface IssueSnapshot {
+  visions: Vision[]
+  versions: VisionVersion[]
+  sprints: Sprint[]
+  plans: Plan[]
+  issues: Issue[]
+  distance: DistanceAssessment[]
+}
+
 export interface CanvasApi {
   /** `folder` (the active project's dir) skips the picker; omit it to prompt. */
   newCard(folder?: string): Promise<NewCardResult | null>
@@ -610,6 +879,14 @@ export interface CanvasApi {
   onBrowserScan(cb: (cardId: string) => void): () => void
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
   setOrchestratorMode(mode: OrchestratorMode): void
+  // MARK: Issue store (Mastermind substrate)
+  /** Load the whole issue-store projection (Vision → Sprint → Plan → Issue). */
+  loadIssueStore(): Promise<IssueSnapshot>
+  /** Apply one mutation; the result surfaces rejections (illegal transition, a
+   *  claim on an owned issue). Truth then arrives over onIssueUpdate. */
+  issueAction(action: IssueActionRequest): Promise<IssueActionResult>
+  /** The store changed — main re-pushes the whole projection on every action. */
+  onIssueUpdate(cb: (snapshot: IssueSnapshot) => void): () => void
   // MARK: Voice — push-to-talk speech-to-text and spoken orchestrator replies.
   /** Whether Soniox voice is configured (a key is present in main). */
   voiceAvailable(): Promise<boolean>

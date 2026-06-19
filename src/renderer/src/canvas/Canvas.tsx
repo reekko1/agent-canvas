@@ -18,9 +18,13 @@ import type {
 } from '@shared/types'
 import type { CanvasNode } from './nodes'
 import { ActionRail } from './ActionRail'
+import { SheetRail } from './SheetRail'
 import { CardLayer } from './CardLayer'
 import { CardContextMenu } from './CardContextMenu'
 import { DiffSheet } from './DiffSheet'
+import { IssueSheet } from '@/issues/IssueSheet'
+import { VisionSheet } from '@/issues/VisionSheet'
+import { useIssueBoard } from '@/issues/useIssueBoard'
 import { ProjectToolbar } from './ProjectToolbar'
 import { RenameDialog } from './RenameDialog'
 import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
@@ -71,9 +75,10 @@ export function Canvas() {
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
 
-  // The diff drawer is built into every canvas that has a dir — it watches that
-  // folder, re-points on canvas switch, and starts collapsed behind an edge tab.
-  const [diffCollapsed, setDiffCollapsed] = useState(true)
+  // The three right-edge sheets (diff + vision board + issue board) share one
+  // width channel and are mutually exclusive: at most one is expanded. null = all
+  // collapsed (the master uses full width). Expanding one collapses the others.
+  const [rightSheet, setRightSheet] = useState<'diff' | 'vision' | 'issues' | null>(null)
   const [stackScroll, setStackScroll] = useState(0)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ cardId: string; x: number; y: number } | null>(
@@ -86,6 +91,12 @@ export function Canvas() {
   // Cards spawned by the orchestrator but not yet revealed — held invisible until
   // the delivering comet lands, so a new agent materializes on impact.
   const [pendingReveal, setPendingReveal] = useState<Set<string>>(() => new Set())
+  // Toggle a right-edge sheet: clicking its rail button again collapses it,
+  // otherwise it opens (and the mutual-exclusion makes the others collapse).
+  const toggleSheet = useCallback(
+    (s: 'diff' | 'vision' | 'issues') => setRightSheet((cur) => (cur === s ? null : s)),
+    [],
+  )
   const reveal = (cardId: string): void =>
     setPendingReveal((s) => {
       if (!s.has(cardId)) return s
@@ -106,6 +117,8 @@ export function Canvas() {
     [],
   )
   const proj = useProjects(makeProjectId)
+  // The Mastermind issue board: per-canvas vision + sprints + issues.
+  const issueBoard = useIssueBoard({ activeProjectId: proj.activeProjectId })
 
   const { hydrateTodos } = useCardMeta(setNodes)
   const { asks, decide, releaseCard } = usePendingAsks()
@@ -358,7 +371,8 @@ export function Canvas() {
     winH,
     stackScroll,
     setStackScroll,
-    diffCollapsed,
+    // The master reserves the sheet channel when ANY right sheet is open.
+    diffCollapsed: rightSheet === null,
   })
 
   const switchProject = useCallback(
@@ -452,11 +466,29 @@ export function Canvas() {
           activeDir={activeDir}
           activeProjectId={proj.activeProjectId}
           sheetW={sheetW}
-          collapsed={diffCollapsed}
-          onCollapse={() => setDiffCollapsed(true)}
-          onExpand={() => setDiffCollapsed(false)}
+          collapsed={rightSheet !== 'diff'}
+          onCollapse={() => setRightSheet(null)}
         />
       )}
+
+      {/* Vision board: the north-star sheet (vision + distance), sharing the
+          diff's channel. Split from the issue board so neither crowds the other. */}
+      <VisionSheet
+        activeProjectId={proj.activeProjectId}
+        board={issueBoard}
+        sheetW={sheetW}
+        collapsed={rightSheet !== 'vision'}
+        onCollapse={() => setRightSheet(null)}
+      />
+
+      {/* Issue board: the sprint → plan → issue sheet, sharing the diff's channel. */}
+      <IssueSheet
+        activeProjectId={proj.activeProjectId}
+        board={issueBoard}
+        sheetW={sheetW}
+        collapsed={rightSheet !== 'issues'}
+        onCollapse={() => setRightSheet(null)}
+      />
 
       {/* With titleBarStyle: hiddenInset there is no title bar — this strip is
           how the window gets dragged. The toolbars below are no-drag. */}
@@ -477,6 +509,15 @@ export function Canvas() {
         active={!!active}
         onAddCard={(kind) => void addCard(kind)}
         onRemote={() => setRemoteOpen(true)}
+      />
+
+      {/* The right rail mirrors ActionRail: toggles for the diff + vision +
+          issue sheets (mutually exclusive). */}
+      <SheetRail
+        sheet={rightSheet}
+        onToggle={toggleSheet}
+        hasDiff={!!activeDir}
+        distance={issueBoard.latestDistance}
       />
 
       <RemoteAccessDialog open={remoteOpen} onClose={() => setRemoteOpen(false)} />

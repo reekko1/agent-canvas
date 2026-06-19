@@ -28,11 +28,23 @@ hooks it composes, and IPC goes through `window.canvas.*`.
   Pure presentation — all geometry/state arrives as props.
 - **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
   (disabled with no active canvas) + remote-access entry.
+- **SheetRail.tsx** — the floating **right** rail, mirror of `ActionRail`: the
+  toggles for the three right-edge sheets (diff + vision board + issue board). Each
+  button is `active` while its sheet is open and collapses it on a second click;
+  they live in the `RIGHT_GUTTER` channel so an open sheet stops short of them.
+  Carries the distance-to-vision note on the vision tooltip (the old ProjectToolbar
+  crown).
 - **RenameDialog.tsx** — the rename-a-card modal (Electron has no
   `window.prompt`); click-away / Esc cancel, Enter / Rename commit.
-- **DiffSheet.tsx** — the right-edge diff drawer + its collapsed edge tab; keyed
-  by active project id, watches `active.dir`. Collapse parks it, the caller
-  dropping `activeDir` tears it down.
+- **DiffSheet.tsx** — the right-edge diff drawer; keyed by active project id,
+  watches `active.dir`. Toggled from `SheetRail` (no edge tab of its own);
+  collapse parks it, the caller dropping `activeDir` tears it down.
+- **VisionSheet / IssueSheet** (in `src/renderer/src/issues/`, both mounted by
+  Canvas) — the two Mastermind right-edge sheets (the north-star vision board and
+  the sprint → plan → issue board), sharing the diff's width channel. Canvas's
+  `rightSheet` (`'diff' | 'vision' | 'issues' | null`) makes all three mutually
+  exclusive (toggled from `SheetRail`); the master reserves the sheet width when
+  any is open. See `src/renderer/src/issues/CLAUDE.md`.
 - **CardContextMenu.tsx** — right-click-a-card menu: Rename / Close card.
   Dismisses on click-away or Esc.
 - **ProjectToolbar.tsx** — top canvas switcher: a dropdown naming the active
@@ -44,9 +56,11 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 ## Layout / state
 
 - **layout.ts** — pure master-stack geometry (no pan/zoom). Constants
-  (`TOP_STRIP`, `PAD`, `LEFT_GUTTER`, stack fraction/min/max, card height, gap)
-  plus `masterRect`, `stackSlot`, `stackWidth`, `stackContentHeight`. Every rect
-  derives from these + window size + which card is master.
+  (`TOP_STRIP`, `PAD`, `LEFT_GUTTER`, `RIGHT_GUTTER`, stack fraction/min/max,
+  card height, gap) plus `masterRect`, `stackSlot`, `stackWidth`,
+  `stackContentHeight`. Every rect derives from these + window size + which card
+  is master. `LEFT_GUTTER`/`RIGHT_GUTTER` are the symmetric channels the two
+  floating rails sit in; the master and stack column stop at those insets.
 - **nodes.ts** — the `CanvasNode` type: a single `{ id, type: 'card', data }`
   shape (shells are cards with `data.kind === 'shell'`, browsers with
   `'browser'`). The diff is NOT a node.

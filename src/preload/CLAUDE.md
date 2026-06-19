@@ -17,6 +17,9 @@ The API exposed on `window.canvas` groups by concern:
   (`onCardEvent`, `readTodos`, `paneCommand`, `paneCwd`), workspace persistence
   (`loadWorkspace`, `saveWorkspace`), and asks/questions (`onAsk`, `onQuestion`,
   `decide`, `answerQuestion`, `releaseAsks`).
+- **Issue store (Mastermind substrate)** — the visible `Vision → Sprint → Plan →
+  Issue` board: `loadIssueStore`, `issueAction` (apply one mutation), `onIssueUpdate`
+  (the whole projection re-pushed on every applied action).
 - **Git / diff** — `watchDiff`/`unwatchDiff`, `readFileDiff`, `gitAction`,
   `repoIdentity`, `onDiffSnapshot`, plus folder actions `revealFolder`,
   `openInEditor`, `pickFolder`.

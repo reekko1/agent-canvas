@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
 import { PtyRegistry } from './ptys'
 import { WorkspaceStore } from './workspace'
+import { IssueStore } from './issueStore'
 import { execFile } from 'node:child_process'
 import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
@@ -18,6 +19,7 @@ import type {
   AskDecision,
   GitActionRequest,
   GitChange,
+  IssueActionRequest,
   MultiProjectSnapshot,
   OrchestratorCommandResult,
   OrchestratorMode,
@@ -30,6 +32,9 @@ let win: BrowserWindow | null = null
 const spine = new Spine()
 const ptys = new PtyRegistry()
 const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
+// The Mastermind substrate: the Vision → Sprint → Plan → Issue store (see
+// MASTERMIND.md). Main owns it; the renderer board reads/writes it over IPC.
+const issues = new IssueStore(join(SPINE_DIR, 'issues.jsonl'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
 const browserController = new BrowserController({
   // Ask the renderer to wake a dormant (evicted) browser so it can be driven.
@@ -227,6 +232,10 @@ app.whenReady().then(() => {
   }
   spine.onQuestion = (ask) => send('question-ask', ask)
   spine.start()
+  // The issue store: replay the log into memory before the window can ask for it,
+  // and re-push the whole projection to the board on every applied action.
+  issues.onChange = (snapshot) => send('issue-update', snapshot)
+  issues.load()
   // The in-app orchestrator: drives the canvas via the Agent SDK. Reads the
   // latest published RemoteState for `list_world`; dispatches mutations and
   // confirms to the renderer (see the orchestrator-* IPC below).
@@ -287,6 +296,7 @@ app.on('window-all-closed', () => app.quit())
 // Quitting only detaches tmux clients — the fleet keeps working by design.
 app.on('before-quit', () => {
   workspace.flush()
+  issues.flush()
   diffWatchers.disposeAll()
   orchestrator?.dispose()
   voice?.dispose()
@@ -380,6 +390,8 @@ ipcMain.handle('pane-command', (_e, cardId: string) => spine.paneCommand(cardId)
 ipcMain.handle('pane-cwd', (_e, cardId: string) => spine.paneCwd(cardId))
 ipcMain.handle('load-workspace', () => workspace.load())
 ipcMain.on('save-workspace', (_e, snapshot: MultiProjectSnapshot) => workspace.save(snapshot))
+ipcMain.handle('load-issue-store', () => issues.snapshot())
+ipcMain.handle('issue-action', (_e, action: IssueActionRequest) => issues.apply(action))
 
 ipcMain.handle('kill-card', (_e, cardId: string) => {
   ptys.kill(cardId)

@@ -187,7 +187,26 @@ export class Orchestrator {
       void this.bus.sendToAgent(
         m.ownerId,
         `You've been assigned issue "${m.detail ?? m.issueId}". Run get_issue to read it, do the work, ` +
-          `self-audit (adversarial subagents), then mark it in_review. See your mastermind-worker skill.`,
+          `self-audit (adversarial subagents), then mark it done. See your mastermind-worker skill.`,
+      )
+      return
+    }
+    if (m.kind === 'issue-done' || m.kind === 'issue-blocked') {
+      // A worker hit a terminal state — notify the lead (no polling). Symmetric
+      // with the assignment nudge: the mastermind is the routing hub.
+      const lead = this.deps
+        .getState()
+        ?.cards.find((c) => c.role === 'lead' && c.projectId === m.projectId)
+      if (!lead) return
+      const freed = m.ownerId ? ` Worker card ${m.ownerId} is now free.` : ''
+      void this.bus.sendToAgent(
+        lead.id,
+        m.kind === 'issue-done'
+          ? `Issue "${m.detail ?? m.issueId}" is DONE.${freed} Re-check list_issues and assign any ` +
+              `newly-unblocked issue to a free worker. When every issue is done, run your outcome ` +
+              `self-audit and set the sprint to done.`
+          : `Issue "${m.detail ?? m.issueId}" is BLOCKED — the worker hit a wall (see its comment). ` +
+              `Decide: reassign it, adjust the issue, or escalate to the human.`,
       )
       return
     }

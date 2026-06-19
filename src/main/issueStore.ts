@@ -315,6 +315,19 @@ export class IssueStore {
         const issue = s.issues.find((x) => x.id === action.id)
         if (!issue) return fail('no such issue')
         issue.status = action.status
+        // A worker reaching a terminal state notifies the lead (no polling): done
+        // → assign the next frontier / finish the sprint; blocked → unstick it.
+        if (action.status === 'done' || action.status === 'blocked') {
+          const plan = s.plans.find((p) => p.id === issue.planRef)
+          const sprint = plan && s.sprints.find((sp) => sp.id === plan.sprintRef)
+          this.milestone({
+            kind: action.status === 'done' ? 'issue-done' : 'issue-blocked',
+            projectId: sprint?.projectId ?? '',
+            issueId: issue.id,
+            ownerId: issue.owner ?? undefined,
+            detail: issue.title,
+          })
+        }
         return ok(issue.id)
       }
 

@@ -787,7 +787,7 @@ export interface IssueSnapshot {
 /// `plan-ready` (a sprint's plan was approved → spawn a lead); the others are
 /// wired as the cascade grows.
 export interface IssueMilestone {
-  kind: 'plan-ready' | 'issue-assigned' | 'sprint-ready' | 'issue-done' | 'outcome-verified'
+  kind: 'plan-ready' | 'issue-assigned' | 'issue-done' | 'issue-blocked' | 'sprint-ready' | 'outcome-verified'
   projectId: string
   sprintId?: string
   issueId?: string

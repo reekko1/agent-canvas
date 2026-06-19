@@ -313,6 +313,30 @@ export class AgentIssueMcp {
           )
         },
       )
+
+      server.registerTool(
+        'get_plan',
+        {
+          description:
+            "Read a plan's full blueprint — overview, stack, structure, dependency graph, and non-goals. Read the approved plan (its id comes from list_sprints) BEFORE you decompose it, so your issues faithfully cover what the planner actually wrote, not just the sprint outcome.",
+          inputSchema: { id: z.string().describe('The plan id (from list_sprints)') },
+        },
+        async ({ id }) => {
+          const loc = locatePlan(id)
+          if ('error' in loc) return failResult(loc.error)
+          const { plan } = loc
+          return okResult({
+            id: plan.id,
+            sprintRef: plan.sprintRef,
+            overview: plan.overview,
+            stack: plan.stack,
+            structure: plan.structure,
+            deps: plan.deps,
+            nonGoals: plan.nonGoals,
+            approved: plan.approved,
+          })
+        },
+      )
     }
 
     // ── Worker tools (advances its assigned issues; never self-claims) ────────

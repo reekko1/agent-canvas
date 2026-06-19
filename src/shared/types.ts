@@ -634,7 +634,6 @@ export type IssueStatus =
   | 'claimed'
   | 'in_progress'
   | 'blocked'
-  | 'in_review'
   | 'done'
 
 /// An audit verdict on an issue (gate output). APPROVED clears it; ISSUES carries

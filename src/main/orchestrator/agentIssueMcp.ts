@@ -48,7 +48,7 @@ export interface AgentIssueMcpDeps {
   ) => Promise<{ ok: boolean; workerIds: string[]; message?: string }>
 }
 
-const STATUSES = ['backlog', 'ready', 'claimed', 'in_progress', 'blocked', 'in_review', 'done'] as const
+const STATUSES = ['backlog', 'ready', 'claimed', 'in_progress', 'blocked', 'done'] as const
 const SPRINT_STATES = [
   'DRAFT', 'PLAN_REVIEW', 'APPROVED', 'DECOMPOSED', 'EXECUTING', 'OUTCOME_REVIEW', 'DONE',
 ] as const
@@ -345,7 +345,7 @@ export class AgentIssueMcp {
         'update_issue_status',
         {
           description:
-            "Advance an issue assigned to you: in_progress while working, in_review once the work is done AND you've self-audited it (spawn adversarial subagents to refute your work first), done when accepted.",
+            "Advance an issue assigned to you: in_progress while working, then done once the work is finished AND you've self-audited it (spawn adversarial subagents to refute your work first).",
           inputSchema: {
             id: z.string().describe('The issue id (one assigned to you)'),
             status: z.enum(STATUSES).describe('The new status'),

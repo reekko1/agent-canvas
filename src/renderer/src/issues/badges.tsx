@@ -83,7 +83,6 @@ export const ISSUE_STATUS_META: Record<IssueStatus, { label: string; color: stri
   claimed: { label: 'Claimed', color: 'var(--status-waiting)' },
   in_progress: { label: 'In progress', color: 'var(--status-running)' },
   blocked: { label: 'Blocked', color: 'var(--status-blocked)' },
-  in_review: { label: 'In review', color: 'var(--status-stalled)' },
   done: { label: 'Done', color: 'var(--status-done)' },
 }
 
@@ -93,7 +92,6 @@ export const ISSUE_STATUSES: IssueStatus[] = [
   'claimed',
   'in_progress',
   'blocked',
-  'in_review',
   'done',
 ]
 

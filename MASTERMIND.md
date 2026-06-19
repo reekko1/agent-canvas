@@ -7,14 +7,17 @@
 > prose-plan-vs-tracker split, non-skippable audit gates, `clear-fix`/`needs-decision`
 > classification, adversarial multi-lens audits) and lifts it onto a live, visible, parallel
 > fleet. The existing `src/main/orchestrator/` (Agent SDK loop + in-process MCP over a command
-> bus) is the seam this grows from. Nothing here ships until the schema (below) is built.
+> bus) is the seam this grows from. **Milestone 1** (the visible per-canvas substrate) and the
+> **Milestone 2 worker channel** are now implemented; the roles + mastermind below are the
+> remaining build.
 
 ## The one idea
 
 A coding-agent fleet that **steers itself toward a product vision**, where the top-level
 orchestrator — the **mastermind** — never does any work with its own hands. It does not plan,
 write plans, write code, audit, or even flip a status. It **designs an org and staffs it**, then
-trusts correctness because it built independent verification into *every* seam.
+**trusts the flow** — every role audits its own output before handing it off, so the mastermind
+only ever sees *validated milestones* ("plan ready", "sprint ready", "issue done").
 
 The whole system is one loop: measure the gap between the product as it is and the product as the
 vision describes it → close the most valuable part of that gap → re-measure → forever. The vision
@@ -24,8 +27,9 @@ is an asymptote; it is approached, never reached.
 >
 > 1. **Trust through structure, not inspection.** Correctness is not policed by a smart overseer
 >    (that overseer becomes the bottleneck and the single point of failure). It is an *emergent
->    property of the org chart*: every actor that produces something has an independent, hired
->    auditor checking it — including the lead. The mastermind's skill is org design, not oversight.
+>    property of the org chart*: **every role audits its own output — adversarially, via its own
+>    subagents — before handing it off**, so nothing reaches the next role (or the mastermind)
+>    unvalidated. The mastermind's skill is org design, not oversight.
 > 2. **The orchestrator is pure control plane; agents are the entire data plane.** Producing or
 >    mutating content (plans, code, audits, fixes, statuses) is the data plane and belongs to
 >    agents. Deciding, routing, gating, hiring, firing is the control plane and is all the
@@ -37,8 +41,8 @@ is an asymptote; it is approached, never reached.
 |---|---|---|---|
 | **Vision** | Per canvas (one product/repo). The purpose, end-state experience, principles/taste, and anti-vision (markdown body). The north star. | **Human** (sole writer) | Never "done" — an asymptote |
 | **Sprint** | One outcome-bounded plan. The unit the mastermind reasons over. | Conceived by a strategist, staffed by the mastermind | Done when its **outcome is verified**, never when time elapses |
-| **Plan** | The sprint's approved blueprint: stack, deps, structure. Prose + dependency graph. | The **lead** | Approved (gate) before any decomposition |
-| **Issues** | The lead's decomposition of the approved plan into executable DAG nodes. | The **lead** creates; a **worker** owns each | Closed when done *and* audited |
+| **Plan** | The sprint's blueprint: stack, deps, structure. Prose + dependency graph. | The **planner** (later: + framework-expert subagents) | Self-audited by the planner before handoff to the lead |
+| **Issues** | The lead's decomposition of the delivered plan into executable DAG nodes. | The **lead** creates; a **worker** owns each | Closed when done *and* self-audited by its worker |
 
 `Vision → Sprints → Plans → Issues` is a single chain. Every sprint cites which part of the
 vision it closes; every issue traces up to a plan, a sprint, and ultimately the vision. Every
@@ -99,35 +103,59 @@ detected.
 | Role | Owns / does | Verbs | Never |
 |---|---|---|---|
 | **Human** | The vision; final authority; court of last resort. | Author/steward vision; arbitrate gap-priority; commit vision amendments. | — |
-| **Mastermind** (the orchestrator) | The org and its verification structure. Outcome-based. | `hire(role, skills, tools, brief)`, `fire(agent)`, `observe()` (read-only), `escalate(decision)`. Writes only the **fleet** (process lifecycle), never the blackboard. | Plan, code, audit, assign, or flip a status. |
-| **Strategist** | Reads vision-vs-reality, proposes the next sprint to close the largest-leverage gap. | Gap analysis → next-sprint proposal. | Execute. |
-| **Lead** (the "CEO") | Turns an approved plan into issues; assigns and coordinates. Is itself audited. | `create_issue`, `assign`, `set_deps`, `create_phase`. | Author the vision; bless its own plan. |
-| **Worker** | One issue at a time; owns *its own* status. | `update_status` (own issues only), `comment`, `report_blocker`. | Touch another worker's issue or write a verdict. |
-| **Auditor** | Independent verification at every seam. Adversarial and diverse. | `post_verdict(APPROVED \| ISSUES, findings)`. | Write work-status or code. |
+| **Mastermind** (the orchestrator) | The org. Outcome-based; sees only validated milestones. | `hire(role, brief)`, `fire(agent)`, `observe()` (read-only milestone feed), `escalate(decision)`. Writes only the **fleet** (process lifecycle). | Plan, code, audit, assign, or flip a status. |
+| **Strategist** *(optional)* | Reads vision-vs-reality, proposes the next sprint to close the largest-leverage gap. | Gap analysis → next-sprint proposal. | Execute. |
+| **Planner** | Researches and **writes the plan**; self-audits it before handoff. Later: framework-expert subagents. | `get_vision`, read, `create_plan`, then **self-audit → deliver**. | Decompose, assign, or touch issues. |
+| **Lead** | Decomposes the delivered plan into issues, sets deps, requests workers, assigns; self-audits the distribution. | `create_issue`, `set_deps`, `assign_issue`, `request_workers`, then **self-audit → deliver**. | Write the plan or the vision. |
+| **Worker** | One assigned issue at a time; self-audits its work before delivering. | `update_status` (own only), `report_blocker`, `comment`; **self-audit → `done`**. | Touch another worker's issue. |
 
-The mastermind's only real intelligence is **how it reacts to failure** and **which gap to
-close next** — and even those it delegates (strategist proposes, auditor checks, mastermind
-staffs). Everything else is structure.
+**Auditing is not a role — it's a step in every role.** Planner, lead, and worker each, as the
+final step of their skill, spawn their own **adversarial subagents** to audit their output (the
+plan, the issue distribution, the work) *before* handing it off. The mastermind hires no auditor
+and gates nothing; it trusts the flow because the audit is built into each role's workflow.
+
+The mastermind's only real intelligence is **how it reacts to a stalled milestone** and **which
+gap to close next** — and even those it delegates (the strategist proposes, each role self-audits,
+the mastermind only staffs). Everything else is structure.
+
+## What the mastermind sees
+
+The mastermind lives on a feed of **validated milestones** — never the work that produced them.
+Each role, after its self-audit passes and it delivers, leaves a green checkmark the mastermind
+reads (read-only) and wakes on:
+
+| Signal | Store fact | Mastermind reacts by |
+|---|---|---|
+| **plan ready** | planner self-audited → `plan.approved` → sprint `APPROVED` | spawn / notify the **lead** |
+| **sprint ready** | lead self-audited the distribution + assigned → `EXECUTING` | let it run |
+| **issue done** | worker self-audited → `status: done` | tally progress |
+| **outcome verified** | all issues done → sprint `DONE` | recognize completion / next gap |
+| *(stalled)* | `blocked` / `REALIGNMENT_PENDING` lingering | **escalate to the human** |
+
+It never sees a draft, an in-progress diff, or a self-audit report. Because it ingests only
+validated milestones, its context stays **tiny** (org state + the signal feed) — which is exactly
+what lets it supervise a *large* fleet without drowning. It operates at milestone altitude, never
+raw-work altitude: cheap, robust, and it scales because it refuses to look down.
 
 ## The verification gates
 
-A production step with no auditor is the hole through which false success escapes. So every
-production in a sprint has an independent checker. The mastermind's obsession is **coverage** —
-ensuring all of these gates *exist*, not judging the work itself.
+A production delivered without a self-audit is the hole through which false success escapes. So
+every production in a sprint ends with the producing role auditing its *own* output before handoff
+— the four gates live **inside** the roles, not at external checkpoints:
 
-| Gate | When | Question | Consequence of failure |
+| Gate | Self-audited by | Question | On failure |
 |---|---|---|---|
-| **#0 Conception** | Before planning | Does this sprint's outcome serve the **vision**? | Don't start it. |
-| **#1 Plan approval** | After the lead drafts the plan, before decomposition | Is the *structure* sound — stack right per current docs, deps coherent, decomposition-shape valid? | Re-brief the lead. (Cheapest, highest-leverage gate.) |
-| **#2 Decomposition fidelity** | After plan → issues, before execution | Do the issues *faithfully and completely* cover the plan — every step has exactly one issue, no drops, no hallucinated extras, deps preserved? | Re-decompose. (NarraOS `/start` Step 6 proved leads drop/invent nodes.) |
-| **#3 Per-issue audit** | At each issue's completion | Is this unit correct and **in-scope** (later-phase gaps are deferred, not blocking)? | `clear-fix` → dispatch a fixer; `needs-decision` → escalate to human. |
-| **#4 Sprint-outcome audit** | When all issues are done | Does the **assembled whole** achieve the outcome? (Parts passing ≠ whole succeeding.) | Re-staff; the sprint is not DONE until this passes. |
+| **#0 Conception** | strategist / human | Does this sprint's outcome serve the **vision**? | Don't start it. |
+| **#1 Plan** | **planner**, before handoff | Is the *structure* sound — stack right per current docs, deps coherent, shape valid? | The planner revises. (Cheapest, highest-leverage gate.) |
+| **#2 Distribution** | **lead**, before requesting workers | Do the issues *faithfully and completely* cover the plan — no drops, no hallucinated extras, deps preserved? | The lead re-decomposes. (NarraOS `/start` Step 6 proved decomposition drifts.) |
+| **#3 Per-issue** | **worker**, before `done` | Is this unit correct and **in-scope** (later-phase gaps are deferred, not blocking)? | The worker fixes; genuine ambiguity → escalate to the human. |
+| **#4 Outcome** | **lead**, when the DAG drains | Does the **assembled whole** achieve the outcome? (Parts passing ≠ whole succeeding.) | Fix or escalate; the sprint isn't DONE until it passes. |
 
-Audits are run as multi-lens **adversarial** reviews (find → verify each finding is `real` *and*
-`inScope` → adjudicate `clear-fix` vs `needs-decision`), per the NarraOS `audit-phase` workflow.
-`clear-fix` is dispatched to a fixer agent — the mastermind never applies it itself.
-`needs-decision` is escalated to the human (optionally after a decision-support panel lays out
-options).
+Each self-audit is a multi-lens **adversarial** review the role runs over its *own* output —
+fresh-context subagents told to *refute* it (find → verify each finding is `real` *and* `inScope`),
+the NarraOS `audit-phase` pattern turned inward. The role fixes what survives before delivering; a
+genuine `needs-decision` (a tradeoff it can't resolve) is escalated to the human. The mastermind
+applies nothing — it only sees the resulting validated milestone.
 
 ## The substrate — one store, two faces
 
@@ -153,16 +181,21 @@ schema.
 ### The MCP surface *is* the org chart
 
 The agent-facing MCP server is **role-scoped**, and that scoping *is* the authority model from
-the org chart — enforced at the tool layer, not by good behavior:
+the org chart — enforced at the tool layer, not by good behavior. The same `role` flag drives both
+the tool grant (capability) and the role's skill (behavior):
 
-- A **worker** physically cannot flip another worker's status (its `update_status` is restricted
-  to issues it owns).
-- An **auditor** physically cannot write work-status; only verdicts.
-- The **lead**'s `create_issue` / `set_deps` unlock only *after* the plan passes gate #1.
+- A **planner** has `create_plan` but no `create_issue` — it writes the blueprint, never decomposes.
+- A **lead** has `create_issue` / `set_deps` / `assign_issue` / `request_workers` but no
+  `create_plan` — it decomposes a *delivered* plan, never authors one.
+- A **worker** physically cannot flip another worker's status (its `update_status` is restricted to
+  issues it owns).
 - The **mastermind** has *zero* issue-mutation tools and no `Edit`/`Write`; it acts only through
-  the command bus (hire/fire).
+  the command bus (hire/fire) and reads the board.
 - The **vision** is human-write-only and read by everyone; agents may *propose* amendments, only
   the human commits them.
+
+There is no auditor grant — auditing is each role spawning its *own* subagents, which need no
+issue-store tools (they read the work and report back to their parent role).
 
 **Identity is the linchpin.** Each card gets an identity token at launch (injected by
 `src/main/spine/` when it spawns the `claude` in tmux). The MCP server authorizes every call by
@@ -177,8 +210,9 @@ Keep these distinct:
   `src/main/spine/` ingests Claude Code hook events into card status.
 - **MCP = work progress** (did the unit advance, pass audit).
 
-The mastermind reads both — hooks tell it a card is stuck *breathing*; MCP tells it the *work*
-stalled.
+The mastermind doesn't read either for *work* — it reacts to the board's **milestone
+transitions** (above). Liveness is only its stalled-card detector: a card breathing but producing
+no milestone is the cue to escalate.
 
 ## Data model (sketch)
 
@@ -194,11 +228,14 @@ VisionVersion { id, projectId, n, body(md), principles[], antiVision[], rational
                 class:'clarification'|'redirection'|'expansion',
                 author:'human', committedAt }              // immutable, append-only
 Sprint        { id, projectId, visionVersionRef, outcome(definition-of-done), state, gapRationale }
-Plan          { id, sprintRef, overview, stack[], structure, deps(DAG), nonGoals[], approved }
+Plan          { id, sprintRef, overview, stack[], structure, deps(DAG), nonGoals[], approved } // approved = planner self-audit passed
 Issue    { id, planRef, title, description, verify(acceptance), status, owner,
            phase, deps[], labels[], kind:'task'|'audit-gate'|'decision',
            verdicts[], comments[], intentRef }
 ```
+
+`verdicts[]` is the **self-audit trail** — the producing role records its own audit outcome there,
+so the board (and you) can see *that* a role audited and what it found, not just the final status.
 
 **Sprint state machine** (this *is* the mastermind's decision input — "what to do next"):
 
@@ -234,19 +271,21 @@ where each sprint sits and reacts by staffing — plan stuck in `PLAN_REVIEW` �
 | Blind `kill $PPID` shell phase-runner loop | A **conversational, watchable** mastermind you can talk to (NL + voice) |
 | Two-way comms via hook-scraping + text injection | Structured **MCP** tool calls |
 | Single active workflow | **Per-project** concurrent sprints |
-| Human approves plan + answers `needs-decision` | Mastermind staffs; **auditor verdicts are the gates**; human owns only the vision + escalations |
+| Human approves plan + answers `needs-decision` | Each role **self-audits before handoff**; the mastermind staffs and sees only validated milestones; the human owns the vision + escalations |
 | No re-grounding | Verifier checks each issue's premise against the live repo before dispatch |
 
 ## Honest risks & load-bearing conditions
 
 These are the conditions under which "trust the flow" is *earned* rather than blind:
 
-- **Auditor independence/diversity.** If the auditor shares the worker's model and blind spots,
-  "trust the flow" = "trust a yes-man." Auditors must be a different lens, adversarially told to
-  refute, ideally voting.
-- **Verification coverage.** A seam without an auditor is the escape hatch for false success. The
-  mastermind hunts *uncovered productions*, not bad work.
-- **Vision calibration is the hardest authoring skill.** Too vague → auditors can't judge "does
+- **Self-audit independence is the whole ballgame.** A role auditing its *own* output is weaker
+  than a separate auditor — even fresh subagents can inherit the producer's blind spots. So each
+  role's skill must make the audit subagents genuinely **adversarial and diverse** (told to
+  *refute*, multiple lenses), never a rubber stamp. "Trust the flow" holds exactly to that degree;
+  the **next role** consuming the output and the **human** are the backstops beyond it.
+- **The self-audit must live in every role's skill.** A role whose skill skips or weakens its audit
+  step *is* the hole — there's no external auditor to catch it. Skill quality = trust.
+- **Vision calibration is the hardest authoring skill.** Too vague → no self-audit can judge "does
   this serve it?" Too concrete → it becomes a finite spec you can *complete*, killing the
   asymptote. State qualities and direction, not enumerated features.
 - **A wrong vision (or wrong gap analysis) marches the system confidently in the wrong direction
@@ -263,7 +302,7 @@ These are the conditions under which "trust the flow" is *earned* rather than bl
 - **Mid-plan version races** — the human commits a new version while a sprint is being planned
   against the old one. Don't lock; **pin** the version the sprint started under and let the
   propagation pass reconcile it after.
-- **"Distance to vision" is assessed, not computed** — a recurring independent auditor judgment,
+- **"Distance to vision" is assessed, not computed** — a recurring independent judgment,
   not a number.
 - **Atomic claims** — if workers self-claim ready issues, test-and-set (a real transactional
   store, not a JSON blob) prevents two grabbing one.
@@ -275,8 +314,8 @@ These are the conditions under which "trust the flow" is *earned* rather than bl
 
 ## Open questions
 
-- **Mastermind's failure repertoire.** On terminal failure, does it fire-and-rehire the same
-  role, escalate, or *restructure* the org (insert an auditor, split a role, change the skill
+- **Mastermind's failure repertoire.** On a stalled milestone, does it fire-and-rehire the same
+  role, escalate, or *restructure* (split a role, strengthen a role's self-audit skill, change the
   loadout)? This — how a board reacts to a failing company — is the only real reasoning the
   mastermind needs.
 - **Strategist as a distinct role vs. a mastermind function.** Is gap-analysis a hired agent or
@@ -287,7 +326,9 @@ These are the conditions under which "trust the flow" is *earned* rather than bl
 ## The summary in one breath
 
 You author the vision. A strategist reads the gap and proposes the next sprint. The mastermind
-stages and audits the org. The lead plans and decomposes into issues. Workers own them. Auditors
-gate every seam (0–4). The store holds all of it — visible to you, controllable by agents over
-MCP. Your scarce attention concentrates entirely at the top, *because* everything beneath is
-delegated and independently verified. The product approaches its own vision, forever.
+stages the org and trusts the flow — it sees only validated milestones. The planner writes and
+self-audits the plan; the lead decomposes and self-audits the distribution; workers execute and
+self-audit their work — each spawning adversarial subagents before it hands off. The store holds
+all of it, visible to you and controllable by agents over MCP. Your scarce attention concentrates
+entirely at the top, *because* every role validates its own output before the next one — or the
+mastermind — ever sees it. The product approaches its own vision, forever.

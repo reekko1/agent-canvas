@@ -23,7 +23,7 @@ import { SheetRail } from './SheetRail'
 import { CardLayer } from './CardLayer'
 import { CardContextMenu } from './CardContextMenu'
 import { DiffSheet } from './DiffSheet'
-import { IssueSheet } from '@/issues/IssueSheet'
+import { IssueConstellation } from '@/issues/IssueConstellation'
 import { VisionSheet } from '@/issues/VisionSheet'
 import { useIssueBoard } from '@/issues/useIssueBoard'
 import { ProjectToolbar } from './ProjectToolbar'
@@ -380,8 +380,10 @@ export function Canvas() {
     winH,
     stackScroll,
     setStackScroll,
-    // The master reserves the sheet channel when ANY right sheet is open.
-    diffCollapsed: rightSheet === null,
+    // The master reserves the sheet channel for the right-edge sheets (diff /
+    // vision). The issues view is a full-viewport takeover, not a side sheet, so
+    // it reserves no width — it overlays the whole canvas.
+    diffCollapsed: rightSheet === null || rightSheet === 'issues',
   })
 
   const switchProject = useCallback(
@@ -490,14 +492,15 @@ export function Canvas() {
         onCollapse={() => setRightSheet(null)}
       />
 
-      {/* Issue board: the sprint → plan → issue sheet, sharing the diff's channel. */}
-      <IssueSheet
-        activeProjectId={proj.activeProjectId}
-        board={issueBoard}
-        sheetW={sheetW}
-        collapsed={rightSheet !== 'issues'}
-        onCollapse={() => setRightSheet(null)}
-      />
+      {/* Issue constellation: the full-viewport takeover (the master-stack dims
+          and recedes behind it). Unlike diff/vision, not a right-edge sheet. */}
+      {rightSheet === 'issues' && (
+        <IssueConstellation
+          projectId={proj.activeProjectId}
+          board={issueBoard}
+          onClose={() => setRightSheet(null)}
+        />
+      )}
 
       {/* With titleBarStyle: hiddenInset there is no title bar — this strip is
           how the window gets dragged. The toolbars below are no-drag. */}

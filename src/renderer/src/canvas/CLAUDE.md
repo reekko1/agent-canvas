@@ -29,22 +29,25 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 - **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
   (disabled with no active canvas) + remote-access entry.
 - **SheetRail.tsx** — the floating **right** rail, mirror of `ActionRail`: the
-  toggles for the three right-edge sheets (diff + vision board + issue board). Each
-  button is `active` while its sheet is open and collapses it on a second click;
-  they live in the `RIGHT_GUTTER` channel so an open sheet stops short of them.
-  Carries the distance-to-vision note on the vision tooltip (the old ProjectToolbar
-  crown).
+  toggles for the diff drawer, the vision sheet, and the issues constellation
+  (diff + vision are right-edge sheets; issues is a full-viewport takeover). Each
+  button is `active` while its view is open and closes it on a second click; they
+  live in the `RIGHT_GUTTER` channel so an open sheet stops short of them. Carries
+  the distance-to-vision note on the vision tooltip (the old ProjectToolbar crown).
 - **RenameDialog.tsx** — the rename-a-card modal (Electron has no
   `window.prompt`); click-away / Esc cancel, Enter / Rename commit.
 - **DiffSheet.tsx** — the right-edge diff drawer; keyed by active project id,
   watches `active.dir`. Toggled from `SheetRail` (no edge tab of its own);
   collapse parks it, the caller dropping `activeDir` tears it down.
-- **VisionSheet / IssueSheet** (in `src/renderer/src/issues/`, both mounted by
-  Canvas) — the two Mastermind right-edge sheets (the north-star vision board and
-  the sprint → plan → issue board), sharing the diff's width channel. Canvas's
-  `rightSheet` (`'diff' | 'vision' | 'issues' | null`) makes all three mutually
-  exclusive (toggled from `SheetRail`); the master reserves the sheet width when
-  any is open. See `src/renderer/src/issues/CLAUDE.md`.
+- **VisionSheet / IssueConstellation** (in `src/renderer/src/issues/`, both
+  mounted by Canvas) — the two faces of the Mastermind store. `VisionSheet` is the
+  calm north-star **right-edge sheet** (shares the diff's width channel);
+  `IssueConstellation` is the immersive **full-viewport takeover** (a vision-sun
+  with the sprint's issue-DAG orbiting it). Canvas's `rightSheet`
+  (`'diff' | 'vision' | 'issues' | null`) makes all mutually exclusive (toggled
+  from `SheetRail`). The master reserves sheet width for diff/vision; **issues
+  reserves none** (`diffCollapsed: rightSheet === null || === 'issues'`) — the
+  takeover overlays the whole canvas. See `src/renderer/src/issues/CLAUDE.md`.
 - **CardContextMenu.tsx** — right-click-a-card menu: Rename / Close card.
   Dismisses on click-away or Esc.
 - **ProjectToolbar.tsx** — top canvas switcher: a dropdown naming the active

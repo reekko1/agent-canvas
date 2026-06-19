@@ -540,3 +540,79 @@
   /* The one-shot ripple is pure flourish — drop it entirely. */
   .issue-land { display: none; }
 }
+
+/* ── The Constellation — the issues takeover ──────────────────────────────────
+   The issues view breaks out of the side sheet into a full-viewport gravity
+   well: the vision is a sun at the centre, the selected sprint's issue-DAG
+   orbits it as concentric wave-rings, and the bright frontier ring sweeps inward
+   as waves land — the system contracting toward its north star (the asymptote,
+   made visible). Deep space, luminous orbs, glowing edges that flow inward. All
+   compositor-only; reduced-motion freezes it into a legible static map. */
+
+/* The takeover fades up over the dimmed, receded master-stack. */
+@keyframes takeover-in { from { opacity: 0; } to { opacity: 1; } }
+.takeover-in { animation: takeover-in 0.32s ease both; }
+@keyframes constellation-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.constellation-in { animation: constellation-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+/* The star field — three parallax layers of faint dots over deep space, drifting. */
+@keyframes star-drift {
+  from { background-position: 0 0, 0 0, 0 0; }
+  to   { background-position: -140px -90px, 90px -160px, -50px 120px; }
+}
+.starfield {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgb(255 255 255 / 0.7), transparent),
+    radial-gradient(1px 1px at 70% 60%, rgb(160 220 255 / 0.6), transparent),
+    radial-gradient(1.5px 1.5px at 45% 80%, rgb(255 255 255 / 0.4), transparent);
+  background-size: 260px 260px, 360px 360px, 200px 200px;
+  background-repeat: repeat;
+  animation: star-drift 140s linear infinite;
+}
+
+/* The whole constellation drifts as one rigid body — slow enough to read as
+   "alive", not as spinning. Edges + orbs ride it together so they stay joined. */
+@keyframes constellation-spin { to { transform: rotate(360deg); } }
+.constellation-spin { animation: constellation-spin 220s linear infinite; transform-origin: center; }
+
+/* The vision-sun — a luminous core that breathes; its outer charge halo brightens
+   with the sprint's progress (set inline via opacity). */
+@keyframes sun-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.04); }
+}
+.sun-breathe { animation: sun-breathe 6s ease-in-out infinite; }
+
+/* The frontier ring — the bright band of light at the live wave's radius. */
+@keyframes frontier-ring {
+  0%, 100% { opacity: 0.28; }
+  50%      { opacity: 0.6; }
+}
+.frontier-ring { animation: frontier-ring 3.6s ease-in-out infinite; }
+
+/* A dependency edge flowing inward (dep → dependent, toward the goal). */
+@keyframes edge-flow { to { stroke-dashoffset: -12; } }
+.edge-flow {
+  stroke-dasharray: 3 9;
+  animation: edge-flow 1.2s linear infinite;
+}
+
+/* An orb's soft idle twinkle (the calm states) — barely-there opacity breath so
+   the field shimmers without the loud per-status pulses. */
+@keyframes orb-twinkle { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
+.orb-twinkle { animation: orb-twinkle 4.5s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .starfield,
+  .constellation-spin,
+  .sun-breathe,
+  .frontier-ring,
+  .edge-flow,
+  .orb-twinkle,
+  .constellation-in,
+  .takeover-in { animation: none; }
+  .edge-flow { stroke-dasharray: none; }
+}

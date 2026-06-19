@@ -4,7 +4,8 @@ import { VisionPanel } from './VisionPanel'
 import { DistancePanel } from './DistancePanel'
 import type { IssueBoardApi } from './useIssueBoard'
 
-/// The vision board (the IssueBoard analogue for the north star): the
+/// The vision board (the north-star sheet, sibling of the issues constellation):
+/// the
 /// distance-to-vision assessment up top, then the full vision — current version,
 /// the immutable "git for intent" timeline, and the commit composer — given room
 /// to breathe in its own sheet. v1 is human-driven; committing is the sole

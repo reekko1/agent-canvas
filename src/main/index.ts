@@ -12,6 +12,7 @@ import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import { Orchestrator } from './orchestrator/manager'
 import { AgentBrowserMcp } from './orchestrator/agentBrowserMcp'
+import { AgentIssueMcp } from './orchestrator/agentIssueMcp'
 import { BrowserController } from './orchestrator/browserController'
 import { SonioxVoice, validateSonioxKey } from './voice/soniox'
 import { storeSonioxKey } from './voice/keyStore'
@@ -283,6 +284,19 @@ app.whenReady().then(() => {
   agentBrowserMcp.start(spine.browserMcpPort, (port) => {
     spine.attachBrowserMcp(port)
     console.log(`[browser-mcp] ready on 127.0.0.1:${port}`)
+  })
+  // Agent-facing issue tools: a second loopback MCP server attached per card via
+  // --mcp-config, talking directly to the IssueStore (main is the single arbiter),
+  // scoped to the caller card's canvas. The worker slice of Milestone 2.
+  const agentIssueMcp = new AgentIssueMcp({
+    apply: (action) => issues.apply(action),
+    snapshot: () => issues.snapshot(),
+    getState: () => spine.remote.getLatestState(),
+    token: spine.token,
+  })
+  agentIssueMcp.start(spine.issueMcpPort, (port) => {
+    spine.attachIssueMcp(port)
+    console.log(`[issue-mcp] ready on 127.0.0.1:${port}`)
   })
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):

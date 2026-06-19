@@ -35,6 +35,8 @@ interface SpineConfig {
   /** The agent-browser MCP server's port — persisted for the same reason as the
    *  sink: surviving tmux sessions read their mcp.json url once at launch. */
   browserMcpPort?: number
+  /** The agent-issue MCP server's port — persisted for the same reason. */
+  issueMcpPort?: number
 }
 
 function loadConfig(): SpineConfig {
@@ -136,6 +138,19 @@ export class Spine {
     this.config.browserMcpPort = port
     saveConfig(this.config)
     this.adapter.stageBrowserMcp(SPINE_DIR, port, this.config.token)
+  }
+
+  /** The agent-issue MCP server's last-bound port (preferred on restart). */
+  get issueMcpPort(): number | undefined {
+    return this.config.issueMcpPort
+  }
+
+  /** Persist the agent-issue MCP port and stage its per-card `--mcp-config`
+   *  (the adapter writes issue-mcp.json alongside the browser one). */
+  attachIssueMcp(port: number): void {
+    this.config.issueMcpPort = port
+    saveConfig(this.config)
+    this.adapter.stageIssueMcp(SPINE_DIR, port, this.config.token)
   }
 
   /** The single source of truth for a card's tmux session name. The one mapping

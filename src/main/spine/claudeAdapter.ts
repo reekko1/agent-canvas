@@ -25,6 +25,9 @@ export class ClaudeAdapter {
    *  `--mcp-config`. Set by stageBrowserMcp() once the server binds; null until
    *  then (a card launched before it simply has no browser tools). */
   private mcpConfigFile: string | null = null
+  /** The materialized agent-issue MCP config (--mcp-config) — the worker tools
+   *  for the Mastermind board. Set by stageIssueMcp() once that server binds. */
+  private issueMcpConfigFile: string | null = null
 
   /** Events acked instantly (status/feed material). PermissionRequest is
    *  configured separately as the held interactive channel. */
@@ -123,14 +126,44 @@ export class ClaudeAdapter {
     console.log(`[adapter] wrote browser MCP config (port ${port}) → ${file}`)
   }
 
+  /** Materialize the agent-issue MCP config — `<dir>/issue-mcp.json`, an HTTP MCP
+   *  server pointed at the loopback AgentIssueMcp — attached to every card via
+   *  `--mcp-config` alongside the browser config. Same identity/token scheme as
+   *  the browser config; written once the server's port is known, rebuilt each call. */
+  stageIssueMcp(dir: string, port: number, token: string): void {
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'issue-mcp.json')
+    const config = {
+      mcpServers: {
+        issues: {
+          type: 'http',
+          url: `http://127.0.0.1:${port}/mcp`,
+          headers: {
+            'X-Canvas-Card': `\${CANVAS_CARD_ID:-${UNKNOWN_CARD}}`,
+            'X-Canvas-Token': token,
+          },
+        },
+      },
+    }
+    writeFileSync(file, JSON.stringify(config, null, 2))
+    chmodSync(file, 0o600) // carries the sink token — owner-readable only
+    this.issueMcpConfigFile = file
+    console.log(`[adapter] wrote issue MCP config (port ${port}) → ${file}`)
+  }
+
   launchCommand(initialPrompt?: string): string {
     const flags: string[] = []
     // Sink-not-ready (no settings) shouldn't happen, but degrade to bare claude.
     if (this.settingsFile) flags.push(`--settings ${shellQuote(this.settingsFile)}`)
     // Every agent card is equipped with the curated skill plugin.
     if (this.pluginDir) flags.push(`--plugin-dir ${shellQuote(this.pluginDir)}`)
-    // …and with the browser MCP server (see-and-control its own browser card).
-    if (this.mcpConfigFile) flags.push(`--mcp-config ${shellQuote(this.mcpConfigFile)}`)
+    // …and with the per-card MCP servers (browser control + the issue board).
+    // `--mcp-config` is variadic (`<configs...>`), so both files ride one flag —
+    // no repeated flag needed, and the trailing `--` (below) still ends options.
+    const mcpConfigs = [this.mcpConfigFile, this.issueMcpConfigFile].filter(
+      (f): f is string => !!f,
+    )
+    if (mcpConfigs.length) flags.push(`--mcp-config ${mcpConfigs.map(shellQuote).join(' ')}`)
     const base = flags.length ? `exec claude ${flags.join(' ')}` : 'exec claude'
     // An initial prompt makes the interactive session boot already working on
     // the task (`claude [prompt]`) — race-free vs. typing it in after launch.

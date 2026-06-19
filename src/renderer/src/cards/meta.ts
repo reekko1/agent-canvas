@@ -1,4 +1,4 @@
-import type { AgentTodo, CardEvent, CardKind, CardStatus } from '@shared/types'
+import type { AgentRole, AgentTodo, CardEvent, CardKind, CardStatus } from '@shared/types'
 
 // Status palette lives in index.css (:root tokens); loud = blocked/error.
 export const STATUS_COLORS: Record<CardStatus, string> = {
@@ -53,6 +53,9 @@ export interface CardData extends Record<string, unknown> {
   kind: CardKind
   /** Display name — defaults to "Agent N" for agents; user/orchestrator renameable. */
   name?: string
+  /** The agent's Mastermind role (planner/lead/worker) — drives its issue-MCP tool
+   *  grant. Absent = a plain agent (worker). Persisted via CardRecord. */
+  role?: AgentRole
   /** Current page — only for `kind === 'browser'`. Tracked live from the
    *  webview's navigation and persisted (the card reloads it on restore). */
   url?: string

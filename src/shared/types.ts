@@ -151,6 +151,12 @@ export type GitActionRequest =
 /// tmux/pty session at all (neutral chrome, never speaks to the spine).
 export type CardKind = 'agent' | 'shell' | 'browser'
 
+/// An agent card's role in the Mastermind org (MASTERMIND.md). `worker` is the
+/// default; `planner` writes the plan, `lead` decomposes the plan into issues and
+/// coordinates. Drives both the card's issue-MCP tool grant (capability) and —
+/// later — its skill (behavior).
+export type AgentRole = 'planner' | 'lead' | 'worker'
+
 /** The card-id sentinel a card sends when it has none — the `${CANVAS_CARD_ID:-…}`
  *  default the spine bakes into each card's browser MCP headers (claudeAdapter
  *  `stageBrowserMcp`) and the value the agent browser MCP guard treats as "no
@@ -176,6 +182,9 @@ export interface CardRecord {
   session?: string
   /** Display name (default "Agent N"), set by the user or the orchestrator. */
   name?: string
+  /** The agent's Mastermind role (planner/lead/worker). Absent = a plain agent,
+   *  treated as a worker by the issue MCP. Persisted so the org survives restart. */
+  role?: AgentRole
   /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
    *  (the live snapshot is transient and never persisted). */
   url?: string
@@ -247,6 +256,9 @@ export interface RemoteState {
     name: string
     /** agent (watched), shell (bare $SHELL), or browser (an in-app web view). */
     kind: CardKind
+    /** The agent's Mastermind role — the issue MCP resolves a card's tool grant
+     *  from this (absent = worker). */
+    role?: AgentRole
     status: CardStatus
     loud: boolean
     since: number // epoch seconds the status began
@@ -458,7 +470,7 @@ export type OrchestratorCommand =
   | {
       id: number
       cmd: 'spawnAgent'
-      payload: { canvasId?: string; folder?: string; prompt?: string; name?: string }
+      payload: { canvasId?: string; folder?: string; prompt?: string; name?: string; role?: AgentRole }
     }
   | { id: number; cmd: 'renameAgent'; payload: { cardId: string; name: string } }
   | { id: number; cmd: 'killCard'; payload: { cardId: string } }

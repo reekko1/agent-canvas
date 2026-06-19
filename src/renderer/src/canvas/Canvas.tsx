@@ -11,6 +11,7 @@ import { OrchestratorTracers } from '@/orchestrator/Tracer'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
 import type { BrowserNavPatch } from '@/cards/meta'
 import type {
+  AgentRole,
   CardKind,
   CardRecord,
   PermissionAskInfo,
@@ -200,13 +201,21 @@ export function Canvas() {
   )
 
   const makeCard = useCallback(
-    (cardId: string, folder: string, kind: CardKind, name?: string, url?: string): CanvasNode => ({
+    (
+      cardId: string,
+      folder: string,
+      kind: CardKind,
+      name?: string,
+      url?: string,
+      role?: AgentRole,
+    ): CanvasNode => ({
       id: cardId,
       type: 'card',
       data: {
         folder,
         kind,
         name,
+        role,
         url,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
@@ -221,7 +230,7 @@ export function Canvas() {
   const restoreItem = useCallback(
     (c: CardRecord): CanvasNode | null => {
       if (!c.folder) return null
-      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url)
+      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url, c.role)
       // Restore a browser's ownership link + reason so request_browser resolves
       // the same browser after a restart (agents reattach to live tmux sessions).
       node.data.ownerCardId = c.ownerCardId

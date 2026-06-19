@@ -47,12 +47,16 @@ export function buildCanvasServer(bus: CommandBus) {
 
   const spawnAgent = tool(
     'spawn_agent',
-    'Spawn a new Claude agent card on a canvas, optionally with an initial instruction to start working on.',
+    'Spawn (hire) a new Claude agent card on a canvas, optionally as a Mastermind role and with an initial instruction (its brief).',
     {
       canvasId: z.string().optional().describe('Target canvas id; defaults to the active canvas'),
       folder: z.string().optional().describe('Working directory; defaults to the canvas folder'),
-      prompt: z.string().optional().describe('Initial instruction for the new agent'),
+      prompt: z.string().optional().describe('Initial instruction / brief for the new agent'),
       name: z.string().optional().describe('Name for the new agent (e.g. "Chase"); defaults to "Agent N"'),
+      role: z
+        .enum(['planner', 'lead', 'worker'])
+        .optional()
+        .describe('Mastermind role to hire as — planner (writes the plan), lead (decomposes + coordinates), worker (executes). Omit for a plain worker.'),
     },
     async (args) => {
       try {

@@ -8,6 +8,7 @@
 // Imports use a relative path (not the `@shared` alias) so the standalone tsx
 // harness resolves it without tsconfig-path support.
 import type {
+  AgentRole,
   CardKind,
   CardStatus,
   AttentionLevel,
@@ -122,6 +123,8 @@ export interface SpawnAgentInput {
   folder?: string
   prompt?: string
   name?: string
+  /** The Mastermind role to hire this card as (planner/lead/worker). */
+  role?: AgentRole
 }
 
 export interface SpawnBrowserInput {

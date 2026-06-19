@@ -3,6 +3,7 @@ import { getBrowser } from '@/cards/browserBridge'
 import type { OrchestratorConfirm } from '@/orchestrator/OrchestratorConfirmToast'
 import { TRACER_TRAVEL_MS } from '@shared/types'
 import type {
+  AgentRole,
   CardKind,
   OrchestratorCommand,
   OrchestratorCommandResult,
@@ -23,7 +24,7 @@ export function useOrchestratorCommands(deps: {
   proj: ProjectsApi
   setNodes: Dispatch<SetStateAction<CanvasNode[]>>
   nodesRef: MutableRefObject<CanvasNode[]>
-  makeCard: (cardId: string, folder: string, kind: CardKind, name?: string, url?: string) => CanvasNode
+  makeCard: (cardId: string, folder: string, kind: CardKind, name?: string, url?: string, role?: AgentRole) => CanvasNode
   switchProject: (id: string) => void
   promoteCard: (cardId: string) => void
   nextAgentName: () => string
@@ -121,7 +122,7 @@ export function useOrchestratorCommands(deps: {
         // Queue the instruction BEFORE the card mounts, so ensure-card launches
         // the agent already working on it (no keystroke race against startup).
         if (prompt) window.canvas.setInitialPrompt(r.cardId, prompt)
-        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'agent', name)])
+        setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, 'agent', name, undefined, cmd.payload.role)])
         finishSpawn(target, r.cardId)
         reply({
           ok: true,

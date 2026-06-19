@@ -25,9 +25,11 @@ export function VisionBoard({
       onCollapse={onCollapse}
     >
       {projectId ? (
-        <div className="flex h-full flex-col">
-          <DistancePanel board={board} />
-          <VisionPanel board={board} />
+        <div className="frontier-field relative flex h-full flex-col">
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+            <DistancePanel board={board} />
+            <VisionPanel board={board} />
+          </div>
         </div>
       ) : (
         <EmptyState>Open a canvas — each one keeps its own vision.</EmptyState>

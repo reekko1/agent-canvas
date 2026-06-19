@@ -3,23 +3,24 @@ import type {
   DistanceAssessment,
   Issue,
   IssueActionRequest,
-  IssueKind,
   IssueSnapshot,
-  IssueStatus,
   Plan,
   Sprint,
-  SprintState,
   Vision,
   VisionEditClass,
   VisionVersion,
 } from '@shared/types'
 
-/// The renderer end of the Mastermind issue store. Restore-once on mount, then
-/// live: every applied action (here, or — later — from an agent over MCP)
-/// re-pushes the whole projection over `onIssueUpdate`, so this never mutates
-/// local state — it sends an action and re-renders on the broadcast (single
-/// arbiter; the same shape as DiffNode → gitAction → watcher re-push). Everything
-/// is filtered to the active project — each canvas has its own vision and sprints.
+/// The renderer end of the Mastermind issue store — an **observation** projection.
+/// Restore-once on mount, then live: every applied action (here, or — over MCP —
+/// from an agent) re-pushes the whole projection over `onIssueUpdate`, so this
+/// never mutates local state. Reads dominate: the board watches a self-running
+/// fleet. The only writes left are the human's genuine touchpoints — authoring
+/// the vision (`commitVisionVersion`), recording a distance assessment
+/// (`assessDistance`), and answering a realignment escalation
+/// (`resolveRealignment`). Everything routine (create/decompose/status/verdict) is
+/// the agents' job over MCP, not the renderer's. Everything is filtered to the
+/// active project — each canvas has its own vision and sprints.
 
 const EMPTY: IssueSnapshot = {
   visions: [],
@@ -30,7 +31,7 @@ const EMPTY: IssueSnapshot = {
   distance: [],
 }
 
-/// In v1 every actor is the human; this is the seam an agent identity later fills.
+/// The vision/distance writer in v1 is the human; the seam an agent identity later fills.
 const ACTOR = 'human'
 
 export interface IssueBoardApi {
@@ -48,7 +49,9 @@ export interface IssueBoardApi {
   distance: DistanceAssessment[]
   latestDistance: DistanceAssessment | undefined
 
-  // Mutators — each is one issueAction; truth returns over onIssueUpdate.
+  // Writes — the human's three touchpoints only. Each is one issueAction; truth
+  // returns over onIssueUpdate. The fleet's own writes arrive over the same
+  // broadcast from main (MCP), never from here.
   commitVisionVersion(input: {
     body: string
     principles: string[]
@@ -57,38 +60,7 @@ export interface IssueBoardApi {
     class: VisionEditClass
   }): void
   assessDistance(note: string): void
-  createSprint(input: { outcome: string; gapRationale: string }): void
-  setSprintState(id: string, state: SprintState): void
   resolveRealignment(id: string, outcome: 'aligned' | 'remove', note?: string): void
-  removeSprint(id: string): void
-  createPlan(input: {
-    sprintRef: string
-    overview: string
-    stack: string[]
-    structure: string
-    deps?: Record<string, string[]>
-    nonGoals: string[]
-  }): void
-  approvePlan(id: string): void
-  createIssue(input: {
-    planRef: string
-    title: string
-    description: string
-    verify: string
-    issueKind: IssueKind
-    deps?: string[]
-    labels?: string[]
-    phase?: string
-  }): void
-  setIssueStatus(id: string, status: IssueStatus): void
-  setIssueDeps(id: string, deps: string[]): void
-  postVerdict(
-    id: string,
-    verdict: 'APPROVED' | 'ISSUES',
-    findings: string,
-    disposition?: 'clear-fix' | 'needs-decision',
-  ): void
-  comment(id: string, body: string): void
 }
 
 export function useIssueBoard({
@@ -165,47 +137,9 @@ export function useIssueBoard({
     },
     [act, activeProjectId],
   )
-  const createSprint = useCallback<IssueBoardApi['createSprint']>(
-    (input) => {
-      if (!activeProjectId) return
-      act({ kind: 'sprint.create', projectId: activeProjectId, ...input })
-    },
-    [act, activeProjectId],
-  )
-  const setSprintState = useCallback(
-    (id: string, state: SprintState) => act({ kind: 'sprint.setState', id, state }),
-    [act],
-  )
   const resolveRealignment = useCallback(
     (id: string, outcome: 'aligned' | 'remove', note?: string) =>
       act({ kind: 'sprint.resolveRealignment', id, outcome, note }),
-    [act],
-  )
-  const removeSprint = useCallback((id: string) => act({ kind: 'sprint.remove', id }), [act])
-  const createPlan = useCallback<IssueBoardApi['createPlan']>(
-    (input) => act({ kind: 'plan.create', deps: {}, ...input }),
-    [act],
-  )
-  const approvePlan = useCallback((id: string) => act({ kind: 'plan.approve', id }), [act])
-  const createIssue = useCallback<IssueBoardApi['createIssue']>(
-    (input) => act({ kind: 'issue.create', ...input }),
-    [act],
-  )
-  const setIssueStatus = useCallback(
-    (id: string, status: IssueStatus) => act({ kind: 'issue.setStatus', id, status }),
-    [act],
-  )
-  const setIssueDeps = useCallback(
-    (id: string, deps: string[]) => act({ kind: 'issue.setDeps', id, deps }),
-    [act],
-  )
-  const postVerdict = useCallback<IssueBoardApi['postVerdict']>(
-    (id, verdict, findings, disposition) =>
-      act({ kind: 'issue.postVerdict', id, verdict, findings, disposition, author: ACTOR }),
-    [act],
-  )
-  const comment = useCallback(
-    (id: string, body: string) => act({ kind: 'issue.comment', id, body, author: ACTOR }),
     [act],
   )
 
@@ -221,16 +155,6 @@ export function useIssueBoard({
     latestDistance: distance[0],
     commitVisionVersion,
     assessDistance,
-    createSprint,
-    setSprintState,
     resolveRealignment,
-    removeSprint,
-    createPlan,
-    approvePlan,
-    createIssue,
-    setIssueStatus,
-    setIssueDeps,
-    postVerdict,
-    comment,
   }
 }

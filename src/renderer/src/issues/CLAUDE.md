@@ -2,97 +2,121 @@
 
 The visible face of the **Mastermind issue store** (see `MASTERMIND.md` at the
 repo root) — the `Vision → Sprint → Plan → Issue` chain. It is the renderer
-projection of a main-owned reactive store; the other projection (agents over MCP)
-is a later milestone. Milestone 1 is **substrate, visible**: the human drives
-everything manually, and every spot where an agent will eventually act (gate
-verdicts, propagation adjudication, distance assessment) is a manual control here
-behind a seam an agent later assumes.
+projection of a main-owned reactive store; the fleet writes to that same store
+over MCP. This sheet is an **observation deck**, not a console.
 
-Like the diff sheet, the chain renders as collapsible right-edge **sheets, not
-canvas nodes** — and it is split across **two** of them so neither crowds the
-other: a **Vision sheet** (the north star + distance) and an **Issues sheet** (the
-sprint → plan → issue execution board). Both share one width channel with the diff
-via Canvas's `rightSheet` discriminator (`'diff' | 'vision' | 'issues' | null`) —
-at most one is expanded. All three are toggled from the floating right `SheetRail`
-(the mirror of the left `ActionRail`); none has its own edge tab. One
-`useIssueBoard` hook backs both sheets (same store, two faces).
+**Design premise — the human watches; the fleet acts.** The whole point of the
+Mastermind is that a self-running org steers the product: the strategist conceives
+sprints, the planner writes plans, the lead decomposes, workers execute, auditors
+verdict — all over MCP. So the board hosts **no operator chrome**: no "new
+sprint / draft plan / new issue", no approve/advance buttons, no status
+dropdowns, no verdict or comment composers. Removing all of that is what frees the
+layout. The human's only touchpoints are **authoring the vision** (a different
+sheet) and **answering an escalation the system raises** (a stranded sprint's
+realignment). Everything else is read-only telemetry.
+
+The execution board is **The Frontier**: the plan's issues as a living dependency
+DAG laid out as cascading **waves** that drain downward. Landed waves recede and
+dim; the **frontier** (first not-fully-done wave — what the fleet works now) sits
+lit, breathing, faintly cyan; upcoming waves wait dim below. As issues complete, a
+wave collapses up and the frontier advances. Motion is the point (the deliberate
+**showpiece** register): the surface breathes even at rest and events land hard,
+reusing the app's cyan "AI is doing something" vocabulary (the comet grid-ripple,
+the `browser-scan` wavefront, the `orchestrator-glow` breath).
+
+The chain renders as collapsible right-edge **sheets** — split across **two**: a
+calm **Vision sheet** (north star + distance; the human IS the sole writer there)
+and the **Issues sheet** (the Frontier deck). Both share the diff's width channel
+via Canvas's `rightSheet` discriminator, toggled from the right `SheetRail`. One
+`useIssueBoard` hook backs both; everything is per-project (per canvas).
 
 ## Files
 
-- **useIssueBoard.ts** — the hook (sibling of `useWorkspace`/`useProjects`),
-  shared by both sheets: restore-once via `loadIssueStore`, subscribe-once via
-  `onIssueUpdate`, filter to the active project, and thin mutators that each send
-  one `issueAction` (truth returns over the broadcast — no local store writes;
-  main is the single arbiter). Everything is per-project — each canvas has its own
-  vision, sprints, and issues.
+- **useIssueBoard.ts** — the hook: restore-once via `loadIssueStore`,
+  subscribe-once via `onIssueUpdate`, filter to the active project. An
+  **observation** projection — reads dominate. The fleet's writes arrive over the
+  same broadcast from main (MCP). The only renderer-side writes are the human's
+  three touchpoints: `commitVisionVersion`, `assessDistance`, `resolveRealignment`
+  (the routine create/decompose/status/verdict mutators were removed — they were
+  the operator path that no longer exists).
+- **useIssuePulses.ts** — derives one-shot "just happened" signals from the
+  snapshot stream: diffs prior status + verdict count per issue, flags ids that
+  hit `done` (→ the radial `issue-land` ripple) or gained a verdict (→ a
+  clear/issues ring), each with a bumped nonce that auto-clears. The first
+  snapshot only seeds the baseline (a fresh load never ripples).
 
-### Vision sheet — the north star
-- **VisionSheet.tsx** — the overlay shell (copy of `DiffSheet`): right-edge park
-  (inset by `RIGHT_GUTTER` to clear the rail), keyed by active project id, renders
-  `VisionBoard`. Toggled from `SheetRail`; no edge tab.
-- **VisionBoard.tsx** — the panel: the distance assessment up top, then the full
-  vision below (it gets the whole sheet now, so no inner fold and no height cap).
-- **VisionPanel.tsx** — current vision + the immutable version timeline ("git for
-  intent") + the commit composer (rationale + class; the human is the sole writer).
-- **DistancePanel.tsx** — distance to the vision: assessed, never computed; a
-  manual "Record assessment" slot + timeline (the seam a recurring auditor fills).
+### Vision sheet — the north star (the human's canvas)
+- **VisionSheet / VisionBoard** — the shell + panel; wears the shared
+  `frontier-field` backdrop so it reads as the same world, but stays calm.
+- **VisionPanel.tsx** — current vision (static `vision-aura`) + the version
+  timeline as a **luminous spine** + the commit composer (the human is the sole
+  vision writer — this is the one legitimate human authoring in the whole system).
+- **DistancePanel.tsx** — distance to the vision: assessed, never computed; the
+  human (later: a recurring auditor) records it.
 
-### Issues sheet — the execution board
-- **IssueSheet.tsx** — the overlay shell (copy of `DiffSheet`): right-edge park
-  (inset by `RIGHT_GUTTER` to clear the rail), keyed by active project id, renders
-  `IssueBoard`. Toggled from `SheetRail`; no edge tab.
-- **IssueBoard.tsx** — the panel (the `DiffNode` analogue): a master-detail split —
-  the project's sprints on the left, the selected sprint's plan + issue DAG on the
-  right. (Vision + distance moved to the Vision sheet, so this stays a clean board.)
-- **SprintList.tsx** — selectable sprint rows with state badge, vision-version
-  chip, and the realignment marker + manual adjudication; the "+ sprint" composer.
-- **PlanView.tsx** — the selected sprint's detail: state-machine advance, the plan
-  (manual "Approve plan" = gate #1), and its `IssueDag`.
-- **IssueDag.tsx** — the plan's issues as dependency-ordered waves (Kahn over
-  `deps`, cycle-guarded) — wave 0 is the parallel frontier; plus the issue composer.
-- **IssueRow.tsx** — one issue: collapsed glyph/title/status/owner/deps/verdicts;
-  expanded description/verify, status control, dep editor, verdict composer (manual
-  gate #3), comments. `owner` is a first-class chip (the future card-id link).
+### Issues sheet — the Frontier observation deck
+- **IssueBoard.tsx** — the composition root. A pinned header (the read-only
+  `SprintSwitcher` + the `FleetPulse` telemetry strip) over a scrolling body (the
+  read-only **plan band**, the realignment escalation, then the `Frontier`). Owns
+  selection + the node `Drawer`. The only interactive element it renders is the
+  `RealignBanner` (the human escalation); everything else observes. Empty states
+  speak in the system's voice ("Awaiting the planner", "the strategist proposes
+  the next one") rather than human imperatives.
+- **SprintSwitcher.tsx** — pure navigation: the active sprint reads prominently
+  (state dot · outcome · `ProgressMeter` · pinned `v{n}`); a portaled base-ui
+  popover switches which sprint is observed. Creates nothing.
+- **Frontier.tsx** — the living wave-banded DAG. `layerize` (Kahn over `deps`,
+  cycle-guarded) gives topology; **live status** classifies each wave
+  (`landed`/`frontier`/`upcoming`). The frontier breathes; connectors flow
+  (`dag-flow`); a cycle lands in a flagged group. Exports `frontierStats` for the
+  fleet-pulse. No composer — issues arrive from the lead over MCP.
+- **IssueNode.tsx** — one issue as a living **cell** (kind glyph · title · quiet
+  cluster of deps · verdict mark · status · owner), wearing its status motion on
+  the frontier. Clicking opens **`IssueDetail`**, a **read-only dossier**: the
+  brief (description / acceptance), live facts (status · owner · deps), the
+  **audit trail** (verdicts the auditor posted, with a needs-decision escalation
+  marker), and the worker's **notes** — all timelines, no inputs.
 
 ### Shared
-- **ui.tsx** — the board's design vocabulary, so there is exactly ONE definition
-  of each repeated piece (it killed ~15 copies of the input className string and
-  6 hand-rolled composers). `Field` / `TextInput` / `TextArea` (one `fieldSurface`
-  class), `InlineComposer` (the open→fields→Create/Cancel shell every composer
-  reuses), `Select` (a thin wrap of base-ui's portaled select — its popup never
-  clips against the sheet's scroll container, and each option carries a status
-  dot), `Segmented` + `Chip` (for small sets / dep toggles, used instead of native
-  selects and checkboxes), `SectionLabel`, `EmptyState`, `asIcon` (Lucide→`Button`
-  leadingIcon adapter), and the `csvToList` / `linesToList` parsers.
-- **badges.tsx** — presentational atoms + semantic chips. `StatusDot` (the quiet
-  6px carrier) and `Tag` (faint-tint or neutral pill) are the atoms; the semantic
-  badges (`SprintStateBadge`, `IssueStatusBadge`, `ClassTag`, `VerdictPill` /
-  `VerdictMark`, `KindGlyph`) and their `*_META` label/color maps build on them.
-  Reuses the `--status-*` palette so a work-unit reads in the same language as an
-  agent card. The discipline is restraint: status is a quiet dot + muted label, a
-  loud treatment is reserved for what interrupts (a failed verdict, a realignment).
+- **ui.tsx** — the primitive vocabulary: `Field`/`TextInput`/`TextArea`/
+  `InlineComposer`/`Segmented` (used by the Vision sheet's authoring),
+  `SectionLabel`/`EmptyState`/`asIcon`/`csvToList`/`linesToList`, and **`Drawer`**
+  (the bottom slide-over node inspector). (The old `Select`/`Chip` editing atoms
+  were removed with the issue-board controls.)
+- **badges.tsx** — presentational atoms reusing the `--status-*` palette:
+  `StatusDot`/`Tag`, the semantic badges (`SprintStateBadge`, `IssueStatusBadge`,
+  `ClassTag`, `VerdictPill`/`VerdictMark`, `KindGlyph`) + their `*_META` maps,
+  **`ProgressMeter`** (the one honest number — done/total), and
+  **`nodeMotionClass`** (ambient motion by live status).
 
-The sheet frame itself lives one level up — `canvas/SheetShell.tsx` — and is
-shared by all three right-edge sheets (diff / vision / issues) so they read as one
-object family: a hairline border, a single soft shadow for lift, and a flush
-header (the title is a node, so the diff keeps its mono path and the boards get a
-sans heading) with shared window controls.
+The sheet frame lives one level up — `canvas/SheetShell.tsx` — shared by all
+three right-edge sheets so they read as one family.
+
+## Motion vocabulary
+
+All in `renderer/src/index.css`, built like `orchestrator-glow` / `browser-scan`
+/ `deck-*`: **compositor-only** (box-shadow / transform / opacity /
+background-position), keyed nonces for one-shots, and a `prefers-reduced-motion`
+fallback to a static, legible state for **every** effect: `frontier-breathe`,
+`node-working` / `node-blocked`, `dag-flow`, `issue-land`, `pulse-ring` (+
+`node-land-flash`), `wave-ignite`, the ambient `frontier-field`, `drawer-up`, and
+the calm static `vision-aura`.
 
 ## Conventions & gotchas
 
-- **No local store writes.** Mutators send an `issueAction`; the UI re-renders on
-  the `onIssueUpdate` broadcast (single arbiter — same shape as DiffNode → gitAction
-  → watcher re-push).
+- **No local store writes.** The three human mutators send an `issueAction`; the
+  UI re-renders on the `onIssueUpdate` broadcast (single arbiter). **Frontier
+  state, wave tones, fleet-pulse counts, and pulses are all _derived_** from the
+  snapshot (`status` + `deps` + diffs) — never stored, so there's zero ripple to
+  main/preload/`shared/types`.
+- **Observation-first.** Don't add create/edit affordances to this sheet — if a
+  new capability is the fleet's job, it arrives over MCP and you render it. The
+  only human controls are realignment (here) and vision authoring (Vision sheet).
 - Both sheets mount in `Canvas.tsx` next to `DiffSheet`, gated by the shared
   `rightSheet` state; the master reserves the sheet width when any is open.
-- **Electron has no `window.prompt`** — all input is inline composers (like the
-  rest of the canvas).
-- **Design language (keep it Linear-clean).** Build from the `ui.tsx` primitives
-  rather than re-styling inline. The type scale is tight and fixed — `13px`
-  content, `text-xs` (12px) body, `text-[11px]` meta/chips, and **nothing
-  smaller** (no 9/10px). Hierarchy comes from weight + color, never from heavy
-  borders, shouting uppercase, or stacked shadows. Hairline `border-border` only.
-  Buttons are `md` (the default) — **don't use `size="sm"`**; `secondary` for
-  entry points (New sprint / New issue / Draft plan), `ghost` for Cancel, the
-  `icon-xs` window controls live in `SheetShell`. Keep per-row color quiet: one
-  status dot, not a row of loud pills.
+- **Design language.** This sheet deliberately **breaks** the app's "quiet, no
+  loud motion" rule — it IS the live system, so it moves. Discipline remains:
+  motion is compositor-only and reduced-motion safe; the type scale stays tight
+  (`13px` content / `text-xs` body / `text-[11px]` meta, nothing smaller); cyan =
+  activity (distinct from the `--status-*` attention palette); never render a fake
+  number for "distance to vision" (it is assessed, not computed).

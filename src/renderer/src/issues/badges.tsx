@@ -88,15 +88,6 @@ export const ISSUE_STATUS_META: Record<IssueStatus, { label: string; color: stri
   done: { label: 'Done', color: 'var(--status-done)' },
 }
 
-export const ISSUE_STATUSES: IssueStatus[] = [
-  'backlog',
-  'ready',
-  'claimed',
-  'in_progress',
-  'blocked',
-  'done',
-]
-
 /// Quiet by design — a dot + muted label, no pill. Status is the one signal a
 /// row always shows, so it stays calm; the loud treatments are reserved for the
 /// things that interrupt (a failed verdict, a needed realignment).
@@ -185,8 +176,6 @@ export const KIND_META: Record<
   decision: { label: 'Decision', color: 'var(--status-waiting)', Icon: GitFork },
 }
 
-export const ISSUE_KINDS: IssueKind[] = ['task', 'audit-gate', 'decision']
-
 /// The leading glyph on an issue row. `task` (the common case) is a quiet gray
 /// circle; the special kinds get color so they stand out from the field of tasks.
 export function KindGlyph({ kind }: { kind: IssueKind }) {
@@ -196,4 +185,53 @@ export function KindGlyph({ kind }: { kind: IssueKind }) {
     Icon: Circle,
   }
   return <Icon className="size-3.5 shrink-0" style={{ color }} strokeWidth={2} aria-label={label} />
+}
+
+// ── Frontier atoms ────────────────────────────────────────────────────────────
+
+/// A compact done/total meter — a thin filled track. The fill goes cyan
+/// (running) until everything lands, then `done` green. This is the ONE honest
+/// number on the board: it counts completed issues. Distance to the vision stays
+/// assessed, never computed, so it is never rendered as a fake gauge.
+export function ProgressMeter({
+  done,
+  total,
+  className,
+}: {
+  done: number
+  total: number
+  className?: string
+}) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+  const complete = total > 0 && done === total
+  return (
+    <span
+      className={cn('inline-flex items-center gap-1.5', className)}
+      title={`${done} / ${total} done`}
+    >
+      <span className="relative h-1 w-10 overflow-hidden rounded-full bg-border/70">
+        <span
+          className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
+          style={{
+            width: `${pct}%`,
+            backgroundColor: complete ? 'var(--status-done)' : 'var(--status-running)',
+          }}
+        />
+      </span>
+      <span className="text-[11px] tabular-nums text-muted-foreground/80">
+        {done}/{total}
+      </span>
+    </span>
+  )
+}
+
+/// The ambient motion class a node wears, by its LIVE status — only the working
+/// states move, so the field stays calm and the eye lands on what's active. An
+/// in-progress issue breathes cyan; a blocked one pulses amber; everything else
+/// is still. (`onFrontier` is reserved for amplifying the frontier later; today
+/// motion is purely status-driven so a stalled frontier never fakes activity.)
+export function nodeMotionClass(status: IssueStatus): string {
+  if (status === 'in_progress') return 'node-working'
+  if (status === 'blocked') return 'node-blocked'
+  return ''
 }

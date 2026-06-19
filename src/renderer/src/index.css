@@ -393,3 +393,150 @@
     -webkit-mask-position: 0 50%;
   }
 }
+
+/* ── The Frontier — the issue board's living-DAG motion vocabulary ────────────
+   The issues sheet is a telemetry window onto a fleet draining a dependency DAG
+   toward a verified outcome, NOT a form — so it moves. The frontier band (what
+   the fleet works right now) breathes even at rest, dependency edges flow
+   downward (data travelling the DAG), and a landing issue fires a radial
+   grid-ripple wavefront — the comet / browser-scan cyan lattice, gone circular.
+   Cyan (#22d3ee = rgb(34 211 238)) is the app's "AI is doing something" accent
+   (cf. orchestrator-glow + browser-scan + the comet ripple), distinct from the
+   --status-* attention palette. Everything is compositor-only (box-shadow /
+   transform / opacity / background-position) and degrades to a static, legible
+   state under prefers-reduced-motion. */
+
+/* Frontier breath — the active wave's slow cyan aura. Sibling of
+   orchestrator-glow: floor → peak → floor, never returning to 0, so it reads as
+   breathing, not blinking. */
+@keyframes frontier-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgb(34 211 238 / 0.16), 0 0 14px 0 rgb(34 211 238 / 0.08); }
+  50%      { box-shadow: inset 0 0 0 1px rgb(34 211 238 / 0.30), 0 0 24px 2px rgb(34 211 238 / 0.16); }
+}
+.frontier-breathe { animation: frontier-breathe 3.4s ease-in-out infinite; }
+
+/* A single in-progress node — lighter and a touch quicker than the band, so an
+   actively-worked issue pulses against its wave. */
+@keyframes node-working {
+  0%, 100% { box-shadow: 0 0 0 1px rgb(34 211 238 / 0.32), 0 0 10px 0 rgb(34 211 238 / 0.14); }
+  50%      { box-shadow: 0 0 0 1px rgb(34 211 238 / 0.58), 0 0 18px 1px rgb(34 211 238 / 0.26); }
+}
+.node-working { animation: node-working 2.4s ease-in-out infinite; }
+
+/* A blocked node — amber, slower: urgency without alarm. */
+@keyframes node-blocked {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-blocked) 32%, transparent); }
+  50%      { box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-blocked) 68%, transparent), 0 0 12px 0 color-mix(in srgb, var(--status-blocked) 28%, transparent); }
+}
+.node-blocked { animation: node-blocked 2.9s ease-in-out infinite; }
+
+/* Dependency connector — a downward-travelling dash, always on (the "data
+   flowing through the DAG" read). A 1px dashed channel whose pattern scrolls. */
+@keyframes dag-flow { from { background-position: 0 0; } to { background-position: 0 14px; } }
+.dag-flow {
+  background-image: linear-gradient(to bottom, rgb(34 211 238 / 0.55) 45%, transparent 45%);
+  background-size: 100% 14px;
+  background-repeat: repeat-y;
+  animation: dag-flow 0.85s linear infinite;
+}
+
+/* Issue-land — the one-shot wavefront when an issue hits done: a radial cyan
+   grid-ripple expanding from the node. Mounted ~1.7s, keyed by a pulse nonce
+   (the same one-shot-by-nonce pattern as the browser scan). */
+@keyframes issue-land {
+  0%   { transform: scale(0.25); opacity: 0; }
+  12%  { opacity: 0.9; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+.issue-land {
+  position: absolute;
+  inset: -10px;
+  z-index: 6;
+  pointer-events: none;
+  border-radius: 14px;
+  background-image:
+    linear-gradient(rgb(34 211 238 / 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(34 211 238 / 0.6) 1px, transparent 1px);
+  background-size: 12px 12px;
+  mask-image: radial-gradient(circle, #000 0%, #000 38%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle, #000 0%, #000 38%, transparent 70%);
+  animation: issue-land 1.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* The brief green ring a node flashes as it settles into its landed state. */
+@keyframes node-land-flash {
+  0%   { box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-done) 80%, transparent), 0 0 20px 2px color-mix(in srgb, var(--status-done) 38%, transparent); }
+  100% { box-shadow: 0 0 0 1px rgb(0 0 0 / 0); }
+}
+.node-land-flash { animation: node-land-flash 1.5s ease-out both; }
+
+/* Wave ignite — when the frontier advances onto a fresh wave, its nodes rise
+   into place once. Keyed by the frontier index so it replays on each advance. */
+@keyframes wave-ignite {
+  0%   { opacity: 0.35; transform: translateY(5px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.wave-ignite { animation: wave-ignite 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+/* A brief coloured ring a node flashes on a one-shot event (verdict landed /
+   done). The colour is set inline per event; this only fades the ring out. */
+@keyframes pulse-ring { 0% { opacity: 0.95; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pulse-ring-anim { animation: none !important; opacity: 0 !important; } }
+
+/* The node inspector sliding up from the bottom of the sheet body. */
+@keyframes drawer-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.drawer-up { animation: drawer-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) { .drawer-up { animation: none; } }
+
+/* Ambient field — a barely-there drifting cyan lattice behind the whole
+   execution board, so the surface reads as a live system even at rest. Faint by
+   design; masked to fade at the edges so it never competes with the content. */
+@keyframes field-drift { from { background-position: 0 0; } to { background-position: 0 -24px; } }
+.frontier-field { position: relative; }
+.frontier-field::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(34 211 238 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(34 211 238 / 0.045) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(130% 70% at 50% 12%, #000, transparent 78%);
+  -webkit-mask-image: radial-gradient(130% 70% at 50% 12%, #000, transparent 78%);
+  animation: field-drift 14s linear infinite;
+}
+
+/* The vision's north-star aura — a calm, STATIC cyan bloom behind the current
+   vision body, tying the two sheets into one world without the execution board's
+   motion (the showpiece energy stays on the Frontier; the vision stays the
+   steady north star). */
+.vision-aura { position: relative; }
+.vision-aura::before {
+  content: '';
+  position: absolute;
+  inset: -4px -4px auto -4px;
+  height: 140px;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 0%, rgb(34 211 238 / 0.08), transparent 62%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frontier-breathe,
+  .node-working,
+  .node-blocked,
+  .node-land-flash,
+  .wave-ignite,
+  .frontier-field::before { animation: none; }
+  /* A blocked node still needs to read as blocked when motion is off. */
+  .node-blocked { box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-blocked) 55%, transparent); }
+  /* A steady channel instead of a marching dash. */
+  .dag-flow {
+    animation: none;
+    background-image: linear-gradient(to bottom, rgb(34 211 238 / 0.32), rgb(34 211 238 / 0.32));
+  }
+  /* The one-shot ripple is pure flourish — drop it entirely. */
+  .issue-land { display: none; }
+}

@@ -105,31 +105,42 @@ export function VisionPanel({ board }: { board: IssueBoardApi }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
       {viewing ? (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] text-muted-foreground">v{viewing.n}</span>
-            <ClassTag cls={viewing.class} />
-            {viewing.id !== currentVersion?.id && (
-              <button
-                className="ml-auto text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                onClick={() => setViewingId(null)}
-              >
-                Back to current
-              </button>
+        <div className="vision-aura rounded-xl">
+          <div className="relative z-10 space-y-3">
+            <div className="flex items-center gap-2">
+              <span
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: 'rgb(34 211 238)' }}
+                aria-hidden
+              />
+              <span className="font-mono text-[11px] text-muted-foreground">v{viewing.n}</span>
+              <ClassTag cls={viewing.class} />
+              {viewing.id === currentVersion?.id ? (
+                <span className="text-[11px] text-muted-foreground/60">· north star</span>
+              ) : (
+                <button
+                  className="ml-auto text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => setViewingId(null)}
+                >
+                  Back to current
+                </button>
+              )}
+            </div>
+            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
+              {viewing.body || <span className="text-muted-foreground">(empty)</span>}
+            </p>
+            {viewing.principles.length > 0 && (
+              <Bullets title="Principles" items={viewing.principles} />
+            )}
+            {viewing.antiVision.length > 0 && (
+              <Bullets title="Anti-vision" items={viewing.antiVision} />
+            )}
+            {viewing.rationale && (
+              <p className="text-[11px] italic leading-relaxed text-muted-foreground">
+                Why v{viewing.n}: {viewing.rationale}
+              </p>
             )}
           </div>
-          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
-            {viewing.body || <span className="text-muted-foreground">(empty)</span>}
-          </p>
-          {viewing.principles.length > 0 && <Bullets title="Principles" items={viewing.principles} />}
-          {viewing.antiVision.length > 0 && (
-            <Bullets title="Anti-vision" items={viewing.antiVision} />
-          )}
-          {viewing.rationale && (
-            <p className="text-[11px] italic leading-relaxed text-muted-foreground">
-              Why v{viewing.n}: {viewing.rationale}
-            </p>
-          )}
         </div>
       ) : (
         <p className="text-xs leading-relaxed text-muted-foreground">
@@ -140,23 +151,33 @@ export function VisionPanel({ board }: { board: IssueBoardApi }) {
       {versions.length > 0 && (
         <div className="mt-4 space-y-1.5 border-t border-border pt-3">
           <SectionLabel>History</SectionLabel>
-          <div className="space-y-0.5">
-            {versions.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => setViewingId(v.id)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
-                  v.id === viewing?.id ? 'bg-accent' : 'hover:bg-hover',
-                )}
-              >
-                <span className="font-mono text-[11px] text-muted-foreground">v{v.n}</span>
-                <ClassTag cls={v.class} />
-                <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-                  {v.rationale || '—'}
-                </span>
-              </button>
-            ))}
+          {/* The version timeline as a luminous spine — "git for intent" read top
+              (latest) to bottom, each commit a node on the line. */}
+          <div className="relative ml-1 space-y-0.5 border-l border-border/70 pl-3">
+            {versions.map((v) => {
+              const active = v.id === viewing?.id
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => setViewingId(v.id)}
+                  className={cn(
+                    'relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                    active ? 'bg-accent' : 'hover:bg-hover',
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className="absolute -left-[15px] size-1.5 rounded-full ring-2 ring-card"
+                    style={{ backgroundColor: active ? 'rgb(34 211 238)' : 'var(--color-border)' }}
+                  />
+                  <span className="font-mono text-[11px] text-muted-foreground">v{v.n}</span>
+                  <ClassTag cls={v.class} />
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                    {v.rationale || '—'}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

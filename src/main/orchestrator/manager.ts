@@ -349,6 +349,7 @@ export class Orchestrator {
   // so each access must be deferred to call time.
   private readonly bus = makeMainBus({
     getState: () => this.deps.getState(),
+    getMode: () => this.mode,
     dispatch: (command) => this.dispatch(command),
     writeToCard: (cardId, data) => this.deps.writeToCard(cardId, data),
     getReply: (cardId) => this.deps.getReply(cardId),

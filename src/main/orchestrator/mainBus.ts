@@ -13,6 +13,7 @@ import type {
   OrchestratorActionResult,
   OrchestratorCommand,
   OrchestratorConfirmResult,
+  OrchestratorMode,
   OrchestratorTarget,
   RemoteState,
 } from '../../shared/types'
@@ -52,6 +53,9 @@ export type Dispatch = (
 export interface MainBusDeps {
   /** The latest published app state, or null before the first publish. */
   getState: () => RemoteState | null
+  /** The orchestrator's current mode — a role card's spawn prompt invokes its role
+   *  skill in this mode (partner → interview; autonomous → unattended). */
+  getMode: () => OrchestratorMode
   /** Dispatch a renderer-owned mutation and await it. */
   dispatch: Dispatch
   /** Write input to a card's terminal (keystroke injection). */
@@ -210,7 +214,20 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
     },
 
     spawnAgent: async (input) => {
-      const r = await deps.dispatch({ cmd: 'spawnAgent', payload: { ...input } })
+      // A ROLE card boots straight into its role: lead the initial prompt with the
+      // role skill, invoked in the current mode. A slash command at the START of the
+      // initial prompt runs on turn 0, so the card knows its purpose before anything
+      // else — no reliance on the model auto-discovering the skill. (Namespace must
+      // match spine/skills.ts PLUGIN_NAME = 'canvas-skills'.)
+      const payload = input.role
+        ? {
+            ...input,
+            prompt: `/canvas-skills:mastermind-${input.role} ${
+              deps.getMode() === 'autonomous' ? 'autonomous' : 'partner'
+            }\n\n${input.prompt ?? ''}`.trim(),
+          }
+        : { ...input }
+      const r = await deps.dispatch({ cmd: 'spawnAgent', payload })
       if (r.ok && r.cardId) deps.signalTarget({ kind: 'spawn', cardId: r.cardId })
       return { ok: !!r.ok, cardId: r.cardId, message: r.message ?? (r.ok ? 'spawned' : 'failed') }
     },

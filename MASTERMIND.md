@@ -227,7 +227,7 @@ Vision        { projectId, currentVersion }                // per-canvas pointer
 VisionVersion { id, projectId, n, body(md), principles[], antiVision[], rationale,
                 class:'clarification'|'redirection'|'expansion',
                 author:'human', committedAt }              // immutable, append-only
-Sprint        { id, projectId, visionVersionRef, outcome(definition-of-done), state, gapRationale }
+Sprint        { id, projectId, visionVersionRef, title(short headline), outcome(definition-of-done), state, gapRationale }
 Plan          { id, sprintRef, overview, stack[], structure, deps(DAG), nonGoals[], approved } // approved = planner self-audit passed
 Issue    { id, planRef, title, description, verify(acceptance), status, owner,
            phase, deps[], labels[], kind:'task'|'audit-gate'|'decision',

@@ -109,8 +109,13 @@ export function IssueConstellation({
                 </span>
               </div>
               <h1 className="text-[28px] font-semibold leading-[1.1] tracking-tight text-white drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]">
-                {selected.outcome || 'Untitled sprint'}
+                {selected.title || selected.outcome || 'Untitled sprint'}
               </h1>
+              {selected.outcome && (
+                <p className="mt-2 max-w-md text-sm leading-relaxed text-white/70">
+                  {selected.outcome}
+                </p>
+              )}
               {selected.gapRationale && (
                 <p className="mt-2 max-w-md text-xs leading-relaxed text-white/45">
                   {selected.gapRationale}
@@ -252,13 +257,13 @@ function SprintRail({
               'flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] transition-colors',
               active ? 'bg-white/15 text-white' : 'text-white/55 hover:bg-white/10 hover:text-white/85',
             )}
-            title={s.outcome}
+            title={s.outcome || s.title}
           >
             <StatusDot
               color={meta?.color ?? 'var(--status-idle)'}
               className={s.state === 'REALIGNMENT_PENDING' ? 'node-blocked' : undefined}
             />
-            <span className="max-w-[160px] truncate">{s.outcome || 'Untitled sprint'}</span>
+            <span className="max-w-[160px] truncate">{s.title || s.outcome || 'Untitled sprint'}</span>
             {issues.length > 0 && (
               <span className="tabular-nums text-white/35">
                 {done}/{issues.length}

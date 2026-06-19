@@ -303,6 +303,7 @@ export class AgentIssueMcp {
           return okResult(
             mySprints(snap, p.id).map((s) => ({
               id: s.id,
+              title: s.title,
               outcome: s.outcome,
               gapRationale: s.gapRationale,
               state: s.state,
@@ -385,16 +386,23 @@ export class AgentIssueMcp {
         'create_sprint',
         {
           description:
-            'Create the sprint your plan will serve — its outcome (definition of done) and which vision gap it closes. In partner mode, do this once you and the human have agreed what to build; then create_plan for it. Requires a committed vision on this canvas.',
+            'Create the sprint your plan will serve — a short title naming what it delivers, its outcome (definition of done), and which vision gap it closes. In partner mode, do this once you and the human have agreed what to build; then create_plan for it. Requires a committed vision on this canvas.',
           inputSchema: {
-            outcome: z.string().describe('The outcome / definition-of-done'),
+            title: z
+              .string()
+              .describe(
+                'A short, general title — a few words naming what the sprint delivers, no technical detail. This is the headline on the board; the specifics (stack, structure, how) live in the plan, not here.',
+              ),
+            outcome: z
+              .string()
+              .describe('The outcome / definition-of-done — one line stating when this sprint is done.'),
             gapRationale: z.string().describe('Which part of the vision this sprint closes'),
           },
         },
-        async ({ outcome, gapRationale }) => {
+        async ({ title, outcome, gapRationale }) => {
           const p = pid()
           if ('error' in p) return failResult(p.error)
-          const r = apply({ kind: 'sprint.create', projectId: p.id, outcome, gapRationale })
+          const r = apply({ kind: 'sprint.create', projectId: p.id, title, outcome, gapRationale })
           return r.ok ? okResult({ sprintId: r.id }) : failResult(r.message ?? 'failed')
         },
       )

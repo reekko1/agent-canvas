@@ -205,6 +205,7 @@ export class IssueStore {
           id,
           projectId: action.projectId,
           visionVersionRef: vision.currentVersion,
+          title: action.title ?? '',
           outcome: action.outcome,
           gapRationale: action.gapRationale,
           state: 'DRAFT',
@@ -278,7 +279,7 @@ export class IssueStore {
             kind: 'plan-ready',
             projectId: sprint.projectId,
             sprintId: sprint.id,
-            detail: sprint.outcome,
+            detail: sprint.title || sprint.outcome,
           })
         }
         return ok(plan.id)

@@ -587,6 +587,9 @@ export interface Sprint {
   projectId: string
   /** The pinned VisionVersion id this sprint was conceived under (provenance chain). */
   visionVersionRef: string
+  /** A short, general title — a few words naming what the sprint delivers, no
+   *  technical detail. The headline on the board; the specifics live in the plan. */
+  title: string
   /** The outcome / definition-of-done — done when verified, never when time elapses. */
   outcome: string
   /** Which part of the vision gap this sprint closes (gate #0 conception). */
@@ -716,7 +719,7 @@ export type IssueActionRequest =
   // Distance (per-canvas, assessed, recurring)
   | { kind: 'vision.assessDistance'; projectId: string; note: string; assessedBy: string }
   // Sprint
-  | { kind: 'sprint.create'; projectId: string; outcome: string; gapRationale: string }
+  | { kind: 'sprint.create'; projectId: string; title: string; outcome: string; gapRationale: string }
   | { kind: 'sprint.setState'; id: string; state: SprintState }
   | { kind: 'sprint.resolveRealignment'; id: string; outcome: 'aligned' | 'remove'; note?: string }
   | { kind: 'sprint.remove'; id: string }

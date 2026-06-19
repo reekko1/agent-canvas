@@ -16,6 +16,7 @@ import type { CommandBus } from './contract'
 import { TRACER_TRAVEL_MS } from '../../shared/types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
+  IssueMilestone,
   OrchestratorCommand,
   OrchestratorCommandResult,
   OrchestratorEvent,
@@ -68,9 +69,9 @@ export class Orchestrator {
   private sessionActive = false
   /** App is tearing down — the input generator should end and not restart. */
   private disposed = false
-  /** How autonomous the orchestrator is. See OrchestratorMode. Default to the
-   *  supervised middle: it wakes on events but every action needs a click. */
-  private mode: OrchestratorMode = 'supervising'
+  /** How a sprint is born + how much it drives. See OrchestratorMode. Default to
+   *  manual: it does nothing on its own until you pick partner or autonomous. */
+  private mode: OrchestratorMode = 'manual'
   /** Stop the live turn (barge-in), set per session from the SDK query handle.
    *  Null between sessions. */
   private interruptTurn: (() => Promise<void>) | null = null
@@ -85,17 +86,18 @@ export class Orchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  /** Switch autonomy mode. Entering autopilot is loud — it bypasses every
-   *  confirmation — so announce both edges in the chat log. */
+  /** Switch mode — announce it (it changes how work is born and whether the
+   *  cascade runs without you). */
   setMode(mode: OrchestratorMode): void {
     if (mode === this.mode) return
-    const was = this.mode
     this.mode = mode
-    if (mode === 'autopilot') {
-      this.emit({ kind: 'mode', text: 'autopilot engaged — all confirmations bypassed' })
-    } else if (was === 'autopilot') {
-      this.emit({ kind: 'mode', text: `autopilot off — now ${mode}` })
-    }
+    const note =
+      mode === 'manual'
+        ? 'manual — I act only on your command'
+        : mode === 'partner'
+          ? 'partner — talk to a planner; I drive the cascade once you confirm the plan'
+          : 'autonomous — I find the work and drive it end to end'
+    this.emit({ kind: 'mode', text: note })
   }
 
   /** A chat prompt from the user — highest priority, processed before any
@@ -148,9 +150,10 @@ export class Orchestrator {
     if (this.mode === 'manual') return
     const card = this.findCard(ask.cardId)
     const who = card?.name ?? 'An agent'
-    // Autopilot clears the block immediately — no wake, no model, no click.
-    if (this.mode === 'autopilot') {
-      // Comet flies to the blocked agent, then it's cleared on landing.
+    // Cascade role cards (planner/lead/worker) run unattended — auto-approve their
+    // asks so the sprint doesn't stall waiting on a human. A PLAIN agent's asks
+    // still wake the orchestrator as a fleet event (and the human sees the prompt).
+    if (card?.role) {
       this.signalTarget({ kind: 'approve', cardId: ask.cardId })
       setTimeout(() => this.deps.decideAsk(ask.askId, 'allow'), TRACER_TRAVEL_MS)
       this.emit({ kind: 'auto', text: `auto-approved ${who}: ${ask.detail}` })
@@ -170,6 +173,69 @@ export class Orchestrator {
       parent_tool_use_id: null,
       priority: 'next',
     })
+  }
+
+  /** A board milestone fired (e.g. a sprint's plan was approved). In partner /
+   *  autonomous mode this wakes the orchestrator to drive the next cascade step —
+   *  currently PLAN READY → spawn a lead. Manual ignores it, like every event. */
+  notifyMilestone(m: IssueMilestone): void {
+    if (this.mode === 'manual') return
+    if (m.kind === 'issue-assigned') {
+      if (!m.ownerId) return
+      // Deterministic nudge — deliver the assignment to the worker directly so it
+      // can't be missed if the worker checked before the lead assigned (the race).
+      void this.bus.sendToAgent(
+        m.ownerId,
+        `You've been assigned issue "${m.detail ?? m.issueId}". Run get_issue to read it, do the work, ` +
+          `self-audit (adversarial subagents), then mark it in_review. See your mastermind-worker skill.`,
+      )
+      return
+    }
+    if (m.kind !== 'plan-ready') return
+    const canvasName = this.deps.getState()?.canvases.find((c) => c.id === m.projectId)?.name
+    const where = canvasName ? ` on canvas "${canvasName}"` : ''
+    this.enqueue({
+      type: 'user',
+      message: {
+        role: 'user',
+        content:
+          `[fleet event] PLAN READY${where}: the plan for sprint "${m.detail ?? 'a sprint'}" was approved. ` +
+          `Spawn a lead now — call spawn_agent with role "lead", canvasId "${m.projectId}", and a one-line ` +
+          `brief telling it the plan is approved and to decompose it into issues, self-audit the distribution, ` +
+          `request workers, and assign the work. This is the cascade; do it without waiting.`,
+      },
+      parent_tool_use_id: null,
+      priority: 'next',
+    })
+  }
+
+  /** A lead asked the mastermind to hire workers (via the issue MCP). Spawn `count`
+   *  worker cards on the lead's canvas with the brief and return their ids so the
+   *  lead can assign issues to them. Honored only when driving (not manual). */
+  async requestWorkers(
+    leadCardId: string,
+    count: number,
+    brief: string,
+  ): Promise<{ ok: boolean; workerIds: string[]; message?: string }> {
+    if (this.mode === 'manual')
+      return { ok: false, workerIds: [], message: 'manual mode — the mastermind is not hiring.' }
+    const canvasId = this.findCard(leadCardId)?.projectId
+    if (!canvasId) return { ok: false, workerIds: [], message: "could not resolve the lead's canvas" }
+    const n = Math.max(1, Math.min(8, Math.floor(count) || 1)) // clamp — no runaway fleets
+    const workerBrief =
+      `${brief}\n\nYou are a WORKER on this sprint. Stand by — the lead will assign you an issue shortly; ` +
+      `when you receive the assignment, work it to a self-audited finish (see your mastermind-worker skill).`
+    const results = await Promise.all(
+      Array.from({ length: n }, (_, i) =>
+        this.bus.spawnAgent({ canvasId, role: 'worker', name: `Worker ${i + 1}`, prompt: workerBrief }),
+      ),
+    )
+    const workerIds = results.filter((r) => r.ok && r.cardId).map((r) => r.cardId as string)
+    this.emit({
+      kind: 'auto',
+      text: `hired ${workerIds.length} worker${workerIds.length === 1 ? '' : 's'} for the lead`,
+    })
+    return { ok: workerIds.length > 0, workerIds, message: `spawned ${workerIds.length} workers` }
   }
 
   /** Barge-in: stop the current turn so it stops narrating and runs no further
@@ -309,17 +375,8 @@ export class Orchestrator {
     input: Record<string, unknown>,
   ): Promise<GateDecision> => {
     // Speech-pacing lives in canUseTool (beforeTool) now — it covers every tool,
-    // so the gate only decides permission.
-    // The orchestrator has full autonomy over its own tools in supervising and
-    // autopilot — approve_ask included. If the user said "approve this", a
-    // re-confirm would just ask for permission they already gave verbally. Only
-    // manual gates the orchestrator's actions.
-    //
-    // The supervising/autopilot difference is about AGENTS and lives in
-    // notifyAsk: autopilot auto-clears every agent ask the instant it fires;
-    // supervising leaves an unattended ask for a human decision — the user, or
-    // the orchestrator acting on the user's instruction (the system prompt
-    // forbids it from approving on its own judgement).
+    // so the gate only decides permission. The orchestrator's OWN tools run freely
+    // in partner and autonomous (it's driving the cascade); only manual gates them.
     if (this.mode !== 'manual') return { allow: true }
     // manual → a human decides; give it minutes, not the 30s machine round-trip.
     // Build the human copy here (main owns the tool vocabulary) and ship it ready

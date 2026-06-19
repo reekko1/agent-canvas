@@ -271,6 +271,9 @@ app.whenReady().then(() => {
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just
   // commanded by it.
   spine.onReply = (cardId, reply) => orchestrator?.notifyAgentReply(cardId, reply)
+  // Board milestones (e.g. a plan was approved) wake the mastermind to drive the
+  // next cascade step — partner/autonomous only; manual ignores them.
+  issues.onMilestone = (m) => orchestrator?.notifyMilestone(m)
   // Agent-facing browser tools: a loopback HTTP MCP server attached to every
   // card via --mcp-config, driving browsers through the orchestrator's bus. It
   // shares the spine's token (cards authenticate as their hooks do) and a stable
@@ -288,11 +291,14 @@ app.whenReady().then(() => {
   // Agent-facing issue tools: a second loopback MCP server attached per card via
   // --mcp-config, talking directly to the IssueStore (main is the single arbiter),
   // scoped to the caller card's canvas. The worker slice of Milestone 2.
+  const orch = orchestrator // non-null here; captured for the deferred dep below
   const agentIssueMcp = new AgentIssueMcp({
     apply: (action) => issues.apply(action),
     snapshot: () => issues.snapshot(),
     getState: () => spine.remote.getLatestState(),
     token: spine.token,
+    requestWorkers: (leadCardId, count, brief) =>
+      orch.requestWorkers(leadCardId, count, brief),
   })
   agentIssueMcp.start(spine.issueMcpPort, (port) => {
     spine.attachIssueMcp(port)
@@ -471,7 +477,7 @@ ipcMain.on('browser-ready', (_e, cardId: string, webContentsId: number | null) =
     browserController.markGone(cardId)
   }
 })
-// Set the orchestrator's autonomy mode (manual / supervising / autopilot).
+// Set the orchestrator's mode (manual / partner / autonomous).
 ipcMain.on('orchestrator-mode', (_e, mode: OrchestratorMode) => orchestrator?.setMode(mode))
 
 // MARK: Voice — push-to-talk STT and the orchestrator's spoken replies. The

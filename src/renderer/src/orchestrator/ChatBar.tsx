@@ -42,25 +42,25 @@ const fadeMs = (text: string): number => Math.min(9000, 4000 + text.length * 30)
 const HISTORY_CAP = 40
 
 // Click cycles through the three modes; the badge shows the current one.
-const MODE_ORDER: OrchestratorMode[] = ['manual', 'supervising', 'autopilot']
+const MODE_ORDER: OrchestratorMode[] = ['manual', 'partner', 'autonomous']
 const MODE_BADGE: Record<OrchestratorMode, { label: string; cls: string; title: string }> = {
   manual: {
     label: '○ manual',
     cls: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
     title:
-      'Manual — replies are not echoed and never wake the orchestrator, and every orchestrator action needs your click. Click to supervise.',
+      'Manual — fleet events never wake the orchestrator, and every orchestrator action needs your click. Click for partner mode.',
   },
-  supervising: {
-    label: '◉ supervising',
+  partner: {
+    label: '◉ partner',
     cls: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25',
     title:
-      'Supervising — the orchestrator wakes on fleet events and uses all its tools freely, without asking, including approving an agent when you tell it to. Unattended agent permission asks still wait for a decision (they are not blanket-approved). Click to engage autopilot.',
+      'Partner — you originate work by talking to a planner (it interviews you; you confirm the plan), then the orchestrator drives the cascade — spawns the lead, hires workers — without a click. Click for autonomous.',
   },
-  autopilot: {
-    label: '⚡ autopilot',
-    cls: 'bg-red-500/25 text-red-300 ring-1 ring-red-500/60 hover:bg-red-500/35',
+  autonomous: {
+    label: '⚡ autonomous',
+    cls: 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/50 hover:bg-amber-500/30',
     title:
-      'AUTOPILOT — bypasses every confirmation: the orchestrator auto-allows its own actions and auto-approves every agent permission ask. Click to return to manual.',
+      'Autonomous — the mastermind finds the work itself (via the strategist) and drives the whole cascade unattended. Same cascade as partner, no human at the head. Click to return to manual.',
   },
 }
 
@@ -83,8 +83,8 @@ export function OrchestratorChatBar({
   const [input, setInput] = useState('')
   // It's mid-turn (calling tools) — the pill pulses instead of listing them.
   const [thinking, setThinking] = useState(false)
-  // How autonomous the orchestrator is; defaults to supervising (main mirrors).
-  const [mode, setMode] = useState<OrchestratorMode>('supervising')
+  // How work is born + how much it drives; defaults to manual (main mirrors).
+  const [mode, setMode] = useState<OrchestratorMode>('manual')
   // The transient caption; null once it has faded or been collapsed away.
   const [whisper, setWhisper] = useState<Entry | null>(null)
   // The collapsed-by-default run, revealed by clicking the pill's glyph.

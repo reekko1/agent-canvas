@@ -351,24 +351,25 @@ export interface UpdateStatus {
 
 // MARK: Orchestrator (in-app agent driving the canvas)
 
-/** How much the orchestrator may do on its own. Its OWN tools
- *  (spawn/kill/rename/focus/send/approve_ask) run freely whenever it is awake;
- *  only `manual` gates them. The supervising/autopilot difference is purely
- *  about unattended AGENT permission asks.
- *  - `manual`      — nothing wakes it (agent replies are not echoed) and every
- *                    orchestrator action needs your click at the gate.
- *  - `supervising` — it wakes on fleet events and runs its own tools without a
- *                    click; unattended agent permission asks still wait for a
- *                    human (it only approves one when you tell it to).
- *  - `autopilot`   — it wakes AND auto-approves every agent permission ask. No
- *                    clicks. Dangerous: this bypasses every confirmation. */
-export type OrchestratorMode = 'manual' | 'supervising' | 'autopilot'
+/** How a sprint gets BORN — and how much the orchestrator drives on its own. Its
+ *  OWN tools (spawn/kill/rename/focus/send) run freely whenever it is awake; only
+ *  `manual` gates them. `partner` and `autonomous` share one execution cascade
+ *  (planner → lead → workers, each self-auditing); they differ only at the head.
+ *  - `manual`     — nothing wakes it (fleet events are not echoed) and every
+ *                   orchestrator action needs your click at the gate.
+ *  - `partner`    — YOU originate work by talking to a planner (it interviews you;
+ *                   you confirm the plan). The orchestrator then drives the cascade
+ *                   — spawns the lead, hires workers on request — without a click.
+ *  - `autonomous` — the mastermind originates work itself (the strategist finds a
+ *                   vision gap, later) and drives the whole cascade unattended.
+ *                   Same cascade as partner; different head. */
+export type OrchestratorMode = 'manual' | 'partner' | 'autonomous'
 
 /** One streamed line from an orchestrator turn. The renderer shows the
  *  orchestrator's voice (`assistant`/`result`) as a transient whisper and uses
- *  `tool` only to drive a "working" pulse. `auto` marks an action autopilot took
- *  without asking (a bypassed confirmation); `mode` marks a user-driven
- *  autonomy-mode switch (a status line, not a turn); `error` surfaces as a red
+ *  `tool` only to drive a "working" pulse. `auto` marks an action the mastermind
+ *  took on its own (e.g. hiring workers for a lead); `mode` marks a user-driven
+ *  mode switch (a status line, not a turn); `error` surfaces as a red
  *  whisper that never auto-fades. The agents' own replies are never echoed here
  *  — the orchestrator digests them and speaks its own line. */
 export interface OrchestratorEvent {
@@ -387,10 +388,9 @@ export const TRACER_TRAVEL_MS = 600
 
 /** Fired when the orchestrator acts on a specific agent (spawn/message/kill/
  *  rename/approve) so the renderer can draw a tracer from the chat bar to that
- *  card. Targets by `cardId` when known; the orchestrator's `approve` path instead
- *  carries the `askId` (approvals don't carry a card id) and the renderer resolves
- *  it to the asking card — but the autopilot auto-approve has the card directly and
- *  sends `cardId`. So `approve` may arrive with either; the renderer takes whichever
+ *  card. Targets by `cardId` when known; the `approve` path may instead carry the
+ *  `askId` (approvals don't carry a card id) and the renderer resolves it to the
+ *  asking card. So `approve` may arrive with either; the renderer takes whichever
  *  is present. */
 export interface OrchestratorTarget {
   kind: 'spawn' | 'send' | 'kill' | 'rename' | 'approve'
@@ -780,6 +780,21 @@ export interface IssueSnapshot {
   plans: Plan[]
   issues: Issue[]
   distance: DistanceAssessment[]
+}
+
+/// A board milestone the IssueStore emits on a meaningful transition — the
+/// mastermind's wake signal (it sees only these, never the work). v1 fires
+/// `plan-ready` (a sprint's plan was approved → spawn a lead); the others are
+/// wired as the cascade grows.
+export interface IssueMilestone {
+  kind: 'plan-ready' | 'issue-assigned' | 'sprint-ready' | 'issue-done' | 'outcome-verified'
+  projectId: string
+  sprintId?: string
+  issueId?: string
+  /** The worker an issue was assigned to (on `issue-assigned`) — nudged to start. */
+  ownerId?: string
+  /** Human context (e.g. the sprint outcome, or an issue title) for the brief. */
+  detail?: string
 }
 
 export interface CanvasApi {

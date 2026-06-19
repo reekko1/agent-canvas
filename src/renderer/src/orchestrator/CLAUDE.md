@@ -4,7 +4,7 @@ The renderer face of the natural-language orchestrator: a bottom-center chat bar
 
 ## Files
 
-- **ChatBar.tsx** — `OrchestratorChatBar`, the bottom pill. Owns the input, the autonomy-mode badge (manual / supervising / autopilot, cycled on click), the transient "whisper" caption + collapsed run history, the working pulse, and all push-to-talk wiring. Renders `OrchestratorConfirmToast` directly above itself.
+- **ChatBar.tsx** — `OrchestratorChatBar`, the bottom pill. Owns the input, the mode badge (manual / partner / autonomous, cycled on click), the transient "whisper" caption + collapsed run history, the working pulse, and all push-to-talk wiring. Renders `OrchestratorConfirmToast` directly above itself.
 - **OrchestratorConfirmToast.tsx** — `OrchestratorConfirmToast` + the `OrchestratorConfirm` type. A single Allow/Deny permission gate (cyan-accented to read as the orchestrator, not an agent). Pure presentation; Canvas supplies the value and the decision callback.
 - **Tracer.tsx** — `OrchestratorTracers` and the per-tracer `Tracer`. SVG comet that arcs from the chat bar to a target agent card, with a trailing tail and a ring bloom on landing; color is keyed to the action kind (cyan=identity, amber=approve, red=kill). Each tracer self-removes via `onDone`.
 - **voice.ts** — `MicCapture` (getUserMedia → AudioWorklet → 16 kHz pcm_s16le chunks) and `TtsPlayer` (gapless scheduling of 24 kHz pcm_s16le chunks on a Web Audio timeline, plus the loudness analyser that drives the edge glow). No React.

@@ -6,6 +6,7 @@ import type {
   Issue,
   IssueActionRequest,
   IssueActionResult,
+  IssueMilestone,
   IssueSnapshot,
   Plan,
   Sprint,
@@ -71,9 +72,15 @@ const fail = (message: string): IssueActionResult => ({ ok: false, message })
 export class IssueStore {
   /** Re-pushed in whole on every applied action (cf. spine.onUpdate → card-event). */
   onChange?: (snapshot: IssueSnapshot) => void
+  /** A meaningful transition fired (e.g. a plan was approved) — the mastermind's
+   *  wake signal. NOT fired during replay (load), only on live applies. */
+  onMilestone?: (m: IssueMilestone) => void
 
   private state: IssueSnapshot = empty()
   private seq = 0
+  /** True while replaying the log in load() — suppresses milestone emission so a
+   *  restart doesn't re-fire "plan ready" and re-spawn leads. */
+  private replaying = false
 
   constructor(private file: string) {}
 
@@ -88,21 +95,31 @@ export class IssueStore {
     } catch {
       return // first run / unreadable → empty store
     }
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue
-      let entry: LogEntry
-      try {
-        entry = JSON.parse(line) as LogEntry
-      } catch {
-        console.warn('[issues] skipping unparseable log line')
-        continue
+    this.replaying = true
+    try {
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue
+        let entry: LogEntry
+        try {
+          entry = JSON.parse(line) as LogEntry
+        } catch {
+          console.warn('[issues] skipping unparseable log line')
+          continue
+        }
+        let cursor = 0
+        const ctx: ApplyCtx = { id: () => entry.ids[cursor++] ?? randomUUID(), now: () => entry.ts }
+        const result = this.reduce(entry.action, ctx)
+        if (!result.ok) console.warn('[issues] replay rejected an action:', result.message)
+        if (typeof entry.seq === 'number') this.seq = Math.max(this.seq, entry.seq)
       }
-      let cursor = 0
-      const ctx: ApplyCtx = { id: () => entry.ids[cursor++] ?? randomUUID(), now: () => entry.ts }
-      const result = this.reduce(entry.action, ctx)
-      if (!result.ok) console.warn('[issues] replay rejected an action:', result.message)
-      if (typeof entry.seq === 'number') this.seq = Math.max(this.seq, entry.seq)
+    } finally {
+      this.replaying = false
     }
+  }
+
+  /** Emit a milestone (the mastermind's wake signal) — suppressed during replay. */
+  private milestone(m: IssueMilestone): void {
+    if (!this.replaying) this.onMilestone?.(m)
   }
 
   snapshot(): IssueSnapshot {
@@ -254,7 +271,16 @@ export class IssueStore {
         if (!plan) return fail('no such plan')
         plan.approved = true
         const sprint = s.sprints.find((x) => x.id === plan.sprintRef)
-        if (sprint && sprint.state === 'PLAN_REVIEW') sprint.state = 'APPROVED' // gate #1
+        if (sprint && sprint.state === 'PLAN_REVIEW') {
+          sprint.state = 'APPROVED' // gate #1
+          // "Plan ready" — the cascade trigger the mastermind wakes on.
+          this.milestone({
+            kind: 'plan-ready',
+            projectId: sprint.projectId,
+            sprintId: sprint.id,
+            detail: sprint.outcome,
+          })
+        }
         return ok(plan.id)
       }
 
@@ -298,6 +324,17 @@ export class IssueStore {
         if (issue.owner) return fail(`already owned by ${issue.owner}`)
         issue.owner = action.owner
         issue.status = 'claimed'
+        // The lead assigned this issue to a worker — nudge that worker to start, so
+        // the assignment can't be missed if it already checked (the timing race).
+        const plan = s.plans.find((p) => p.id === issue.planRef)
+        const sprint = plan && s.sprints.find((sp) => sp.id === plan.sprintRef)
+        this.milestone({
+          kind: 'issue-assigned',
+          projectId: sprint?.projectId ?? '',
+          issueId: issue.id,
+          ownerId: action.owner,
+          detail: issue.title,
+        })
         return ok(issue.id)
       }
 

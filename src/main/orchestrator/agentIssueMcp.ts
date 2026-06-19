@@ -39,6 +39,13 @@ export interface AgentIssueMcpDeps {
   snapshot: () => IssueSnapshot
   getState: () => RemoteState | null
   token: string
+  /** A lead asks the mastermind to hire workers — spawns them on the lead's canvas
+   *  and returns their card ids. (Wired to Orchestrator.requestWorkers.) */
+  requestWorkers: (
+    leadCardId: string,
+    count: number,
+    brief: string,
+  ) => Promise<{ ok: boolean; workerIds: string[]; message?: string }>
 }
 
 const STATUSES = ['backlog', 'ready', 'claimed', 'in_progress', 'blocked', 'in_review', 'done'] as const
@@ -129,7 +136,7 @@ export class AgentIssueMcp {
    *  canvas, with only the tools — and the visibility — its **role** grants. */
   private buildServer(cardId: string): McpServer {
     const server = new McpServer({ name: 'issues', version: '0.1.0' })
-    const { apply, snapshot, getState } = this.deps
+    const { apply, snapshot, getState, requestWorkers } = this.deps
     const noCard = !cardId || cardId === UNKNOWN_CARD
     const role: AgentRole = getState()?.cards.find((c) => c.id === cardId)?.role ?? 'worker'
     const isWorker = role === 'worker'
@@ -351,6 +358,24 @@ export class AgentIssueMcp {
     // ── Planner tools ─────────────────────────────────────────────────────────
     if (role === 'planner') {
       server.registerTool(
+        'create_sprint',
+        {
+          description:
+            'Create the sprint your plan will serve — its outcome (definition of done) and which vision gap it closes. In partner mode, do this once you and the human have agreed what to build; then create_plan for it. Requires a committed vision on this canvas.',
+          inputSchema: {
+            outcome: z.string().describe('The outcome / definition-of-done'),
+            gapRationale: z.string().describe('Which part of the vision this sprint closes'),
+          },
+        },
+        async ({ outcome, gapRationale }) => {
+          const p = pid()
+          if ('error' in p) return failResult(p.error)
+          const r = apply({ kind: 'sprint.create', projectId: p.id, outcome, gapRationale })
+          return r.ok ? okResult({ sprintId: r.id }) : failResult(r.message ?? 'failed')
+        },
+      )
+
+      server.registerTool(
         'create_plan',
         {
           description:
@@ -471,6 +496,23 @@ export class AgentIssueMcp {
           if ('error' in loc) return failResult(loc.error)
           const r = apply({ kind: 'sprint.setState', id, state })
           return r.ok ? okResult({ id, state }) : failResult(r.message ?? 'failed')
+        },
+      )
+
+      server.registerTool(
+        'request_workers',
+        {
+          description:
+            'Ask the mastermind to hire N worker cards for this sprint — returns their card ids. Call this AFTER you have decomposed the plan into issues and self-audited the distribution; then assign_issue the ready frontier to the returned workers.',
+          inputSchema: {
+            count: z.number().min(1).max(8).describe('How many workers to hire'),
+            brief: z.string().describe('One-line brief for the workers (what this sprint is about)'),
+          },
+        },
+        async ({ count, brief }) => {
+          if (noCard) return failResult('No calling card id.')
+          const r = await requestWorkers(cardId, count, brief)
+          return r.ok ? okResult({ workers: r.workerIds }) : failResult(r.message ?? 'hire failed')
         },
       )
     }

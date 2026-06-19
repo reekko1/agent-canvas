@@ -67,7 +67,9 @@ export const SPRINT_STATE_META: Record<SprintState, { label: string; color: stri
 }
 
 export function SprintStateBadge({ state }: { state: SprintState }) {
-  const m = SPRINT_STATE_META[state]
+  // Fall back for an out-of-enum value (e.g. a status from before a schema change)
+  // so stale data can never crash the board — show the raw value, don't throw.
+  const m = SPRINT_STATE_META[state] ?? { label: String(state), color: 'var(--status-idle)' }
   return (
     <Tag color={m.color} tint>
       {m.label}
@@ -99,7 +101,9 @@ export const ISSUE_STATUSES: IssueStatus[] = [
 /// row always shows, so it stays calm; the loud treatments are reserved for the
 /// things that interrupt (a failed verdict, a needed realignment).
 export function IssueStatusBadge({ status }: { status: IssueStatus }) {
-  const m = ISSUE_STATUS_META[status]
+  // Fall back for an out-of-enum value (e.g. a stale status persisted before a
+  // schema change) so it renders as the raw value instead of crashing the board.
+  const m = ISSUE_STATUS_META[status] ?? { label: String(status), color: 'var(--status-idle)' }
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground">
       <StatusDot color={m.color} />
@@ -129,7 +133,7 @@ export const CLASS_META: Record<VisionEditClass, { label: string; color: string;
 }
 
 export function ClassTag({ cls }: { cls: VisionEditClass }) {
-  const m = CLASS_META[cls]
+  const m = CLASS_META[cls] ?? { label: String(cls), color: 'var(--status-idle)', hint: '' }
   return (
     <Tag color={m.color} tint>
       {m.label}
@@ -186,6 +190,10 @@ export const ISSUE_KINDS: IssueKind[] = ['task', 'audit-gate', 'decision']
 /// The leading glyph on an issue row. `task` (the common case) is a quiet gray
 /// circle; the special kinds get color so they stand out from the field of tasks.
 export function KindGlyph({ kind }: { kind: IssueKind }) {
-  const { Icon, color, label } = KIND_META[kind]
+  const { Icon, color, label } = KIND_META[kind] ?? {
+    label: String(kind),
+    color: 'var(--status-idle)',
+    Icon: Circle,
+  }
   return <Icon className="size-3.5 shrink-0" style={{ color }} strokeWidth={2} aria-label={label} />
 }

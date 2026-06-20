@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -58,6 +58,12 @@ export function IssueConstellation({
     [explicitSprint, pendingConception, board.sprints],
   )
   const conception: Conception | null = selected ? null : pendingConception
+  // The dossier always shows the latest deliberation — including a DECIDED one that is
+  // now hidden behind its sprint. (`conception` is the live/abstained centre-stage
+  // field; this is newest-of-any-state, so a finished tournament's bracket — the
+  // "why this sprint?" record — stays one click away.)
+  const latestConception = board.conceptions[0] ?? null
+  const dossierConception = conception ?? latestConception
 
   const visiblePlans = useMemo(() => {
     if (!selected) return []
@@ -88,11 +94,11 @@ export function IssueConstellation({
     return () => window.removeEventListener('keydown', onKey)
   }, [openIssueId, conceptionOpen, onClose])
 
-  // If the deliberation resolves (decided → a sprint appears, or it clears), drop the
-  // dossier flag so a stale Esc isn't swallowed by an already-invisible panel.
+  // Drop the dossier flag only when there's NO deliberation left to show at all, so a
+  // stale Esc isn't swallowed by an invisible panel (a decided bracket stays openable).
   useEffect(() => {
-    if (!conception) setConceptionOpen(false)
-  }, [conception])
+    if (!dossierConception) setConceptionOpen(false)
+  }, [dossierConception])
 
   return (
     <div className="dark fixed inset-0 z-[60] text-white" style={{ WebkitAppRegion: 'no-drag' }}>
@@ -126,6 +132,20 @@ export function IssueConstellation({
           {/* The pre-ignition deliberation — contender proto-stars over the sun. */}
           {conception && (
             <ConceptionField conception={conception} onOpen={() => setConceptionOpen(true)} />
+          )}
+
+          {/* A decided deliberation is hidden behind its sprint (or sits in the gap
+              before the sprint forms) — keep its bracket one click away. */}
+          {latestConception && !conception && (
+            <button
+              onClick={() => setConceptionOpen(true)}
+              className="pointer-events-auto absolute bottom-6 left-6 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur-md transition-colors hover:bg-white/10 hover:text-white/90"
+              title="View the strategist's deliberation — the idea tournament behind this canvas"
+            >
+              <Sparkles className="size-3.5" />
+              <span>Deliberation</span>
+              <span className="text-white/35">{latestConception.candidates.length} ideas</span>
+            </button>
           )}
 
           {/* Hero — the outcome headline + fleet-pulse, the typographic anchor. */}
@@ -227,7 +247,7 @@ export function IssueConstellation({
       )}
 
       {/* The deliberation's read-only bracket — why the fleet is building what it is. */}
-      {conceptionOpen && conception && (
+      {conceptionOpen && dossierConception && (
         <aside className="takeover-in absolute right-0 top-0 z-20 flex h-full w-[360px] flex-col border-l border-white/10 bg-[#0a0c14]/85 backdrop-blur-xl">
           <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-3">
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
@@ -244,7 +264,7 @@ export function IssueConstellation({
             </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            <ConceptionDossier conception={conception} />
+            <ConceptionDossier conception={dossierConception} />
           </div>
         </aside>
       )}

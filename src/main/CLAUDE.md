@@ -51,8 +51,12 @@ Each has its own CLAUDE.md — read it before working in that area.
   interleave and atomic claims need no transaction. `load` replays the log (ids +
   timestamps are persisted per entry for deterministic replay); a `vision.commit`
   runs the propagation pass (a redirection/expansion moves stale sprints to
-  REALIGNMENT_PENDING). Channels: `load-issue-store`, `issue-action` (both invoke),
-  `issue-update` (push). v1 has no agents; the renderer board is the only client.
+  REALIGNMENT_PENDING). It records strategist **conceptions** too (the idea
+  tournament; `conception.*`) and fires the milestones the mastermind wakes on —
+  `plan-ready`, the `issue-*` nudges, `outcome-verified` (a sprint reached DONE),
+  and `idea-ready` / `idea-abstained`. Channels: `load-issue-store`, `issue-action`
+  (both invoke), `issue-update` (push). Clients: the renderer board (IPC) and the
+  role cards (the agent issue MCP).
 
 ## Architecture / data flow
 - **Lifecycle:** `app.whenReady` starts the spine, builds voice + orchestrator, creates the

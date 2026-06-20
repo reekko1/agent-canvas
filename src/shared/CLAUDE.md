@@ -48,7 +48,10 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     `Plan` / `Issue` records, the `IssueActionRequest` mutation union +
     `IssueActionResult`, and the `IssueSnapshot` read-projection. Everything is
     per-project (per canvas): each canvas has its own vision, versions, sprints,
-    plans, and issues — one north star per product/repo.
+    plans, and issues — one north star per product/repo. The **strategist** layer
+    adds `Idea` + `Conception` (the recorded idea tournament; `conception.*` actions)
+    on the same store, the `idea-ready` / `idea-abstained` milestones, and the
+    `strategist` member of `AgentRole`.
   - `CanvasApi` — the full interface the preload bridge implements and the
     renderer consumes (the IPC contract in one place). Browser readiness rides
     here too: `browserReady` (renderer→main: a `<webview>` is dom-ready, with

@@ -2,7 +2,9 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import type {
+  Conception,
   DistanceAssessment,
+  Idea,
   Issue,
   IssueActionRequest,
   IssueActionResult,
@@ -64,6 +66,7 @@ const empty = (): IssueSnapshot => ({
   plans: [],
   issues: [],
   distance: [],
+  conceptions: [],
 })
 
 const ok = (id?: string): IssueActionResult => ({ ok: true, id })
@@ -222,6 +225,16 @@ export class IssueStore {
         if (!SPRINT_TRANSITIONS[sprint.state].includes(action.state))
           return fail(`illegal transition ${sprint.state} → ${action.state}`)
         sprint.state = action.state
+        if (action.state === 'DONE') {
+          // The sprint's outcome was verified — the autonomous loop's "find the
+          // next" trigger (the mastermind spawns a strategist for this canvas).
+          this.milestone({
+            kind: 'outcome-verified',
+            projectId: sprint.projectId,
+            sprintId: sprint.id,
+            detail: sprint.title || sprint.outcome,
+          })
+        }
         return ok(sprint.id)
       }
 
@@ -392,6 +405,90 @@ export class IssueStore {
           postedAt: ctx.now(),
         })
         return ok(issue.id)
+      }
+
+      case 'conception.create': {
+        // Mirrors sprint.create: the deliberation pins the canvas's current vision.
+        if (!action.projectId) return fail('conception needs a project')
+        const vision = s.visions.find((v) => v.projectId === action.projectId)
+        if (!vision?.currentVersion)
+          return fail('commit a vision version for this canvas first')
+        const id = ctx.id()
+        // Mint candidate ids in array order (after the conception id) — stable on replay.
+        const candidates: Idea[] = action.candidates.map((c) => ({
+          id: ctx.id(),
+          idea: c.idea,
+          why: c.why,
+          outcome: c.outcome,
+          visionLink: c.visionLink,
+          lens: c.lens,
+          rating: c.rating,
+          eliminatedRound: c.eliminatedRound,
+        }))
+        const conception: Conception = {
+          id,
+          projectId: action.projectId,
+          visionVersionRef: vision.currentVersion,
+          gapRead: action.gapRead,
+          candidates,
+          rounds: [],
+          state: 'deliberating',
+          createdAt: ctx.now(),
+        }
+        s.conceptions.push(conception)
+        return ok(id)
+      }
+
+      case 'conception.updateRound': {
+        const conception = s.conceptions.find((c) => c.id === action.id)
+        if (!conception) return fail('no such conception')
+        if (conception.state !== 'deliberating') return fail('conception already resolved')
+        conception.rounds.push({
+          n: action.round.n,
+          survivors: action.round.survivors,
+          note: action.round.note,
+        })
+        for (const u of action.ratings ?? []) {
+          const cand = conception.candidates.find((c) => c.id === u.ideaRef)
+          if (!cand) continue
+          if (u.rating !== undefined) cand.rating = u.rating
+          if (u.eliminatedRound !== undefined) cand.eliminatedRound = u.eliminatedRound
+        }
+        return ok(conception.id)
+      }
+
+      case 'conception.setWinner': {
+        const conception = s.conceptions.find((c) => c.id === action.id)
+        if (!conception) return fail('no such conception')
+        if (conception.state !== 'deliberating') return fail('conception already resolved')
+        const winner = conception.candidates.find((c) => c.id === action.winnerIdeaRef)
+        if (!winner) return fail('winner is not a candidate of this conception')
+        conception.winnerIdeaRef = winner.id
+        conception.state = 'decided'
+        // "Idea ready" — the mastermind spawns a planner seeded with the winning idea.
+        this.milestone({
+          kind: 'idea-ready',
+          projectId: conception.projectId,
+          conceptionId: conception.id,
+          detail: winner.idea,
+        })
+        return ok(conception.id)
+      }
+
+      case 'conception.abstain': {
+        const conception = s.conceptions.find((c) => c.id === action.id)
+        if (!conception) return fail('no such conception')
+        if (conception.state !== 'deliberating') return fail('conception already resolved')
+        conception.state = 'abstained'
+        conception.abstainReason = action.reason
+        // No winner — escalate to the human; never manufacture a sprint.
+        this.milestone({
+          kind: 'idea-abstained',
+          projectId: conception.projectId,
+          conceptionId: conception.id,
+          detail: action.reason,
+        })
+        return ok(conception.id)
       }
 
       default:

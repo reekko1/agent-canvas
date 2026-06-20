@@ -15,6 +15,8 @@
 // grant enforces what it can actually do — so a worker that opened the lead skill
 // still has no lead tools.
 
+import STRATEGIST_TOURNAMENT_SRC from './strategistTournament.js?raw'
+
 export interface CanvasSkill {
   /** SKILL.md `name`: lowercase, `[a-z0-9-]`, ≤64 chars. Becomes the namespaced
    *  invocation `/canvas-skills:<name>`. */
@@ -32,6 +34,16 @@ export interface CanvasSkill {
  *  and must stay stable so reattached sessions resolve the same plugin. */
 export const PLUGIN_NAME = 'canvas-skills'
 export const PLUGIN_VERSION = '0.1.0'
+
+/** The pinned strategist tournament workflow source (authored in
+ *  strategistTournament.js, inlined at build via `?raw`) — written into the plugin
+ *  dir by stageSkills and invoked by the mastermind-strategist skill via scriptPath. */
+export { STRATEGIST_TOURNAMENT_SRC }
+/** Where stageSkills writes the pinned workflow inside the plugin dir. */
+export const STRATEGIST_WORKFLOW_REL = 'workflows/strategist-tournament.js'
+/** Token in the strategist SKILL.md body that stageSkills replaces with the
+ *  workflow's absolute path (runtime-only, inside SPINE_DIR — never the user repo). */
+export const STRATEGIST_WORKFLOW_PLACEHOLDER = '__STRATEGIST_WORKFLOW_PATH__'
 
 export const CANVAS_SKILLS: CanvasSkill[] = [
   {
@@ -180,6 +192,47 @@ export const CANVAS_SKILLS: CanvasSkill[] = [
       '## Boundaries',
       '- You never claim or pick up unassigned work — the lead assigns. You act only on',
       '  your own issues and cannot see the rest of the canvas.',
+    ].join('\n'),
+  },
+  {
+    name: 'mastermind-strategist',
+    description:
+      'Use this when you are spawned as the STRATEGIST (the autonomous head) for a canvas — to find the next sprint by running the pinned idea tournament (10 lensed generators, a Bradley-Terry contest, refinement, an absolute-bar gate), record the bracket, and hand the winning idea to a planner or abstain to the human. You conduct the contest; you never author or judge ideas, and never create a sprint or plan.',
+    body: [
+      '# Mastermind — Strategist',
+      '',
+      'You were spawned as the **strategist** — the autonomous head of this canvas. Your job:',
+      'find the next sprint for this canvas by running an idea TOURNAMENT, then hand the winning',
+      'idea to a planner (the system spawns it). You CONDUCT the contest — you never author or',
+      'judge ideas yourself, and you never create a sprint or a plan. You have the **issues** MCP',
+      'tools and the **Workflow** tool.',
+      '',
+      '## Flow',
+      '1. PERCEIVE the vision: `get_vision` (current body, principles, anti-vision) and',
+      '   `get_vision_history` (the trajectory of intent — where the vision is heading). A vision',
+      '   must exist; if none is set, say so and stop.',
+      '2. RUN THE PINNED TOURNAMENT. Invoke the **Workflow** tool with EXACTLY:',
+      '   - `scriptPath`: "__STRATEGIST_WORKFLOW_PATH__"',
+      '   - `args`: { "vision": "<the full vision as text — assemble the body, principles, and',
+      '     anti-vision from get_vision, plus the version-history rationales from get_vision_history>" }',
+      '   Do NOT author or edit a workflow script and do NOT pass `script`. The pinned workflow runs',
+      '   10 lensed generators that read THIS repository, a pairwise Bradley-Terry tournament,',
+      '   refinement rounds, and an absolute-bar gate — all on its own. Wait for it to finish.',
+      '3. RECORD THE BRACKET. The workflow returns { gapRead, candidates, winnerLens, abstainReason }.',
+      '   Call `record_conception` with that `gapRead` and `candidates` array verbatim (this is your',
+      '   visible deliberation; it returns a conception id).',
+      '4. DELIVER OR ABSTAIN:',
+      '   - If `winnerLens` is set: `set_conception_winner` with the conception id and that',
+      '     `winnerLens`. This hands the winning idea to a planner (the system spawns it). Done.',
+      '   - If `winnerLens` is null: `abstain_conception` with the conception id and `abstainReason`.',
+      '     No sprint is born and the human is asked to steer. Do NOT retry or manufacture a winner.',
+      '5. End your turn with one line: what won (or that you abstained) and why.',
+      '',
+      '## Boundaries',
+      '- You conduct; the workflow subagents generate and judge. You never write an idea or a',
+      '  verdict yourself, and you never create a sprint, plan, or issue — the planner makes the',
+      '  sprint from your winning idea.',
+      '- Trust the tournament result: if its gate abstained, abstain — do not override it.',
     ].join('\n'),
   },
 ]

@@ -616,3 +616,26 @@
   .takeover-in { animation: none; }
   .edge-flow { stroke-dasharray: none; }
 }
+
+/* The strategist's pre-ignition deliberation — contender "proto-stars" competing to
+   become the next sprint. Brightness/size/position are set inline from each idea's
+   Bradley-Terry rating; these classes add only the motion. */
+@keyframes proto-twinkle { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+.proto-star { animation: proto-twinkle 3.2s ease-in-out infinite; transition: opacity 0.7s ease, left 0.7s ease, top 0.7s ease; }
+/* The winner igniting — a brighter, slower swell as it is chosen and pulled to the core. */
+@keyframes proto-ignite {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.18); }
+}
+.proto-winner { animation: proto-ignite 2.4s ease-in-out infinite; }
+/* A culled contender — receded and dim (spent). */
+.proto-culled { transition: opacity 0.7s ease, left 0.7s ease, top 0.7s ease; }
+/* Abstention — a calm-but-insistent amber breath: the one moment that needs you. */
+@keyframes needs-you { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+.needs-you { animation: needs-you 2.8s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-star,
+  .proto-winner,
+  .needs-you { animation: none; }
+}

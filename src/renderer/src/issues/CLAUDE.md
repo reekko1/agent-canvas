@@ -69,6 +69,14 @@ read-only dossier). Esc returns to the fleet.
 - **IssueDossier.tsx** — the read-only record surfaced on orb-select: the brief
   (description / acceptance), live facts (status · owner · deps), the audit trail
   (verdicts), and the worker's notes. All timelines, no inputs.
+- **ConceptionField.tsx** — the **pre-ignition deliberation** (the constellation's
+  missing state): while the strategist's tournament runs (no sprint yet), its candidate
+  ideas hang around the sun as contender **proto-stars** — brighter/larger by Bradley-Terry
+  rating, culled ones receded and dim, the winner ignited toward the core. Reuses the
+  `<Constellation>` sun beneath (empty issues); hover for a headline, click for the bracket.
+- **ConceptionDossier.tsx** — the read-only **bracket**: the gap it read, the winner
+  (or the abstention — the "needs you" trail), and the full field ranked by final rating
+  with each idea's lens + the round it was culled in.
 
 ### Vision sheet — the north star (the human's canvas)
 - **VisionSheet / VisionBoard** — the right-edge sheet shell + panel (wears the

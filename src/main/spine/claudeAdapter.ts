@@ -1,10 +1,17 @@
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { UNKNOWN_CARD, type AgentTodo, type CardEvent, type Question, type QuestionAnswers } from '../../shared/types'
 import * as events from './claudeEvents'
-import { CANVAS_SKILLS, PLUGIN_NAME, PLUGIN_VERSION } from './skills'
+import {
+  CANVAS_SKILLS,
+  PLUGIN_NAME,
+  PLUGIN_VERSION,
+  STRATEGIST_TOURNAMENT_SRC,
+  STRATEGIST_WORKFLOW_PLACEHOLDER,
+  STRATEGIST_WORKFLOW_REL,
+} from './skills'
 
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
@@ -84,13 +91,22 @@ export class ClaudeAdapter {
         2,
       ),
     )
+    // Bundle the pinned strategist tournament workflow inside the plugin dir, and
+    // resolve the absolute path the strategist skill invokes it by — inside SPINE_DIR,
+    // never copied into the user's repo. Re-written each call (the dir was rmSync'd).
+    const workflowPath = join(pluginDir, STRATEGIST_WORKFLOW_REL)
+    mkdirSync(dirname(workflowPath), { recursive: true })
+    writeFileSync(workflowPath, STRATEGIST_TOURNAMENT_SRC)
     for (const s of CANVAS_SKILLS) {
       const skillDir = join(pluginDir, 'skills', s.name)
       mkdirSync(skillDir, { recursive: true })
+      // The strategist skill carries a placeholder for the pinned workflow's absolute
+      // path (only known here, at stage time); substitute it. A no-op for the rest.
+      const body = s.body.split(STRATEGIST_WORKFLOW_PLACEHOLDER).join(workflowPath)
       // name is constrained to [a-z0-9-] so it's YAML-safe bare; description is
       // free text (may contain ':'), so emit it as a double-quoted scalar —
       // JSON string escaping is valid YAML flow-scalar syntax.
-      const md = `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${s.body}\n`
+      const md = `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${body}\n`
       writeFileSync(join(skillDir, 'SKILL.md'), md)
     }
     this.pluginDir = pluginDir

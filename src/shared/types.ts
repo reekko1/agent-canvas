@@ -153,9 +153,10 @@ export type CardKind = 'agent' | 'shell' | 'browser'
 
 /// An agent card's role in the Mastermind org (MASTERMIND.md). `worker` is the
 /// default; `planner` writes the plan, `lead` decomposes the plan into issues and
-/// coordinates. Drives both the card's issue-MCP tool grant (capability) and —
-/// later — its skill (behavior).
-export type AgentRole = 'planner' | 'lead' | 'worker'
+/// coordinates, `strategist` is the autonomous head — it runs the idea tournament
+/// and hands the winning idea to a planner (it writes only its own Conception).
+/// Drives both the card's issue-MCP tool grant (capability) and its skill (behavior).
+export type AgentRole = 'planner' | 'lead' | 'worker' | 'strategist'
 
 /** The card-id sentinel a card sends when it has none — the `${CANVAS_CARD_ID:-…}`
  *  default the spine bakes into each card's browser MCP headers (claudeAdapter
@@ -699,6 +700,59 @@ export interface DistanceAssessment {
   at: number
 }
 
+/// One candidate "next sprint idea" from a generator in the strategist's tournament —
+/// INTENT, never a technical spec (the schema IS the boundary: no field can hold
+/// implementation). The four core fields map onto the Sprint the planner later
+/// creates: `idea`→title, `outcome`→outcome, `why`→gapRationale, `visionLink`→visionVersionRef.
+export interface Idea {
+  id: string
+  /** The move, in one line (may name an approach, never the how). */
+  idea: string
+  /** The gap it closes + why it is the highest-leverage move now. */
+  why: string
+  /** What is observably different once done — intent altitude, not acceptance criteria. */
+  outcome: string
+  /** The exact principle / anti-vision / capability it serves (the upward trace). */
+  visionLink: string
+  /** The generator lens that authored it — sticky across refinement rounds. */
+  lens: string
+  /** Bradley-Terry rating from the last round it competed in (absent until judged). */
+  rating?: number
+  /** The round it was culled in (absent while still in the field). */
+  eliminatedRound?: number
+}
+
+/// One recorded round of a strategist tournament — the human-visible bracket, round
+/// by round. `survivors` are the Idea ids carried into the next round.
+export interface ConceptionRound {
+  n: number
+  survivors: string[]
+  note?: string
+}
+
+/// A strategist deliberation — the recorded idea tournament (gate #0 conception), and
+/// the autonomous head's ONLY write. Rides the IssueSnapshot like every other
+/// per-project record. `deliberating` while the tournament runs; `decided` fires
+/// `idea-ready` (the mastermind spawns a planner with the winner); `abstained` fires
+/// `idea-abstained` (escalate to the human — never manufacture a sprint).
+export interface Conception {
+  id: string
+  /** The project (canvas) this deliberation is for. */
+  projectId: string
+  /** The pinned VisionVersion id it deliberated under (provenance). */
+  visionVersionRef: string
+  /** The strategist's perception baseline (vision-vs-reality), if recorded. */
+  gapRead?: string
+  candidates: Idea[]
+  rounds: ConceptionRound[]
+  state: 'deliberating' | 'decided' | 'abstained'
+  /** The winning Idea id — set when state flips to `decided`. */
+  winnerIdeaRef?: string
+  /** Why it abstained — set when state flips to `abstained`. */
+  abstainReason?: string
+  createdAt: number
+}
+
 /// Every mutation the issue store accepts — the discriminated union mirrored at
 /// the IPC seam (cf. GitActionRequest / OrchestratorCommand). Main validates each
 /// against current state, applies atomically, appends to the log, and emits a
@@ -759,6 +813,35 @@ export type IssueActionRequest =
       author: string
     }
   | { kind: 'issue.comment'; id: string; author: string; body: string }
+  // Conception (strategist deliberation — the recorded idea tournament; gate #0).
+  // `conception.create` pins `visionVersionRef` from the current vision (mirrors
+  // sprint.create); the store mints the Conception id and each candidate Idea id.
+  | {
+      kind: 'conception.create'
+      projectId: string
+      gapRead?: string
+      /** The full candidate field — each with its final rating and the round it was
+       *  culled in (omit `eliminatedRound` for a survivor). The store mints each id. */
+      candidates: {
+        idea: string
+        why: string
+        outcome: string
+        visionLink: string
+        lens: string
+        rating?: number
+        eliminatedRound?: number
+      }[]
+    }
+  | {
+      kind: 'conception.updateRound'
+      id: string
+      /** The round just completed (number, surviving Idea ids, optional note). */
+      round: { n: number; survivors: string[]; note?: string }
+      /** Per-candidate rating / elimination updates, applied in place by Idea id. */
+      ratings?: { ideaRef: string; rating?: number; eliminatedRound?: number }[]
+    }
+  | { kind: 'conception.setWinner'; id: string; winnerIdeaRef: string } // → decided, fires idea-ready
+  | { kind: 'conception.abstain'; id: string; reason?: string } // → abstained, fires idea-abstained
 
 /// The reply to one issue action — `ok` plus a message on rejection (e.g. an
 /// illegal state transition or a claim on an already-owned issue) and the new
@@ -774,7 +857,7 @@ export interface IssueActionResult {
 /// board). Like RemoteState, a whole-state snapshot — every collection is flat,
 /// keyed by `projectId`, and the renderer filters to the active canvas then trees
 /// it by vision → sprint → plan → issue. `distance` is the recurring judgment
-/// timeline (newest last).
+/// timeline (newest last); `conceptions` are the strategist's recorded tournaments.
 export interface IssueSnapshot {
   visions: Vision[]
   versions: VisionVersion[]
@@ -782,17 +865,30 @@ export interface IssueSnapshot {
   plans: Plan[]
   issues: Issue[]
   distance: DistanceAssessment[]
+  /** Strategist deliberations (the recorded idea tournaments), per project. */
+  conceptions: Conception[]
 }
 
 /// A board milestone the IssueStore emits on a meaningful transition — the
-/// mastermind's wake signal (it sees only these, never the work). v1 fires
-/// `plan-ready` (a sprint's plan was approved → spawn a lead); the others are
-/// wired as the cascade grows.
+/// mastermind's wake signal (it sees only these, never the work). Fires `plan-ready`
+/// (plan approved → spawn a lead), the issue-cascade signals, and the strategist's
+/// `idea-ready` (a tournament decided → spawn a planner with the winner) /
+/// `idea-abstained` (no winner → escalate to the human).
 export interface IssueMilestone {
-  kind: 'plan-ready' | 'issue-assigned' | 'issue-done' | 'issue-blocked' | 'sprint-ready' | 'outcome-verified'
+  kind:
+    | 'plan-ready'
+    | 'issue-assigned'
+    | 'issue-done'
+    | 'issue-blocked'
+    | 'sprint-ready'
+    | 'outcome-verified'
+    | 'idea-ready'
+    | 'idea-abstained'
   projectId: string
   sprintId?: string
   issueId?: string
+  /** The strategist deliberation (on `idea-ready` / `idea-abstained`). */
+  conceptionId?: string
   /** The worker an issue was assigned to (on `issue-assigned`) — nudged to start. */
   ownerId?: string
   /** Human context (e.g. the sprint outcome, or an issue title) for the brief. */
@@ -909,7 +1005,8 @@ export interface CanvasApi {
   /** Set how autonomous the orchestrator is (see OrchestratorMode). */
   setOrchestratorMode(mode: OrchestratorMode): void
   // MARK: Issue store (Mastermind substrate)
-  /** Load the whole issue-store projection (Vision → Sprint → Plan → Issue). */
+  /** Load the whole issue-store projection (Vision → Sprint → Plan → Issue,
+   *  plus strategist conceptions). */
   loadIssueStore(): Promise<IssueSnapshot>
   /** Apply one mutation; the result surfaces rejections (illegal transition, a
    *  claim on an owned issue). Truth then arrives over onIssueUpdate. */

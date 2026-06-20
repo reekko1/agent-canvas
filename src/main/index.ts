@@ -256,6 +256,8 @@ app.whenReady().then(() => {
     speak: (e) => voice?.speakEvent(e),
     awaitVoiceCaughtUp: () => voice?.awaitCaughtUp() ?? Promise.resolve(),
     getState: () => spine.remote.getLatestState(),
+    // The strategist cascade reads the winning idea + a canvas's active sprints here.
+    issueSnapshot: () => issues.snapshot(),
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
     decideAsk: (askId, decision) => {

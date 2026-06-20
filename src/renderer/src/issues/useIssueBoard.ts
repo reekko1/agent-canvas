@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
+  Conception,
   DistanceAssessment,
   Issue,
   IssueActionRequest,
@@ -29,6 +30,7 @@ const EMPTY: IssueSnapshot = {
   plans: [],
   issues: [],
   distance: [],
+  conceptions: [],
 }
 
 /// The vision/distance writer in v1 is the human; the seam an agent identity later fills.
@@ -48,6 +50,10 @@ export interface IssueBoardApi {
   /** Distance assessments, newest-first. */
   distance: DistanceAssessment[]
   latestDistance: DistanceAssessment | undefined
+  /** The active project's strategist deliberations (recorded tournaments), newest-first. */
+  conceptions: Conception[]
+  /** The deliberation running right now (a tournament in progress), if any. */
+  liveConception: Conception | undefined
 
   // Writes — the human's three touchpoints only. Each is one issueAction; truth
   // returns over onIssueUpdate. The fleet's own writes arrive over the same
@@ -113,6 +119,10 @@ export function useIssueBoard({
     () => snapshot.distance.filter((d) => d.projectId === activeProjectId).reverse(),
     [snapshot.distance, activeProjectId],
   )
+  const conceptions = useMemo(
+    () => snapshot.conceptions.filter((c) => c.projectId === activeProjectId).reverse(),
+    [snapshot.conceptions, activeProjectId],
+  )
 
   const plansBySprint = useCallback(
     (sprintId: string) => snapshot.plans.filter((p) => p.sprintRef === sprintId),
@@ -153,6 +163,8 @@ export function useIssueBoard({
     issuesByPlan,
     distance,
     latestDistance: distance[0],
+    conceptions,
+    liveConception: conceptions.find((c) => c.state === 'deliberating'),
     commitVisionVersion,
     assessDistance,
     resolveRealignment,

@@ -10,11 +10,13 @@ import {
   StatusDot,
 } from './badges'
 import { Constellation } from './Constellation'
+import { ConceptionField } from './ConceptionField'
+import { ConceptionDossier } from './ConceptionDossier'
 import { IssueDossier } from './IssueDossier'
 import { frontierStats } from './dag'
 import { useIssuePulses } from './useIssuePulses'
 import type { IssueBoardApi } from './useIssueBoard'
-import type { Sprint } from '@shared/types'
+import type { Conception, Sprint } from '@shared/types'
 
 const CYAN = 'rgb(34 211 238)'
 
@@ -35,12 +37,27 @@ export function IssueConstellation({
 }) {
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
   const [openIssueId, setOpenIssueId] = useState<string | null>(null)
+  const [conceptionOpen, setConceptionOpen] = useState(false)
   const [hovered, setHovered] = useState<{ title: string; status: string; owner: string | null } | null>(null)
 
-  const selected = useMemo(
-    () => board.sprints.find((s) => s.id === selectedSprintId) ?? board.sprints[0] ?? null,
+  // A live deliberation takes the centre stage unless you've clicked into a specific
+  // sprint; otherwise the selected sprint (or the first).
+  const explicitSprint = useMemo(
+    () => (selectedSprintId ? board.sprints.find((s) => s.id === selectedSprintId) ?? null : null),
     [board.sprints, selectedSprintId],
   )
+  // A live tournament OR a lingering abstention takes the centre stage — BOTH must
+  // override defaulting into an (old/done) sprint, else the abstention "needs you" is
+  // hidden behind a stale completed sprint. Selecting a sprint via the rail still wins.
+  const pendingConception = useMemo(
+    () => board.liveConception ?? board.conceptions.find((c) => c.state === 'abstained') ?? null,
+    [board.liveConception, board.conceptions],
+  )
+  const selected = useMemo(
+    () => explicitSprint ?? (pendingConception ? null : board.sprints[0] ?? null),
+    [explicitSprint, pendingConception, board.sprints],
+  )
+  const conception: Conception | null = selected ? null : pendingConception
 
   const visiblePlans = useMemo(() => {
     if (!selected) return []
@@ -64,11 +81,18 @@ export function IssueConstellation({
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       if (openIssueId) setOpenIssueId(null)
+      else if (conceptionOpen) setConceptionOpen(false)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openIssueId, onClose])
+  }, [openIssueId, conceptionOpen, onClose])
+
+  // If the deliberation resolves (decided → a sprint appears, or it clears), drop the
+  // dossier flag so a stale Esc isn't swallowed by an already-invisible panel.
+  useEffect(() => {
+    if (!conception) setConceptionOpen(false)
+  }, [conception])
 
   return (
     <div className="dark fixed inset-0 z-[60] text-white" style={{ WebkitAppRegion: 'no-drag' }}>
@@ -99,6 +123,11 @@ export function IssueConstellation({
             }
           />
 
+          {/* The pre-ignition deliberation — contender proto-stars over the sun. */}
+          {conception && (
+            <ConceptionField conception={conception} onOpen={() => setConceptionOpen(true)} />
+          )}
+
           {/* Hero — the outcome headline + fleet-pulse, the typographic anchor. */}
           {selected ? (
             <div className="pointer-events-none absolute left-8 top-16 max-w-[40%]">
@@ -125,6 +154,8 @@ export function IssueConstellation({
                 <FleetPulse stats={stats} distance={board.latestDistance?.note} />
               </div>
             </div>
+          ) : conception ? (
+            <ConceptionHero conception={conception} />
           ) : (
             <Centered>
               No sprint in flight — the strategist charts the next course toward the vision.
@@ -193,6 +224,71 @@ export function IssueConstellation({
             <IssueDossier issue={openIssue} siblings={board.issuesByPlan(openIssue.planRef)} />
           </div>
         </aside>
+      )}
+
+      {/* The deliberation's read-only bracket — why the fleet is building what it is. */}
+      {conceptionOpen && conception && (
+        <aside className="takeover-in absolute right-0 top-0 z-20 flex h-full w-[360px] flex-col border-l border-white/10 bg-[#0a0c14]/85 backdrop-blur-xl">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-3">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
+              Strategist deliberation
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setConceptionOpen(false)}
+              aria-label="Close deliberation"
+              className="text-white/60 hover:text-white"
+            >
+              <X />
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <ConceptionDossier conception={conception} />
+          </div>
+        </aside>
+      )}
+    </div>
+  )
+}
+
+/// The conception hero — the deliberation's headline, mirroring the sprint hero: the
+/// live tournament, the idea forming, or the abstention (the one "needs you" moment).
+function ConceptionHero({ conception }: { conception: Conception }) {
+  // This view only ever receives a live (deliberating) or abstained conception — a
+  // decided one becomes the orbiting sprint, so there is no "decided" state here.
+  const abstained = conception.state === 'abstained'
+  return (
+    <div className="pointer-events-none absolute left-8 top-16 max-w-[40%]">
+      <div className="pointer-events-auto mb-2 flex items-center gap-2">
+        <span
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
+            abstained ? 'bg-status-blocked/15 text-status-blocked' : 'bg-cyan-400/15 text-cyan-300',
+          )}
+        >
+          <span
+            className={cn('size-1.5 rounded-full', abstained ? 'needs-you' : 'proto-star')}
+            style={{ backgroundColor: 'currentColor' }}
+          />
+          {abstained ? 'Needs you' : 'Deliberating'}
+        </span>
+      </div>
+      <h1 className="text-[28px] font-semibold leading-[1.1] tracking-tight text-white drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]">
+        {abstained ? 'No clear next sprint' : 'Choosing the next sprint'}
+      </h1>
+      {conception.gapRead && (
+        <p className="mt-2 max-w-md text-sm leading-relaxed text-white/70">{conception.gapRead}</p>
+      )}
+      {abstained ? (
+        <p className="mt-2 max-w-md text-xs leading-relaxed text-status-blocked/90">
+          {conception.abstainReason ||
+            'The strategist found nothing that clearly serves the vision. Edit the vision, or start a sprint yourself.'}
+        </p>
+      ) : (
+        <p className="mt-2 max-w-md text-xs leading-relaxed text-white/45">
+          {conception.candidates.length} ideas competing — the field brightens as the tournament resolves.
+        </p>
       )}
     </div>
   )

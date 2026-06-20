@@ -8,8 +8,9 @@
 > classification, adversarial multi-lens audits) and lifts it onto a live, visible, parallel
 > fleet. The existing `src/main/orchestrator/` (Agent SDK loop + in-process MCP over a command
 > bus) is the seam this grows from. **Milestone 1** (the visible per-canvas substrate) and the
-> **Milestone 2 worker channel** are now implemented; the roles + mastermind below are the
-> remaining build.
+> **Milestone 2 worker channel** are now implemented; partner mode runs end-to-end. The roles +
+> mastermind below are the remaining build, and the **strategist** (the autonomous head) is now
+> fully designed — see [The strategist](#the-strategist--how-an-autonomous-sprint-is-born).
 
 ## The one idea
 
@@ -40,7 +41,7 @@ is an asymptote; it is approached, never reached.
 | Layer | What it is | Owned / authored by | Boundary |
 |---|---|---|---|
 | **Vision** | Per canvas (one product/repo). The purpose, end-state experience, principles/taste, and anti-vision (markdown body). The north star. | **Human** (sole writer) | Never "done" — an asymptote |
-| **Sprint** | One outcome-bounded plan. The unit the mastermind reasons over. | Conceived by a strategist, staffed by the mastermind | Done when its **outcome is verified**, never when time elapses |
+| **Sprint** | One outcome-bounded plan. The unit the mastermind reasons over. | Idea from the strategist (autonomous) or human (partner); **created by the planner**; staffed by the mastermind | Done when its **outcome is verified**, never when time elapses |
 | **Plan** | The sprint's blueprint: stack, deps, structure. Prose + dependency graph. | The **planner** (later: + framework-expert subagents) | Self-audited by the planner before handoff to the lead |
 | **Issues** | The lead's decomposition of the delivered plan into executable DAG nodes. | The **lead** creates; a **worker** owns each | Closed when done *and* self-audited by its worker |
 
@@ -104,7 +105,7 @@ detected.
 |---|---|---|---|
 | **Human** | The vision; final authority; court of last resort. | Author/steward vision; arbitrate gap-priority; commit vision amendments. | — |
 | **Mastermind** (the orchestrator) | The org. Outcome-based; sees only validated milestones. | `hire(role, brief)`, `fire(agent)`, `observe()` (read-only milestone feed), `escalate(decision)`. Writes only the **fleet** (process lifecycle). | Plan, code, audit, assign, or flip a status. |
-| **Strategist** *(optional)* | Reads vision-vs-reality, proposes the next sprint to close the largest-leverage gap. | Gap analysis → next-sprint proposal. | Execute. |
+| **Strategist** | The **autonomous head**. A card that reads vision-vs-reality and **runs a competition** to pick the next sprint's idea, then hands the winner to the planner. Orchestrates the contest; is never in it. | Perceive → run the idea tournament → deliver the winning idea. | Generate or judge ideas itself; create the sprint; plan; execute. |
 | **Planner** | Researches and **writes the plan**; self-audits it before handoff. Later: framework-expert subagents. | `get_vision`, read, `create_plan`, then **self-audit → deliver**. | Decompose, assign, or touch issues. |
 | **Lead** | Decomposes the delivered plan into issues, sets deps, requests workers, assigns; self-audits the distribution. | `create_issue`, `set_deps`, `assign_issue`, `request_workers`, then **self-audit → deliver**. | Write the plan or the vision. |
 | **Worker** | One assigned issue at a time; self-audits its work before delivering. | `update_status` (own only), `report_blocker`, `comment`; **self-audit → `done`**. | Touch another worker's issue. |
@@ -126,6 +127,7 @@ reads (read-only) and wakes on:
 
 | Signal | Store fact | Mastermind reacts by |
 |---|---|---|
+| **idea ready** | strategist's tournament converged → `Conception.decided` | spawn the **planner** (autonomous) with the winning idea |
 | **plan ready** | planner self-audited → `plan.approved` → sprint `APPROVED` | spawn / notify the **lead** |
 | **sprint ready** | lead self-audited the distribution + assigned → `EXECUTING` | let it run |
 | **issue done** | worker self-audited → `status: done` | tally progress |
@@ -145,7 +147,7 @@ every production in a sprint ends with the producing role auditing its *own* out
 
 | Gate | Self-audited by | Question | On failure |
 |---|---|---|---|
-| **#0 Conception** | strategist / human | Does this sprint's outcome serve the **vision**? | Don't start it. |
+| **#0 Conception** | strategist / human | Does this sprint's outcome serve the **vision**? | Abstain — escalate, never manufacture a sprint. |
 | **#1 Plan** | **planner**, before handoff | Is the *structure* sound — stack right per current docs, deps coherent, shape valid? | The planner revises. (Cheapest, highest-leverage gate.) |
 | **#2 Distribution** | **lead**, before requesting workers | Do the issues *faithfully and completely* cover the plan — no drops, no hallucinated extras, deps preserved? | The lead re-decomposes. (NarraOS `/start` Step 6 proved decomposition drifts.) |
 | **#3 Per-issue** | **worker**, before `done` | Is this unit correct and **in-scope** (later-phase gaps are deferred, not blocking)? | The worker fixes; genuine ambiguity → escalate to the human. |
@@ -156,6 +158,168 @@ fresh-context subagents told to *refute* it (find → verify each finding is `re
 the NarraOS `audit-phase` pattern turned inward. The role fixes what survives before delivering; a
 genuine `needs-decision` (a tradeoff it can't resolve) is escalated to the human. The mastermind
 applies nothing — it only sees the resulting validated milestone.
+
+## The strategist — how an autonomous sprint is born
+
+Every sprint needs a *head*: something that decides what to build next. There are two, and the
+choice of head is the **only** difference between the non-manual modes. In **partner** mode the head
+is the **human**, working through a planner interview. In **autonomous** mode the head is the
+**strategist**. From the moment a winning idea exists, the two modes are byte-for-byte identical —
+the same planner writes and self-audits the plan, the same lead decomposes it, the same workers
+execute. Only the *origin* of intent differs.
+
+The strategist is the system's one act of authorship — and the only way an authoring step survives
+the never-by-hand rule is to make it a **contest, not an opinion.** The strategist does not generate
+ideas and does not judge them. It **runs a competition**: it stands up a field of independent
+idea-generators and an independent panel of judges, drives the tournament, packages the winner, and
+hands it to the planner. It is the conductor, never a player. This is the mastermind's own pattern
+one level down — *strategist : competition :: mastermind : org* — a pure orchestrator that trusts
+the flow it stages and never touches content.
+
+### Four moves
+
+1. **Perceive** — read the product as it is against the vision *and its trajectory* (the version
+   history + rationales, not just the current body — the richest planning input there is). This is
+   the dominant quality lever and the least glamorous: every candidate is anchored here, so a
+   misread baseline makes the whole field confidently wrong. Crucially, perception reads the
+   **code**, not just the docs — in testing, this engine found a real, high-leverage gap (a product
+   with no inbound data ingestion) that a docs-only survey missed entirely.
+2. **Generate** — a field of **10** idea-generators, each on a *distinct lens* (capability gap,
+   quality-below-a-principle, anti-vision drift, foundational leverage, next user-journey,
+   trajectory-anticipation). Diversity matters more than the count — the tournament can only crown
+   what's in the field. Each returns one schema'd idea.
+3. **Select** — the tournament (below).
+4. **Conceive** — package the winner and hand it to the planner, who turns it into a sprint. The
+   strategist creates no sprint and writes no plan; it delivers an *idea*.
+
+### An idea is intent, never a spec
+
+A generator's entire output is a small, fixed schema — and the schema is the *enforcement* of the
+strategist/planner boundary, not just tidiness. With no field to hold implementation, technicality
+cannot leak up:
+
+```
+Idea {
+  idea       // the move, in one line. "Set up auth with Clerk." — no how.
+  why        // the gap it closes + why it's the highest-leverage move right now
+  outcome    // what's observably different once it's done (intent altitude, not acceptance criteria)
+  visionLink // the exact principle / anti-vision / capability in the current vision it serves
+}
+```
+
+The four map straight onto the sprint the planner will create (`idea→title`, `outcome→outcome`,
+`why→gapRationale`, `visionLink→visionVersionRef`) — an idea is a *sprint, shaped at intent
+altitude*; the planner adds the technical body. An idea wins on **leverage toward the vision, not
+sophistication**: "set up auth with Clerk" can beat an elaborate proposal because auth is the
+biggest gap between here and the north star. The judging rubric must actively protect that — LLM
+judges over-reward the elaborate, so a short idea must never be punished for being short.
+
+### The tournament
+
+Selection is **pairwise, not scored.** LLM judges are unreliable at absolute scores (they cluster,
+drift, anchor to wording) and reliable at comparison ("is A better than B?"). So judges run
+head-to-head matches and ideas accrue ratings — the Chatbot Arena method, turned on ideas. For our
+small field the right estimator is a **full round-robin aggregated by Bradley-Terry** (the
+maximum-likelihood cousin of ELO; it finds the ratings that best explain the whole win/loss matrix).
+It is fully parallel and deterministic — no sequential rating updates, no RNG (round-robin pairings
+are fixed), which matters because the workflow runtime forbids randomness. Round-robin also absorbs
+the *intransitivity* LLM judgments routinely show (A>B>C>A), where a single-elimination bracket
+would let seeding luck eliminate a strong idea early.
+
+Reliability details: judged payloads are **anonymized** (judges never see the lens or generator —
+kills identity bias); each pair runs in **both orderings** and is averaged (kills position bias);
+**K judges per match**, majority-aggregated (denoises the single call); and **rigor escalates** —
+cheap and wide early (one judge, single ordering, to drop the obvious losers), full rigor late (both
+orderings, a larger panel) on the two or three finalists where precision actually decides the
+winner.
+
+**Refinement rounds** sharpen the field instead of judging it once. Survivors **cull** on a gentle
+schedule (10 → 6 → 3 → 1, so a rough-but-promising idea survives to improve), and each surviving
+generator gets to revise — but the feedback is **its own critique, never the rival ideas.** A
+refiner is told the judges' reasons *it* lost and asked to answer them; it is *not* shown the leader
+to imitate. This is the one non-negotiable: show losers the winner and the field collapses into ten
+copies of the leader within two rounds, destroying the diversity that was the whole point. Lenses
+stay sticky across rounds for the same reason.
+
+Before it sharpens, the refiner **re-reads the codebase** to verify every factual claim its idea
+rests on and correct any wording that's overstated — *accuracy over bravado*. Without this,
+adversarial refinement drifts toward persuasive overclaim: it optimizes for *winning the argument*,
+and bold framing wins arguments. An A/B confirmed it — the re-read made a winning idea self-correct
+a false "this fires the cohort-evaluator" claim into the true "this fires resource automations; the
+criteria re-evaluation is named follow-on wiring." The re-read is scoped to *verifying this idea*,
+never hunting a new gap — it tightens, never replaces; and because each refiner now does real file
+I/O, it costs wall-clock, which is exactly why it lives in the handful of refinement calls and never
+in the many judge calls.
+
+Termination is **adaptive** — stop when the leader is
+stable across two rounds and clearly separated, capped at `R_max`. Because the field shrinks, three
+refined rounds cost only ~40% more matches than a single round-robin, not 3×.
+
+The whole tournament — every candidate, round, rating, cull, and critique — is recorded as the
+**Conception** (see the data model).
+
+### Abstain — declining is a quality output
+
+The strategist may decline to propose. The tournament picks the best *relatively*; gate #0 asks
+whether even the winner clears an *absolute* bar ("does this genuinely serve the vision?"). If it
+doesn't — or if the rounds never converge (the leader keeps changing, nothing separates) — that
+**non-convergence is itself the diagnostic**: the vision gap is ambiguous or under-defined. The
+strategist abstains and escalates to the human rather than manufacture a mediocre sprint that would
+spend the whole fleet on low-value work. Knowing when *not* to act is the highest-value thing it
+does.
+
+### Self-correction is free — there is no learning loop
+
+The strategist needs no memory of its past bets, because **the codebase is its memory.** Every past
+sprint's output is permanently in reality, so "what have I tried?" and "did it work?" are both
+answered by perceiving the current state against the vision. Fresh perception self-corrects — the
+world re-tells the truth each cycle. And because the lead verifies a sprint *did what it said*
+before `DONE`, any gap still open after a verified sprint is unambiguously a **strategy** miss, not
+an execution one — but the correction is automatic via the next perception, not a feedback
+mechanism. The recorded brackets persist only as **human-facing history**: your window into what the
+unattended head has been betting on, and the signal — three missed gaps in a row — to step in and
+edit the vision. The learning is yours, not the machine's.
+
+### Where it runs — a card hosting a pinned workflow
+
+The strategist is a **card**, like every other role. It must be: its generators and judges have to
+perceive the *product's* reality, and a card runs `claude` inside the product repo, so its subagents
+inherit the right codebase for free. Hosting the tournament in the card (a separate process,
+separate tmux session) also keeps it **off the mastermind** — a crash there never touches the
+control plane, which stays lean and just waits for the milestone.
+
+The tournament itself is a **pinned dynamic workflow**, because the orchestration (round-robin
+pairings, the cull schedule, Bradley-Terry, the refine-until-converged loop) is deterministic
+control flow — a script's job, not a turn-by-turn model decision — and because a workflow keeps the
+*hundreds* of judge calls in script variables instead of blowing up the card's context, returning
+only the winner. To make it byte-identical every run, the script is **not model-authored**: it is
+bundled with the `canvas-skills` plugin in agent-canvas's own dir and invoked by **`scriptPath`**
+(never copied into the user's repo — the same isolation rule as the config dir and tmux socket).
+`scriptPath` only fixes where the *script* lives; its subagents still run in the card's repo, so
+they still see the code. The strategist *skill* is the thin conductor: perceive (`get_vision` +
+history) → marshal `args` (vision, trajectory, field size, cull schedule) → invoke the pinned
+workflow → record the Conception → package the winning idea → hand off. The mastermind spawns the
+card and waits for `idea-ready` (or the abstain escalation).
+
+### The Conception, made visible
+
+The strategist fills the constellation's one missing state: a sun with nothing orbiting it. Its
+deliberation *is* the pre-ignition view, in the same grammar as the rest of the board:
+
+- **Perceiving** → the sun reveals its dim facets — the under-served principles glow weakly; the gap
+  is the negative space in the corona (your "distance to vision," shown as the sun's own state).
+- **Competing** → ten contender proto-stars ignite in the outer dark, **brightening with their
+  Bradley-Terry rating** as matches resolve; the culled fade and fall away each round; survivors
+  pulse as they refine.
+- **Ignition** → the winner collapses inward and *becomes* the orbiting issue-system as the planner
+  takes it. The tournament doesn't precede the constellation — it turns into it.
+- **Abstain** → nothing ignites; the sun pulses a quiet "needs you," offering the bracket dossier —
+  the loudest-in-a-calm-way moment in the system, because it's the one time your attention is truly
+  required.
+
+The schema that produces the quality (the structured idea + verdict) is the very thing that renders
+the competition — so for the strategist, *designing for visibility and designing for quality are the
+same act.* One recorded artifact, both cares.
 
 ## The substrate — one store, two faces
 
@@ -189,6 +353,9 @@ the tool grant (capability) and the role's skill (behavior):
   `create_plan` — it decomposes a *delivered* plan, never authors one.
 - A **worker** physically cannot flip another worker's status (its `update_status` is restricted to
   issues it owns).
+- A **strategist** is read-only over the chain (`get_vision` + version history, `list_sprints`) and
+  writes only its **Conception** (the recorded tournament). It has no sprint or plan tools — it
+  delivers an *idea*, and the planner creates the sprint.
 - The **mastermind** has *zero* issue-mutation tools and no `Edit`/`Write`; it acts only through
   the command bus (hire/fire) and reads the board.
 - The **vision** is human-write-only and read by everyone; agents may *propose* amendments, only
@@ -232,6 +399,9 @@ Plan          { id, sprintRef, overview, stack[], structure, deps(DAG), nonGoals
 Issue    { id, planRef, title, description, verify(acceptance), status, owner,
            phase, deps[], labels[], kind:'task'|'audit-gate'|'decision',
            verdicts[], comments[], intentRef }
+Idea       { idea(headline), why, outcome, visionLink, lens, rating, eliminatedRound? } // a generator's schema'd output + tournament metadata
+Conception { id, projectId, visionVersionRef, gapRead, candidates:Idea[], rounds[],
+             state:'deliberating'|'decided'|'abstained', winnerIdeaRef? } // the recorded tournament — the strategist's only write
 ```
 
 `verdicts[]` is the **self-audit trail** — the producing role records its own audit outcome there,
@@ -318,15 +488,14 @@ These are the conditions under which "trust the flow" is *earned* rather than bl
   role, escalate, or *restructure* (split a role, strengthen a role's self-audit skill, change the
   loadout)? This — how a board reacts to a failing company — is the only real reasoning the
   mastermind needs.
-- **Strategist as a distinct role vs. a mastermind function.** Is gap-analysis a hired agent or
-  the mastermind's one act of authorship? (Leaning: hired, to preserve never-by-hand.)
 - **TodoWrite.** Kept as an agent's *private* scratchpad for executing one issue; the shared
   issue store is the coordination layer. Two layers, never merged.
 
 ## The summary in one breath
 
-You author the vision. A strategist reads the gap and proposes the next sprint. The mastermind
-stages the org and trusts the flow — it sees only validated milestones. The planner writes and
+You author the vision. A strategist runs a competition to find the next sprint's idea and hands the
+winner to the planner. The mastermind stages the org and trusts the flow — it sees only validated
+milestones. The planner writes and
 self-audits the plan; the lead decomposes and self-audits the distribution; workers execute and
 self-audit their work — each spawning adversarial subagents before it hands off. The store holds
 all of it, visible to you and controllable by agents over MCP. Your scarce attention concentrates

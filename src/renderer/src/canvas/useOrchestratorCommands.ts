@@ -92,6 +92,13 @@ export function useOrchestratorCommands(deps: {
       return
     }
 
+    if (cmd.cmd === 'confirm-clear') {
+      // The gate was resolved on another device (the phone) or timed out — dismiss
+      // our toast. Fire-and-forget: no result reply expected.
+      setOrchConfirm((c) => (c?.id === cmd.id ? null : c))
+      return
+    }
+
     if (cmd.cmd === 'focusCanvas') {
       const { canvasId } = cmd.payload
       const target = proj.projects.find((p) => p.id === canvasId)

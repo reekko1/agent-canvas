@@ -19,26 +19,44 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 15px/1.45 -apple-system, 'Helvetica Neue', sans-serif;
-  /* Clear the status bar / notch (status-bar-style is black-translucent, so
-     content draws under it) and the home indicator. */
-  padding: calc(18px + env(safe-area-inset-top)) 18px calc(28px + env(safe-area-inset-bottom));
   max-width: 720px;
   margin: 0 auto;
+  /* A fixed-height flex column: header, the active view (flex:1), bottom nav. The
+     terminal overlay floats above all of it. */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-h1 {
-  font-size: 17px;
-  letter-spacing: 0.02em;
+header {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Clear the status bar / notch (status-bar-style is black-translucent). */
+  padding: calc(12px + env(safe-area-inset-top)) 18px 10px;
 }
-h1 .badge {
-  background: var(--blocked);
-  color: #13111c;
-  border-radius: 10px;
-  padding: 1px 9px;
-  font-size: 13px;
+header .app-title {
+  font-size: 17px;
   font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* The two top-level views; only the one matching body[data-view] is shown. */
+#chat-view,
+#supervise-view {
+  flex: 1;
+  min-height: 0;
+}
+#supervise-view {
+  overflow-y: auto;
+  padding: 0 18px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+body[data-view='chat'] #supervise-view {
+  display: none;
+}
+body[data-view='supervise'] #chat-view {
   display: none;
 }
 .canvas {
@@ -364,4 +382,231 @@ h2 {
 .term-keys button.on {
   border-color: var(--blocked);
   color: var(--blocked);
+}
+
+/* ---- Chat (the orchestrator home view) ---- */
+#chat-view {
+  display: flex;
+  flex-direction: column;
+}
+#chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 18px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.msg {
+  display: flex;
+  gap: 9px;
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+.msg .g {
+  flex: none;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  width: 14px;
+  text-align: center;
+}
+.msg .t {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.msg-you .t {
+  color: var(--text);
+  font-weight: 600;
+}
+.msg-assistant .t,
+.msg-result .t {
+  color: var(--text);
+}
+.msg-error .g,
+.msg-error .t {
+  color: var(--error);
+}
+.msg-auto .g,
+.msg-auto .t,
+.msg-mode .g,
+.msg-mode .t {
+  color: var(--blocked);
+}
+
+/* Input bar — sits at the bottom of the chat view (JS lifts it above the soft
+   keyboard via transform). The working pulse breathes its border. */
+#chat-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  position: relative;
+}
+#chat-bar.is-working {
+  animation: chat-pulse 1.6s ease-in-out infinite;
+}
+@keyframes chat-pulse {
+  0%,
+  100% {
+    border-top-color: var(--border);
+  }
+  50% {
+    border-top-color: #48bfc0;
+  }
+}
+.chat-conn {
+  position: absolute;
+  top: -18px;
+  left: 16px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+#chat-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--body);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 9px 14px;
+  color: var(--text);
+  font: 15px -apple-system, sans-serif;
+}
+#chat-input:focus {
+  outline: none;
+  border-color: #48bfc0;
+}
+.mic {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 17px;
+  /* The speaking glow tracks TTS loudness via --voice-level (0..1). */
+  box-shadow: 0 0 calc(var(--voice-level, 0) * 16px) rgba(72, 191, 192, 0.6);
+}
+.mic.recording {
+  border-color: var(--error);
+  color: var(--error);
+  animation: mic-rec 1s ease-in-out infinite;
+}
+@keyframes mic-rec {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(243, 63, 76, 0);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(243, 63, 76, 0.5);
+  }
+}
+.chat-mode {
+  flex: none;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 7px 10px;
+}
+.mode-manual {
+  color: var(--muted);
+}
+.mode-partner {
+  color: #48bfc0;
+  border-color: #48bfc0;
+}
+.mode-autonomous {
+  color: var(--blocked);
+  border-color: var(--blocked);
+}
+.chat-send {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 17px;
+  border-color: var(--done);
+  color: var(--done);
+}
+
+/* Confirm gate — a cyan-accented sheet above the input bar (the orchestrator's
+   own manual-mode permission ask). */
+#chat-confirm:empty {
+  display: none;
+}
+.orch-confirm {
+  margin: 0 14px 6px;
+  background: var(--body);
+  border: 1px solid #48bfc0;
+  border-radius: 12px;
+  padding: 11px 13px;
+  box-shadow: 0 0 18px rgba(72, 191, 192, 0.16);
+}
+.oc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.oc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #48bfc0;
+  flex: none;
+  animation: mic-rec 1.4s ease-in-out infinite;
+}
+.oc-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.oc-detail {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-family: ui-monospace, monospace;
+  margin: 5px 0 9px;
+  word-break: break-word;
+}
+.oc-acts {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- Bottom nav ---- */
+#bottom-nav {
+  flex: none;
+  display: flex;
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--bg);
+}
+#bottom-nav button {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+#bottom-nav button.on {
+  color: var(--text);
+}
+#bottom-nav .badge {
+  background: var(--blocked);
+  color: #13111c;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  display: none;
 }

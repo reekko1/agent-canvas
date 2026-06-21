@@ -16,6 +16,7 @@ import { AgentIssueMcp } from './orchestrator/agentIssueMcp'
 import { BrowserController } from './orchestrator/browserController'
 import { SonioxVoice, validateSonioxKey } from './voice/soniox'
 import { storeSonioxKey } from './voice/keyStore'
+import type { WebSocket as RemoteWebSocket } from 'ws'
 import type {
   AskDecision,
   GitActionRequest,
@@ -48,6 +49,24 @@ let nextItem = 1
  *  claude's initial prompt by ensure-card (one-shot, so a spawned agent boots
  *  already working on the task instead of racing a keystroke injection). */
 const pendingPrompts = new Map<string, string>()
+
+// Single-talker voice lease. The Soniox STT socket is a singleton, so two
+// simultaneous talkers would interleave tokens. The first to grab the mic —
+// desktop ⌥ (`'desktop'`) or a phone push-to-talk (its WebSocket) — holds the
+// floor until the utterance ends; a start from a different source is refused.
+// Released by a terminal STT event (final/error, in the voice callbacks) or an
+// explicit finish/cancel/socket-close.
+let voiceLease: 'desktop' | RemoteWebSocket | null = null
+
+/** Grab the mic for a source, run the barge-in (stop the spoken reply + the turn),
+ *  and open a fresh STT session. Refused (no-op) if another source holds the floor. */
+function startVoice(source: 'desktop' | RemoteWebSocket): void {
+  if (voiceLease && voiceLease !== source) return
+  voiceLease = source
+  voice?.cancelSpeak()
+  orchestrator?.interrupt()
+  voice?.startStt()
+}
 
 function send(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args)
@@ -242,12 +261,32 @@ app.whenReady().then(() => {
   // confirms to the renderer (see the orchestrator-* IPC below).
   // Voice I/O for the orchestrator: mic PCM streams up over IPC, transcripts and
   // synthesized audio stream back. No-ops gracefully when SONIOX_API_KEY is unset.
+  // Each callback fans to BOTH the desktop renderer (IPC) and every connected
+  // phone (the /orch socket) — voice is shared output. A terminal STT event
+  // (final / error) also releases the single-talker lease (see startVoice).
   voice = new SonioxVoice({
-    onPartial: (text) => send('voice-stt-partial', text),
-    onFinal: (text) => send('voice-stt-final', text),
-    onError: (message) => send('voice-stt-error', message),
-    onTtsAudio: (pcm) => send('voice-tts-audio', pcm),
-    onTtsReset: () => send('voice-tts-reset'),
+    onPartial: (text) => {
+      send('voice-stt-partial', text)
+      spine.remote.broadcastVoice({ t: 'stt-partial', text })
+    },
+    onFinal: (text) => {
+      send('voice-stt-final', text)
+      spine.remote.broadcastVoice({ t: 'stt-final', text })
+      voiceLease = null
+    },
+    onError: (message) => {
+      send('voice-stt-error', message)
+      spine.remote.broadcastVoice({ t: 'stt-error', message })
+      voiceLease = null
+    },
+    onTtsAudio: (pcm) => {
+      send('voice-tts-audio', pcm)
+      spine.remote.broadcastTtsAudio(pcm)
+    },
+    onTtsReset: () => {
+      send('voice-tts-reset')
+      spine.remote.broadcastVoice({ t: 'tts-reset' })
+    },
   })
   orchestrator = new Orchestrator({
     send,
@@ -268,6 +307,12 @@ app.whenReady().then(() => {
     browser: browserController,
     // Play the scan-line flourish on a browser card when its page is captured.
     notifyBrowserScan: (cardId) => send('browser-scan', cardId),
+    // The phone is a second client: fan events to it, and show/clear its copy of
+    // the manual-mode confirm gate under the same id as the desktop command.
+    remoteEmit: (e) => spine.remote.broadcastOrchEvent(e),
+    remoteConfirm: (id, title, detail) => spine.remote.broadcastConfirm(id, title, detail),
+    remoteClearConfirm: (id) => spine.remote.broadcastConfirmClear(id),
+    remoteMode: (mode) => spine.remote.broadcastMode(mode),
   })
   // Echo every agent's finished turn into the supervision chat the instant its
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just
@@ -459,6 +504,29 @@ spine.remote.onDecline = (askId) => {
 }
 // Skip the phone push when you're already at the desktop.
 spine.remote.isDesktopFocused = () => win?.isFocused() ?? false
+// The phone as a second orchestrator client (over the /orch socket). Prompts /
+// mode / confirm decisions drive the same shared session; voice is lease-guarded
+// so only the active talker's mic audio is honored. Optional-chained like the
+// callbacks above so wiring at module load is safe before app.whenReady assigns
+// the singletons.
+spine.remote.getMode = () => orchestrator?.currentMode ?? 'manual'
+spine.remote.voiceAvailable = () => voice?.available ?? false
+spine.remote.onOrchPrompt = (text) => void orchestrator?.run(text)
+spine.remote.onOrchMode = (mode) => orchestrator?.setMode(mode)
+spine.remote.onOrchConfirm = (id, allow) => orchestrator?.resolveRemoteConfirm(id, allow)
+spine.remote.onVoiceStart = (ws) => startVoice(ws)
+spine.remote.onVoiceAudio = (ws, pcm) => {
+  if (voiceLease === ws) voice?.pushAudio(pcm)
+}
+spine.remote.onVoiceFinish = (ws) => {
+  if (voiceLease === ws) voice?.finishStt() // lease released on the final/error callback
+}
+spine.remote.onVoiceCancel = (ws) => {
+  if (voiceLease === ws) {
+    voice?.cancelStt()
+    voiceLease = null
+  }
+}
 ipcMain.on('open-external', (_e, url: string) => {
   if (typeof url === 'string' && url.startsWith('https://')) void shell.openExternal(url)
 })
@@ -498,18 +566,23 @@ ipcMain.handle('voice-save-key', async (_e, key: string) => {
   return { ok: true }
 })
 ipcMain.on('voice-stt-start', () => {
-  // Barge-in: grabbing the mic talks over the orchestrator. Drop the audio still
-  // playing AND interrupt the turn, so a multi-block turn can't start a fresh
-  // spoken line a beat later — the floor is yours.
-  voice?.cancelSpeak()
-  orchestrator?.interrupt()
-  voice?.startStt()
+  // Barge-in: grabbing the mic talks over the orchestrator. startVoice drops the
+  // audio still playing AND interrupts the turn (so a multi-block turn can't start
+  // a fresh spoken line a beat later) — refused if a phone holds the floor.
+  startVoice('desktop')
 })
-ipcMain.on('voice-stt-audio', (_e, chunk: ArrayBuffer | Uint8Array) =>
-  voice?.pushAudio(Buffer.from(chunk as ArrayBuffer)),
-)
-ipcMain.on('voice-stt-finish', () => voice?.finishStt())
-ipcMain.on('voice-stt-cancel', () => voice?.cancelStt())
+ipcMain.on('voice-stt-audio', (_e, chunk: ArrayBuffer | Uint8Array) => {
+  if (voiceLease === 'desktop') voice?.pushAudio(Buffer.from(chunk as ArrayBuffer))
+})
+ipcMain.on('voice-stt-finish', () => {
+  if (voiceLease === 'desktop') voice?.finishStt() // lease released on final/error
+})
+ipcMain.on('voice-stt-cancel', () => {
+  if (voiceLease === 'desktop') {
+    voice?.cancelStt()
+    voiceLease = null
+  }
+})
 // The renderer's TTS player reports playback start/stop; drives action pacing.
 ipcMain.on('voice-playing', (_e, playing: boolean) => voice?.setPlaying(playing))
 // Queue an initial prompt for a not-yet-spawned card (set just before mount).

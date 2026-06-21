@@ -1,6 +1,7 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { ensureToken } from './net'
 
 /// A full-screen terminal for one card: an xterm wired to the card's tmux
 /// session over a WebSocket (/term). It's a SECOND tmux client, so it mirrors
@@ -65,12 +66,18 @@ export function openTerminal(cardId: string, name: string): void {
   const send = (m: unknown): void => {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(m))
   }
-  const connect = (): void => {
+  const connect = async (): Promise<void> => {
+    // /term now requires the session token as a query param (a WS upgrade can't
+    // carry the x-canvas-token header). Fetch it first; bail if we closed while
+    // waiting.
+    const token = await ensureToken()
+    if (closing) return
     const url = new URL('term', location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.searchParams.set('card', cardId)
     url.searchParams.set('cols', String(term.cols))
     url.searchParams.set('rows', String(term.rows))
+    url.searchParams.set('token', token)
     const ws = new WebSocket(url)
     socket = ws
     ws.onopen = () => {
@@ -88,13 +95,13 @@ export function openTerminal(cardId: string, name: string): void {
       if (closing) return
       if (attempts++ < 6) {
         stateEl.textContent = 'reconnecting…'
-        setTimeout(connect, Math.min(2000, 400 * attempts))
+        setTimeout(() => void connect(), Math.min(2000, 400 * attempts))
       } else {
         stateEl.textContent = 'disconnected'
       }
     }
   }
-  connect()
+  void connect()
 
   // ---- Sticky Ctrl modifier: arms the next typed char as Ctrl+<char> ----
   let ctrl = false

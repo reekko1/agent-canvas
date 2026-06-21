@@ -3,7 +3,13 @@ import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
-import type { QuestionAnswers, RemoteState } from '../../shared/types'
+import type {
+  OrchestratorEvent,
+  OrchestratorMode,
+  OrchServerFrame,
+  QuestionAnswers,
+  RemoteState,
+} from '../../shared/types'
 import { composeAskNotification, type FreshAsk } from './notify'
 import type { PushService } from './push'
 
@@ -64,6 +70,30 @@ export class RemoteServer {
    *  attached to the card's live session. */
   openTerminal?: (cardId: string, cols: number, rows: number) => TermSession | null
 
+  // --- Orchestrator (the phone is a second client into the shared session) ----
+  // Set by the host (index.ts) so the `/orch` WebSocket drives the same session
+  // the desktop does. The voice callbacks carry the originating socket so the host
+  // can run a single-talker lease (only the holder's mic audio is honored).
+  /** The live autonomy mode + whether voice is configured — read for the `hello`
+   *  handshake a freshly connected phone gets. */
+  getMode?: () => OrchestratorMode
+  voiceAvailable?: () => boolean
+  /** A chat prompt typed on the phone. */
+  onOrchPrompt?: (text: string) => void
+  /** A mode change toggled on the phone. */
+  onOrchMode?: (mode: OrchestratorMode) => void
+  /** A confirm-gate decision from the phone (same id space as the desktop). */
+  onOrchConfirm?: (id: number, allow: boolean) => void
+  /** Push-to-talk start/audio/finish/cancel from the phone — each carries the
+   *  socket so the host's voice lease knows the source. */
+  onVoiceStart?: (ws: WebSocket) => void
+  onVoiceAudio?: (ws: WebSocket, pcm: Buffer) => void
+  onVoiceFinish?: (ws: WebSocket) => void
+  onVoiceCancel?: (ws: WebSocket) => void
+
+  /** Every open `/orch` socket — the broadcast set for events/voice/confirm. */
+  private orchClients = new Set<WebSocket>()
+
   port = 0
   // Per-session CSRF token. tailscale serve fronts the panel at an https origin,
   // so a loopback Origin check would break the real deployment; instead the
@@ -84,11 +114,24 @@ export class RemoteServer {
 
   start(preferredPort: number | undefined, onReady: (port: number) => void): void {
     const server = http.createServer((req, res) => this.handle(req, res))
-    // WebSocket terminal: /term?card=<id>&cols=&rows= bridges to a tmux client.
+    // Two WebSocket protocols, kept on separate servers: /term (tmux bridge) and
+    // /orch (the orchestrator session). Both now require the session token as a
+    // query param — browsers can't set headers on a WS upgrade, so the header
+    // trick used for POSTs can't apply. This closes the prior /term tailnet-only
+    // gap and gates /orch, which can spawn/kill agents and approve tool calls.
     const wss = new WebSocketServer({ noServer: true })
+    const wssOrch = new WebSocketServer({ noServer: true })
     server.on('upgrade', (req, socket, head) => {
-      if ((req.url ?? '').split('?')[0] !== '/term') return socket.destroy()
-      wss.handleUpgrade(req, socket, head, (ws) => this.handleTerm(req, ws))
+      const [path, qs] = (req.url ?? '').split('?')
+      const q = new URLSearchParams(qs ?? '')
+      if (q.get('token') !== this.token) return socket.destroy() // opaque drop, like a 404
+      if (path === '/term') {
+        wss.handleUpgrade(req, socket, head, (ws) => this.handleTerm(req, ws))
+      } else if (path === '/orch') {
+        wssOrch.handleUpgrade(req, socket, head, (ws) => this.handleOrch(ws))
+      } else {
+        socket.destroy()
+      }
     })
     // Same stable-identity contract as the hook sink: a `tailscale serve` route
     // is pinned to this port across restarts, so retry the held port through a
@@ -173,6 +216,134 @@ export class RemoteServer {
       clearInterval(heartbeat)
       sess.kill()
     })
+  }
+
+  /** Bridge an orchestrator WebSocket: the phone as a second client into the one
+   *  shared session. Text frames are JSON control (`OrchClientFrame`); binary
+   *  frames are raw mic PCM (honored only while this socket holds the voice lease,
+   *  enforced by the host's `onVoiceAudio`). The host broadcasts events / TTS /
+   *  confirm back via the helpers below. */
+  private handleOrch(ws: WebSocket): void {
+    this.orchClients.add(ws)
+    // Handshake: reflect the live mode + whether voice is configured so the phone
+    // UI is correct the instant it connects (state itself rides the /state poll).
+    this.orchSend(ws, {
+      t: 'hello',
+      mode: this.getMode?.() ?? 'manual',
+      voiceAvailable: this.voiceAvailable?.() ?? false,
+    })
+    ws.on('message', (raw, isBinary) => {
+      if (isBinary) {
+        this.onVoiceAudio?.(ws, raw as Buffer)
+        return
+      }
+      let m: { t?: string; text?: unknown; mode?: unknown; id?: unknown; allow?: unknown }
+      try {
+        m = JSON.parse(raw.toString())
+      } catch {
+        return // ignore malformed frames
+      }
+      switch (m.t) {
+        case 'prompt':
+          if (typeof m.text === 'string') this.onOrchPrompt?.(m.text)
+          break
+        case 'mode':
+          if (m.mode === 'manual' || m.mode === 'partner' || m.mode === 'autonomous')
+            this.onOrchMode?.(m.mode)
+          break
+        case 'confirm':
+          if (typeof m.id === 'number' && typeof m.allow === 'boolean')
+            this.onOrchConfirm?.(m.id, m.allow)
+          break
+        case 'stt-start':
+          this.onVoiceStart?.(ws)
+          break
+        case 'stt-finish':
+          this.onVoiceFinish?.(ws)
+          break
+        case 'stt-cancel':
+          this.onVoiceCancel?.(ws)
+          break
+      }
+    })
+    // A 'ws' 'error' with no listener crashes main (it's rethrown) — handle it so a
+    // dropped phone is harmless; release any voice lease it held.
+    ws.on('error', () => {
+      try {
+        ws.terminate()
+      } finally {
+        this.onVoiceCancel?.(ws)
+      }
+    })
+    // Heartbeat, same as /term — reap a half-open socket so the broadcast set and
+    // any held voice lease don't leak.
+    let alive = true
+    ws.on('pong', () => {
+      alive = true
+    })
+    const heartbeat = setInterval(() => {
+      if (!alive) {
+        ws.terminate()
+        return
+      }
+      alive = false
+      try {
+        ws.ping()
+      } catch {
+        // socket already tearing down
+      }
+    }, 30_000)
+    ws.on('close', () => {
+      clearInterval(heartbeat)
+      this.orchClients.delete(ws)
+      this.onVoiceCancel?.(ws) // release the lease if this socket held it
+    })
+  }
+
+  /** Send one JSON frame to a single orchestrator socket. */
+  private orchSend(ws: WebSocket, frame: OrchServerFrame): void {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(frame))
+  }
+
+  /** Send one JSON frame to every connected phone. */
+  private orchBroadcast(frame: OrchServerFrame): void {
+    const data = JSON.stringify(frame)
+    for (const ws of this.orchClients) if (ws.readyState === ws.OPEN) ws.send(data)
+  }
+
+  /** Fan a typed orchestrator event to every phone (the `remoteEmit` tap). */
+  broadcastOrchEvent(e: OrchestratorEvent): void {
+    this.orchBroadcast({ t: 'event', event: e })
+  }
+
+  /** Show a confirm gate on every phone, under the same id as the desktop. */
+  broadcastConfirm(id: number, title: string, detail: string): void {
+    this.orchBroadcast({ t: 'confirm', id, title, detail })
+  }
+
+  /** Dismiss a confirm gate on every phone (resolved elsewhere or timed out). */
+  broadcastConfirmClear(id: number): void {
+    this.orchBroadcast({ t: 'confirm-clear', id })
+  }
+
+  /** Reflect a mode change to every phone so its badge stays in sync. */
+  broadcastMode(mode: OrchestratorMode): void {
+    this.orchBroadcast({ t: 'mode', mode })
+  }
+
+  /** Fan a voice control frame (transcript / error / tts-reset) to every phone. */
+  broadcastVoice(frame: OrchServerFrame): void {
+    this.orchBroadcast(frame)
+  }
+
+  /** Fan a chunk of TTS audio (raw pcm_s16le @24kHz) to every phone as binary. */
+  broadcastTtsAudio(pcm: Buffer): void {
+    for (const ws of this.orchClients) if (ws.readyState === ws.OPEN) ws.send(pcm)
+  }
+
+  /** Whether the broadcast helper has any live phone (lets the host skip work). */
+  get hasOrchClients(): boolean {
+    return this.orchClients.size > 0
   }
 
   publish(state: RemoteState): void {

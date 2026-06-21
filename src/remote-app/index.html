@@ -12,16 +12,38 @@
     <link rel="apple-touch-icon" href="icon.svg" />
     <title>Agent Canvas</title>
   </head>
-  <body>
-    <h1>
-      Agent Canvas
-      <span class="badge" id="badge"></span>
+  <body data-view="chat">
+    <header>
+      <span class="app-title">Agent Canvas</span>
       <span class="offline" id="offline">offline</span>
       <button id="enable">Enable alerts</button>
-    </h1>
-    <div id="canvases"></div>
-    <h2>ACTIVITY</h2>
-    <div id="feed" class="empty">…</div>
+    </header>
+
+    <!-- CHAT: the orchestrator, the home view -->
+    <main id="chat-view">
+      <div id="chat-log"></div>
+      <div id="chat-confirm"></div>
+      <div id="chat-bar">
+        <span class="chat-conn" id="chat-conn" style="display: none"></span>
+        <input id="chat-input" type="text" placeholder="Talk to the orchestrator…" autocomplete="off" />
+        <button id="chat-mic" class="mic" aria-label="Hold to talk">🎙</button>
+        <button id="chat-mode" class="chat-mode mode-manual">manual</button>
+        <button id="chat-send" class="chat-send" aria-label="Send">↑</button>
+      </div>
+    </main>
+
+    <!-- FLEET: supervision, the secondary view -->
+    <main id="supervise-view">
+      <div id="canvases"></div>
+      <h2>ACTIVITY</h2>
+      <div id="feed" class="empty">…</div>
+    </main>
+
+    <nav id="bottom-nav">
+      <button data-view="chat" class="on">Chat</button>
+      <button data-view="supervise">Fleet<span class="badge" id="nav-badge"></span></button>
+    </nav>
+
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

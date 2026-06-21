@@ -20,6 +20,7 @@ import type {
   IssueSnapshot,
   OrchestratorCommand,
   OrchestratorCommandResult,
+  OrchestratorConfirmResult,
   OrchestratorEvent,
   OrchestratorMode,
   OrchestratorTarget,
@@ -58,10 +59,26 @@ export interface OrchestratorDeps {
    *  mutating action lands with its narration instead of ahead of it. No-op when
    *  voice is unavailable. */
   awaitVoiceCaughtUp?: () => Promise<void>
+  /** Broadcast a typed event to every connected phone — a third tap beside `send`
+   *  (renderer IPC) and `speak` (voice). No-op when no phone is connected. */
+  remoteEmit?: (e: OrchestratorEvent) => void
+  /** Show the manual-mode confirm gate on connected phones too, under the SAME id
+   *  as the desktop command, so a gate can be answered from either device. */
+  remoteConfirm?: (id: number, title: string, detail: string) => void
+  /** Dismiss a phone confirm gate once it's resolved (by any device or timeout). */
+  remoteClearConfirm?: (id: number) => void
+  /** Reflect a mode change to connected phones so their badge stays in sync,
+   *  whichever device flipped it. */
+  remoteMode?: (mode: OrchestratorMode) => void
 }
 
 export class Orchestrator {
   private readonly pending = new Map<number, (r: OrchestratorCommandResult) => void>()
+  /** Confirm gates awaiting a decision, keyed by the same id sent to BOTH the
+   *  desktop renderer and the phones; the first decision (or the 5-min timeout)
+   *  wins and clears the other surfaces. Distinct from `pending` (mutations) so
+   *  the two result shapes don't overload one map. */
+  private readonly confirmPending = new Map<number, (allow: boolean) => void>()
   private nextId = 1
 
   // --- Streaming-input session state ---------------------------------------
@@ -94,11 +111,18 @@ export class Orchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
+  /** The live autonomy mode — read by the remote handshake so a freshly connected
+   *  phone reflects the current mode. (The field is private; this is the read seam.) */
+  get currentMode(): OrchestratorMode {
+    return this.mode
+  }
+
   /** Switch mode — announce it (it changes how work is born and whether the
    *  cascade runs without you). */
   setMode(mode: OrchestratorMode): void {
     if (mode === this.mode) return
     this.mode = mode
+    this.deps.remoteMode?.(mode) // keep the phone badge in sync, whoever flipped it
     const note =
       mode === 'manual'
         ? 'manual — I act only on your command'
@@ -385,13 +409,34 @@ export class Orchestrator {
     this.wake?.()
   }
 
-  /** Reply to a dispatched command (called from the renderer via IPC). */
+  /** Reply to a dispatched command (called from the renderer via IPC). A `confirm`
+   *  reply settles the dual-source gate (and clears the phone); everything else is
+   *  a mutation result. */
   resolveCommand(id: number, result: OrchestratorCommandResult): void {
+    if (this.settleConfirm(id, (result as OrchestratorConfirmResult).allow)) return
     const resolve = this.pending.get(id)
     if (resolve) {
       this.pending.delete(id)
       resolve(result)
     }
+  }
+
+  /** Settle a confirm gate from the phone (over the `/orch` socket). Same id space
+   *  as the desktop command, so whichever device answers first wins. */
+  resolveRemoteConfirm(id: number, allow: boolean): void {
+    this.settleConfirm(id, allow)
+  }
+
+  /** Resolve a pending confirm gate exactly once, clearing BOTH surfaces so the
+   *  losing device's prompt dismisses. Returns whether the id was a live gate. */
+  private settleConfirm(id: number, allow: boolean): boolean {
+    const resolve = this.confirmPending.get(id)
+    if (!resolve) return false
+    this.confirmPending.delete(id)
+    this.deps.send('orchestrator-command', { id, cmd: 'confirm-clear' } as OrchestratorCommand)
+    this.deps.remoteClearConfirm?.(id)
+    resolve(allow)
+    return true
   }
 
   // --- Session plumbing -----------------------------------------------------
@@ -511,8 +556,22 @@ export class Orchestrator {
     // manual → a human decides; give it minutes, not the 30s machine round-trip.
     // Build the human copy here (main owns the tool vocabulary) and ship it ready
     // to display — the renderer no longer reverse-engineers what a verb means.
-    const r = await this.dispatch({ cmd: 'confirm', payload: this.describeGate(toolName, input) }, 5 * 60_000)
-    return r.allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
+    const allow = await this.confirmGate(this.describeGate(toolName, input))
+    return allow ? { allow: true } : { allow: false, reason: 'You denied this action.' }
+  }
+
+  /** A manual-mode gate, fanned to the desktop renderer AND every connected phone
+   *  under one id. Resolves on the first decision from any device; a 5-minute
+   *  silence denies. (Distinct from `dispatch`, whose 30s machine round-trip suits
+   *  mutations, not a human deciding.) */
+  private confirmGate(copy: { title: string; detail: string }): Promise<boolean> {
+    const id = this.nextId++
+    this.deps.send('orchestrator-command', { id, cmd: 'confirm', payload: copy } as OrchestratorCommand)
+    this.deps.remoteConfirm?.(id, copy.title, copy.detail)
+    return new Promise<boolean>((resolve) => {
+      this.confirmPending.set(id, resolve)
+      setTimeout(() => this.settleConfirm(id, false), 5 * 60_000)
+    })
   }
 
   /** Turn a gated tool call into a plain-language gate ("Spawn an agent" / "on
@@ -597,6 +656,7 @@ export class Orchestrator {
     }
     this.deps.send('orchestrator-event', e)
     this.deps.speak?.(e) // voice tap, beside the typed event
+    this.deps.remoteEmit?.(e) // phone broadcast, beside the renderer + voice taps
   }
 
   /** Tell the renderer the orchestrator just acted on an agent, so it can draw a

@@ -1,29 +1,25 @@
-// Renderer-side audio for the orchestrator's voice. Two halves:
-//   • MicCapture — getUserMedia → an AudioWorklet that downsamples to 16 kHz
-//     mono and emits little-endian pcm_s16le chunks. Those go up over IPC to the
-//     Soniox STT socket in main.
-//   • TtsPlayer — schedules the 24 kHz pcm_s16le chunks that stream back from the
-//     TTS socket, gapless, on a Web Audio timeline. reset() is barge-in: it kills
-//     everything queued so a new reply (or the user talking) cuts the old voice.
-// Both rates are fixed by the Soniox config in main (see voice/soniox.ts).
-// MIRRORED by the phone app at src/remote-app/voice.ts (a separate Vite build
-// that can't import across this boundary) — keep the two in sync.
+// VENDORED MIRROR of src/renderer/src/orchestrator/voice.ts — the phone app is a
+// separate Vite build (no @/ alias into the desktop renderer), so MicCapture /
+// TtsPlayer are copied here rather than imported across the build boundary. They
+// are pure Web Audio (zero deps), like the hand-synced COLORS/BOT_SVG in
+// supervise.ts. Keep the rates (16k capture / 24k playback) and the capture
+// worklet in sync with the source and with main's Soniox config (voice/soniox.ts).
+//
+//   • MicCapture — getUserMedia → an AudioWorklet that downsamples to 16 kHz mono
+//     and emits little-endian pcm_s16le chunks, streamed up the /orch socket.
+//   • TtsPlayer — schedules the 24 kHz pcm_s16le chunks that stream back, gapless,
+//     on a Web Audio timeline. reset() is barge-in: it kills everything queued.
 
 const CAPTURE_RATE = 16000
 const PLAYBACK_RATE = 24000
 
-// Voice-reactive glow tuning. The analyser RMS of 16-bit speech sits around
-// 0.05–0.2, so GAIN lifts it toward a ~1 peak; RELEASE is the per-frame decay
-// (fast attack, slow release — an audio-meter envelope, so the glow swells on
-// syllables and eases down instead of strobing); FLOOR keeps it from going dark
-// mid-sentence during brief quiet spots.
+// Voice-reactive glow tuning (see source file for the rationale).
 const LEVEL_GAIN = 5
 const LEVEL_RELEASE = 0.9
 const LEVEL_FLOOR = 0.3
 
 // The capture worklet, inlined as a Blob URL so there's no separate asset to
-// bundle across dev and packaged builds. It buffers ~100 ms of float samples,
-// converts to int16, and posts the raw bytes back to the main thread.
+// bundle. Buffers ~100 ms of float samples, converts to int16, posts the bytes.
 const CAPTURE_WORKLET = `
 class PCM16Capture extends AudioWorkletProcessor {
   constructor() {
@@ -68,7 +64,7 @@ export class MicCapture {
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     })
-    // Asking for a 16 kHz context lets Chromium resample for us — the worklet
+    // Asking for a 16 kHz context lets the browser resample for us — the worklet
     // then only has to pack float→int16.
     this.ctx = new AudioContext({ sampleRate: CAPTURE_RATE })
     await this.ctx.audioWorklet.addModule(captureWorkletUrl())
@@ -96,11 +92,9 @@ export class MicCapture {
 }
 
 export class TtsPlayer {
-  // One reused context for the bar's lifetime — Chromium caps concurrent
+  // One reused context for the app's lifetime — browsers cap concurrent
   // AudioContexts, so reset() stops the live sources rather than churning contexts.
   private ctx: AudioContext | null = null
-  // Sources feed an analyser (→ destination) so we can read playback loudness and
-  // drive the voice-reactive edge glow off what's actually being heard.
   private analyser: AnalyserNode | null = null
   private wave: Float32Array<ArrayBuffer> | null = null
   /** Sources still scheduled or playing, so a barge-in can stop them all. */
@@ -115,11 +109,18 @@ export class TtsPlayer {
   private onActive?: (active: boolean) => void
   private onLevel?: (level: number) => void
 
-  /** Register glow hooks: `onActive` toggles the edge glow on/off when speech
+  /** Register glow hooks: `onActive` toggles the glow on/off when speech
    *  starts/ends; `onLevel` fires every frame with the live 0..1 loudness. */
   listen(onActive: (active: boolean) => void, onLevel: (level: number) => void): void {
     this.onActive = onActive
     this.onLevel = onLevel
+  }
+
+  /** Resume the audio context on a user gesture (iOS Safari starts it suspended;
+   *  the first TTS may arrive with no prior gesture, so the PTT press / first tap
+   *  calls this to unlock playback). Idempotent. */
+  unlock(): void {
+    this.ensure()
   }
 
   private ensure(): AudioContext {
@@ -135,7 +136,7 @@ export class TtsPlayer {
   }
 
   /** Queue one chunk of spoken audio (pcm_s16le, mono, 24 kHz) for playback. The
-   *  chunk is a Uint8Array — a Node Buffer sent over IPC arrives as that view. */
+   *  chunk is a Uint8Array — a binary WebSocket frame arrives as that view. */
   push(pcm: Uint8Array): void {
     const ctx = this.ensure()
     const i16 = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2))
@@ -173,8 +174,7 @@ export class TtsPlayer {
     // Fast attack (jump up), slow release (ease down) — an audio-meter envelope.
     this.level = Math.max(reactive, this.level * LEVEL_RELEASE)
     this.onLevel?.(LEVEL_FLOOR + (1 - LEVEL_FLOOR) * this.level)
-    // Speech is over once nothing is queued and the envelope has eased to ~0;
-    // the consumer's on/off fade carries the visual out, so we don't snap to 0.
+    // Speech is over once nothing is queued and the envelope has eased to ~0.
     if (this.live.size === 0 && this.level < 0.02) {
       this.speaking = false
       this.raf = 0

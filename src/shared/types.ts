@@ -490,6 +490,10 @@ export type OrchestratorCommand =
   // displays it. (Was { toolName, input }, which made the renderer reverse-
   // engineer each verb's label.)
   | { id: number; cmd: 'confirm'; payload: { title: string; detail: string } }
+  // Fire-and-forget (no result expected): dismiss a confirm gate by id when it was
+  // resolved on another device (the phone) or timed out. Lets the desktop toast
+  // clear instead of lingering when the user answers from their phone.
+  | { id: number; cmd: 'confirm-clear' }
 
 /** The renderer's reply to any non-`confirm` OrchestratorCommand — the mutations
  *  (focus/spawn/rename/kill, browser open/navigate/act) plus the browser reads,
@@ -513,6 +517,39 @@ export interface OrchestratorConfirmResult {
 /** The renderer's reply to an OrchestratorCommand, by id. The shape depends on
  *  the command: `confirm` yields a gate decision, the mutations an action result. */
 export type OrchestratorCommandResult = OrchestratorActionResult | OrchestratorConfirmResult
+
+/// ──────────────────────────────────────────────────────────────────────────
+/// Orchestrator over the wire — the phone (`src/remote-app`, which aliases
+/// `@shared`) is a second, co-equal client into the same orchestrator session
+/// over the `/orch` WebSocket. Text frames are JSON (control + events); audio is
+/// sent as raw binary PCM frames (mic up @16kHz, TTS down @24kHz) to keep base64
+/// off the hot path. The desktop still speaks IPC; these types are the phone seam.
+/// ──────────────────────────────────────────────────────────────────────────
+
+/** A text frame the phone sends to main over `/orch`. (Mic audio is a separate
+ *  binary frame, bracketed by `stt-start`/`stt-finish`.) */
+export type OrchClientFrame =
+  | { t: 'prompt'; text: string }
+  | { t: 'mode'; mode: OrchestratorMode }
+  | { t: 'confirm'; id: number; allow: boolean }
+  | { t: 'stt-start' }
+  | { t: 'stt-finish' }
+  | { t: 'stt-cancel' }
+
+/** A text frame main sends to the phone over `/orch`. (TTS audio is a separate
+ *  binary frame.) `hello` is sent once on connect so the phone reflects the live
+ *  mode and whether voice is configured; `confirm-clear` dismisses a gate the user
+ *  answered on another device. */
+export type OrchServerFrame =
+  | { t: 'hello'; mode: OrchestratorMode; voiceAvailable: boolean }
+  | { t: 'event'; event: OrchestratorEvent }
+  | { t: 'confirm'; id: number; title: string; detail: string }
+  | { t: 'confirm-clear'; id: number }
+  | { t: 'stt-partial'; text: string }
+  | { t: 'stt-final'; text: string }
+  | { t: 'stt-error'; message: string }
+  | { t: 'tts-reset' }
+  | { t: 'mode'; mode: OrchestratorMode }
 
 // MARK: Issue store (Mastermind substrate)
 //

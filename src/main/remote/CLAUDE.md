@@ -4,7 +4,7 @@ The phone-facing backend run inside the MAIN process: a loopback HTTP+WebSocket 
 
 ## Files
 
-- `remoteServer.ts` — `RemoteServer`: the HTTP+WS server. Routes, CSRF token, port pinning, `/term` WebSocket bridge, push-trigger logic, static file serving.
+- `remoteServer.ts` — `RemoteServer`: the HTTP+WS server. Routes, CSRF token, port pinning, the `/term` (tmux) and `/orch` (orchestrator) WebSocket bridges, push-trigger logic, static file serving.
 - `notify.ts` — Pure `composeAskNotification(state, fresh)`: builds the push title/body from the items that newly need you. Title = which canvas + what it wants; body = the actual ask. No transport here.
 - `push.ts` — `PushService`: VAPID keypair + the set of installed-PWA subscriptions, persisted to disk; fans notifications out and prunes dead endpoints.
 - `readiness.ts` — Environment probes (not part of the server). `checkAppReadiness` (claude/tmux/brew on PATH, orchestrator auth, voice key) and `checkRemoteReadiness` (tailscale CLI present, `tailscale serve` proxying our port, the resolved tailnet URL).
@@ -19,7 +19,11 @@ Web-push flow: `GET /vapid` hands the page the public key for `pushManager.subsc
 
 CSRF/auth posture: a per-session token (`randomBytes(16)`) gates the four mutating routes (`/subscribe`, `/decide`, `/answer`, `/decline`). The panel fetches it once from the unauthenticated `GET /token` and echoes it as the `x-canvas-token` header; the custom header forces a CORS preflight, closing the simple-request cross-origin hole. A token mismatch returns an opaque **404**, not 401/403, so a probe can't confirm the route exists. There is no Origin check — `tailscale serve` fronts an https origin, which a loopback Origin check would break.
 
-`/term` tailnet-only gap: the terminal WebSocket (`/term?card=&cols=&rows=`) is **not** covered by the CSRF token — it has no auth beyond being reachable only on the tailnet. The card id is validated against `/^[\w-]+$/` at the trust boundary (it reaches tmux as a `-t` target and inside an `if-shell` string, so shell/tmux metacharacters are refused). Server→client frames are raw pty output; client→server frames are JSON (`{i}` input, `{r:[cols,rows]}` resize, `{s}` scroll). A 30s ping/pong heartbeat reaps half-open sockets so the tmux client + pty don't leak.
+WebSocket auth: BOTH upgrades now require the session token as a `?token=` query param (a browser can't set the `x-canvas-token` header on a WS upgrade), checked in the single `upgrade` handler before either server handles it — a mismatch drops the socket opaquely. This closes the old `/term` tailnet-only gap and gates `/orch`.
+
+`/term` (the terminal bridge, `/term?card=&cols=&rows=&token=`): the card id is validated against `/^[\w-]+$/` at the trust boundary (it reaches tmux as a `-t` target and inside an `if-shell` string, so shell/tmux metacharacters are refused). Server→client frames are raw pty output; client→server frames are JSON (`{i}` input, `{r:[cols,rows]}` resize, `{s}` scroll). A 30s ping/pong heartbeat reaps half-open sockets so the tmux client + pty don't leak.
+
+`/orch` (the orchestrator bridge — the phone as a second, co-equal client into the desktop's one shared session): text frames are JSON control (`OrchClientFrame` in, `OrchServerFrame` out); binary frames are raw PCM (mic up @16kHz, TTS down @24kHz). The host (index.ts) wires the callbacks: `onOrchPrompt`/`onOrchMode`/`onOrchConfirm` drive `orchestrator.run`/`setMode`/`resolveRemoteConfirm`; the `onVoice*` callbacks (each carrying the socket) feed the Soniox STT under a single-talker lease. Main fans back out via `broadcastOrchEvent` (the `remoteEmit` tap), `broadcastConfirm`/`broadcastConfirmClear` (the dual-source gate — answered from either device, the loser clears), `broadcastMode`, `broadcastVoice` (transcript / tts-reset), and `broadcastTtsAudio` (binary). A `hello` frame on connect reflects the current mode + voice availability. Same 30s heartbeat; socket close releases any held voice lease.
 
 Port pinning: `start()` prefers a stable port so a `tailscale serve` route survives restarts. On `EADDRINUSE` it retries the held port (20× at 500ms ≈ 10s) through a dying old process before conceding to an ephemeral port (`listen(0)`).
 

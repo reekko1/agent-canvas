@@ -63,5 +63,6 @@ and tmux socket `agentcanvas-web` (the Swift app owns `~/.agentcanvas` +
 
 Stall heartbeat (the `stalled` status exists but nothing auto-detects silence),
 keyboard navigation, and a live-terminal/WebGL budget (Chromium caps WebGL
-contexts at ~16; past that xterm falls back to the slow DOM renderer). The phone
-`/term` WebSocket is still tailnet-only (no query-param token yet).
+contexts at ~16; past that xterm falls back to the slow DOM renderer). Both phone
+WebSockets (`/term` and `/orch`) now require the session token as a `?token=`
+query param on top of tailnet isolation.

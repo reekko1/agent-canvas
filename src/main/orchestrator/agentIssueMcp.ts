@@ -13,7 +13,9 @@
 //               It never self-claims — the lead assigns.
 //   - planner → sees the whole canvas; create_plan / approve_plan (self-audit → deliver).
 //   - lead    → sees the whole canvas; create_issue / set_deps / assign_issue /
-//               set_sprint_state.
+//               set_sprint_state, plus the post-audit repair verbs amend_issue
+//               (refine an issue in place) and retire_issue (void a flawed one +
+//               supersede it — never an in-place rewrite of the wrong shape).
 //   - strategist → the autonomous head; reads the vision + its version history + the
 //               sprint list, and writes ONLY its own Conception (the recorded idea
 //               tournament). No sprint/plan/issue tools — it delivers an idea.
@@ -284,6 +286,7 @@ export class AgentIssueMcp {
           labels: issue.labels,
           comments: issue.comments,
           verdicts: issue.verdicts,
+          supersededBy: issue.supersededBy,
         })
       },
     )
@@ -512,6 +515,53 @@ export class AgentIssueMcp {
           if ('error' in loc) return failResult(loc.error)
           const r = apply({ kind: 'issue.setDeps', id, deps })
           return r.ok ? okResult({ id, deps }) : failResult(r.message ?? 'failed')
+        },
+      )
+
+      server.registerTool(
+        'amend_issue',
+        {
+          description:
+            "Refine an issue you decomposed — correct or tighten its description (impl steps) and/or verify (acceptance criteria) in place, WITHOUT losing history (the change is logged and an audit note is added). Use this when your self-audit finds a spec gap (e.g. an acceptance criterion that doesn't lock a required behaviour) in an issue that is still the RIGHT shape. For an issue that is fundamentally the wrong shape, use retire_issue + create the replacement instead. Cannot amend a done or already-retired issue.",
+          inputSchema: {
+            id: z.string().describe('The issue id'),
+            description: z.string().optional().describe('Replacement implementation steps (omit to leave unchanged)'),
+            verify: z
+              .string()
+              .optional()
+              .describe('Replacement acceptance criteria — what "done" is checked against (omit to leave unchanged)'),
+            note: z.string().optional().describe('Why you are amending — recorded as an audit note on the issue'),
+          },
+        },
+        async ({ id, description, verify, note }) => {
+          const loc = locate(id)
+          if ('error' in loc) return failResult(loc.error)
+          if (description === undefined && verify === undefined)
+            return failResult('Nothing to amend — provide description and/or verify.')
+          const r = apply({ kind: 'issue.amend', id, author: cardId, description, verify, note })
+          return r.ok ? okResult({ id, amended: true }) : failResult(r.message ?? 'amend failed')
+        },
+      )
+
+      server.registerTool(
+        'retire_issue',
+        {
+          description:
+            "Retire a flawed issue — mark it superseded (a terminal void state), free its worker, and AUTO-REMOVE it from every dependent's deps so nothing deadlocks waiting on it. Use when an issue is the wrong shape and must be restructured: create the replacement issue(s) FIRST (create_issue), then retire this one with supersededBy set to the replacement so the lineage is legible. The retired issue stays on the board (you can see it died and why) but leaves the live DAG; any work done on it is orphaned for re-review.",
+          inputSchema: {
+            id: z.string().describe('The issue id to retire'),
+            reason: z.string().describe('Why it is being retired — recorded on the issue'),
+            supersededBy: z
+              .string()
+              .optional()
+              .describe('The id of the replacement issue, if one replaces it (create it first)'),
+          },
+        },
+        async ({ id, reason, supersededBy }) => {
+          const loc = locate(id)
+          if ('error' in loc) return failResult(loc.error)
+          const r = apply({ kind: 'issue.retire', id, author: cardId, reason, supersededBy })
+          return r.ok ? okResult({ id, retired: true, supersededBy }) : failResult(r.message ?? 'retire failed')
         },
       )
 

@@ -376,8 +376,10 @@ export class IssueStore {
       case 'issue.setDeps': {
         const issue = s.issues.find((x) => x.id === action.id)
         if (!issue) return fail('no such issue')
-        const known = new Set(s.issues.map((x) => x.id))
-        issue.deps = action.deps.filter((d) => d !== issue.id && known.has(d))
+        // A retired (superseded) issue is never `done`, so depending on it would
+        // deadlock the dependent forever — drop those alongside unknown / self refs.
+        const live = new Set(s.issues.filter((x) => x.status !== 'superseded').map((x) => x.id))
+        issue.deps = action.deps.filter((d) => d !== issue.id && live.has(d))
         return ok(issue.id)
       }
 
@@ -404,6 +406,63 @@ export class IssueStore {
           body: action.body,
           postedAt: ctx.now(),
         })
+        return ok(issue.id)
+      }
+
+      case 'issue.amend': {
+        const issue = s.issues.find((x) => x.id === action.id)
+        if (!issue) return fail('no such issue')
+        if (issue.status === 'done' || issue.status === 'superseded')
+          return fail(`cannot amend a ${issue.status} issue — retire it and create a replacement instead`)
+        if (action.description === undefined && action.verify === undefined)
+          return fail('nothing to amend — provide description and/or verify')
+        const changed: string[] = []
+        if (action.description !== undefined) {
+          issue.description = action.description
+          changed.push('description')
+        }
+        if (action.verify !== undefined) {
+          issue.verify = action.verify
+          changed.push('verify')
+        }
+        // Append a human-readable audit note (the prior value lives in the log). Always
+        // exactly one ctx.id() call per amend, so replay stays deterministic.
+        issue.comments.push({
+          id: ctx.id(),
+          author: action.author,
+          body: `AMENDED ${changed.join(' + ')}${action.note ? `: ${action.note}` : ''}`,
+          postedAt: ctx.now(),
+        })
+        return ok(issue.id)
+      }
+
+      case 'issue.retire': {
+        const issue = s.issues.find((x) => x.id === action.id)
+        if (!issue) return fail('no such issue')
+        if (issue.status === 'superseded') return fail('issue is already retired')
+        if (action.supersededBy) {
+          if (action.supersededBy === issue.id) return fail('an issue cannot supersede itself')
+          if (!s.issues.some((x) => x.id === action.supersededBy))
+            return fail('no such replacement issue — create it before retiring this one')
+        }
+        issue.status = 'superseded'
+        issue.owner = null // free the worker, if any — its work is orphaned for re-review
+        issue.supersededBy = action.supersededBy
+        issue.comments.push({
+          id: ctx.id(),
+          author: action.author,
+          body: `RETIRED: ${action.reason}${action.supersededBy ? ` (superseded by ${action.supersededBy})` : ''}`,
+          postedAt: ctx.now(),
+        })
+        // Auto-prune the retired id from every dependent's deps so nothing deadlocks
+        // waiting on a node that will never complete; a dependent left with only
+        // satisfied deps flips backlog → ready (mirrors issue.create's readiness rule).
+        const done = new Set(s.issues.filter((i) => i.status === 'done').map((i) => i.id))
+        for (const dep of s.issues) {
+          if (!dep.deps.includes(action.id)) continue
+          dep.deps = dep.deps.filter((d) => d !== action.id)
+          if (dep.status === 'backlog' && dep.deps.every((d) => done.has(d))) dep.status = 'ready'
+        }
         return ok(issue.id)
       }
 

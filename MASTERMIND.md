@@ -107,7 +107,7 @@ detected.
 | **Mastermind** (the orchestrator) | The org. Outcome-based; sees only validated milestones. | `hire(role, brief)`, `fire(agent)`, `observe()` (read-only milestone feed), `escalate(decision)`. Writes only the **fleet** (process lifecycle). | Plan, code, audit, assign, or flip a status. |
 | **Strategist** | The **autonomous head**. A card that reads vision-vs-reality and **runs a competition** to pick the next sprint's idea, then hands the winner to the planner. Orchestrates the contest; is never in it. | Perceive → run the idea tournament → deliver the winning idea. | Generate or judge ideas itself; create the sprint; plan; execute. |
 | **Planner** | Researches and **writes the plan**; self-audits it before handoff. Later: framework-expert subagents. | `get_vision`, read, `create_plan`, then **self-audit → deliver**. | Decompose, assign, or touch issues. |
-| **Lead** | Decomposes the delivered plan into issues, sets deps, requests workers, assigns; self-audits the distribution. | `create_issue`, `set_deps`, `assign_issue`, `request_workers`, then **self-audit → deliver**. | Write the plan or the vision. |
+| **Lead** | Decomposes the delivered plan into issues, sets deps, requests workers, assigns; self-audits the distribution and repairs flaws (amend in place, or retire + supersede). | `create_issue`, `set_deps`, `assign_issue`, `request_workers`, `amend_issue`, `retire_issue`, then **self-audit → deliver**. | Write the plan or the vision. |
 | **Worker** | One assigned issue at a time; self-audits its work before delivering. | `update_status` (own only), `report_blocker`, `comment`; **self-audit → `done`**. | Touch another worker's issue. |
 
 **Auditing is not a role — it's a step in every role.** Planner, lead, and worker each, as the
@@ -350,7 +350,12 @@ the tool grant (capability) and the role's skill (behavior):
 
 - A **planner** has `create_plan` but no `create_issue` — it writes the blueprint, never decomposes.
 - A **lead** has `create_issue` / `set_deps` / `assign_issue` / `request_workers` but no
-  `create_plan` — it decomposes a *delivered* plan, never authors one.
+  `create_plan` — it decomposes a *delivered* plan, never authors one. When its self-audit
+  finds a flaw, it repairs the decomposition rather than rewriting an issue blindly:
+  `amend_issue` tightens an issue's description/verify in place (history-preserving) when the
+  shape is right; `retire_issue` voids a wrong-shape issue to `superseded`, frees its worker,
+  auto-prunes it from dependents' deps, and `supersededBy`-links the freshly-created
+  replacement — append-only restructure, never an in-place rewrite of identity.
 - A **worker** physically cannot flip another worker's status (its `update_status` is restricted to
   issues it owns).
 - A **strategist** is read-only over the chain (`get_vision` + version history, `list_sprints`) and

@@ -669,6 +669,9 @@ export type IssueKind = 'task' | 'audit-gate' | 'decision'
 
 /// An issue's work lifecycle. `ready` = all deps satisfied, claimable. A worker
 /// owns one at a time; closed when done AND audited. In v1 a human flips these.
+/// `superseded` is the one TERMINAL-VOID state: the lead retired a flawed issue
+/// (`issue.retire`) instead of mutating it in place — it stays on the board for
+/// provenance but is out of the live DAG (auto-pruned from dependents' `deps`).
 export type IssueStatus =
   | 'backlog'
   | 'ready'
@@ -676,6 +679,7 @@ export type IssueStatus =
   | 'in_progress'
   | 'blocked'
   | 'done'
+  | 'superseded'
 
 /// An audit verdict on an issue (gate output). APPROVED clears it; ISSUES carries
 /// findings, each adjudicated `clear-fix` (dispatch a fixer) or `needs-decision`
@@ -723,6 +727,9 @@ export interface Issue {
   comments: IssueComment[]
   /** The vision version this issue was built for (inherited from its sprint). */
   intentRef: string
+  /** Set when this issue was retired (`status: 'superseded'`) in favour of another —
+   *  the replacement issue id, so the lineage of a restructure stays legible. */
+  supersededBy?: string
   createdAt: number
 }
 
@@ -850,6 +857,15 @@ export type IssueActionRequest =
       author: string
     }
   | { kind: 'issue.comment'; id: string; author: string; body: string }
+  // Refine an issue in place — correct/tighten the impl steps and/or the acceptance
+  // criteria WITHOUT a new identity (the log preserves the prior value; an audit note
+  // is appended as a comment). Rejected on a done/superseded issue (retire instead).
+  | { kind: 'issue.amend'; id: string; author: string; description?: string; verify?: string; note?: string }
+  // Retire a flawed issue: flip to `superseded` (terminal void), free its owner, append
+  // a RETIRED note, and AUTO-PRUNE its id from every dependent's `deps` so nothing
+  // deadlocks waiting on it (newly-unblocked dependents flip backlog → ready). The
+  // replacement is created separately; `supersededBy` records the lineage.
+  | { kind: 'issue.retire'; id: string; author: string; reason: string; supersededBy?: string }
   // Conception (strategist deliberation — the recorded idea tournament; gate #0).
   // `conception.create` pins `visionVersionRef` from the current vision (mirrors
   // sprint.create); the store mints the Conception id and each candidate Idea id.

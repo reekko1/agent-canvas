@@ -129,7 +129,10 @@ export function useIssueBoard({
     [snapshot.plans],
   )
   const issuesByPlan = useCallback(
-    (planId: string) => snapshot.issues.filter((i) => i.planRef === planId),
+    // Retired (superseded) issues are dropped from the board projection: they left
+    // the live DAG, so they must not poison the wave math or the sun's charge
+    // (they'd count in `total` yet never reach `done`). Their lineage stays in the log.
+    (planId: string) => snapshot.issues.filter((i) => i.planRef === planId && i.status !== 'superseded'),
     [snapshot.issues],
   )
 

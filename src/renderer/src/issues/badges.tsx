@@ -86,6 +86,7 @@ export const ISSUE_STATUS_META: Record<IssueStatus, { label: string; color: stri
   in_progress: { label: 'In progress', color: 'var(--status-running)' },
   blocked: { label: 'Blocked', color: 'var(--status-blocked)' },
   done: { label: 'Done', color: 'var(--status-done)' },
+  superseded: { label: 'Retired', color: 'var(--status-idle)' },
 }
 
 /// Quiet by design — a dot + muted label, no pill. Status is the one signal a

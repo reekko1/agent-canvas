@@ -183,8 +183,8 @@ export interface CardRecord {
   session?: string
   /** Display name (default "Agent N"), set by the user or the orchestrator. */
   name?: string
-  /** The agent's Mastermind role (planner/lead/worker). Absent = a plain agent,
-   *  treated as a worker by the issue MCP. Persisted so the org survives restart. */
+  /** The agent's Mastermind role (planner/lead/worker/strategist). Absent = a plain
+   *  agent, treated as a worker by the issue MCP. Persisted so the org survives restart. */
   role?: AgentRole
   /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
    *  (the live snapshot is transient and never persisted). */
@@ -384,11 +384,11 @@ export interface OrchestratorEvent {
 
 /** How long the action comet takes to fly from the chat bar to the target card.
  *  The action's effect is committed when the comet lands (after this), and a spawn
- *  card is revealed then — so main and the tracer agree on the timing. */
-export const TRACER_TRAVEL_MS = 600
+ *  card is revealed then — so main and the comet agree on the timing. */
+export const COMET_TRAVEL_MS = 600
 
 /** Fired when the orchestrator acts on a specific agent (spawn/message/kill/
- *  rename/approve) so the renderer can draw a tracer from the chat bar to that
+ *  rename/approve) so the renderer can draw a comet from the chat bar to that
  *  card. Targets by `cardId` when known; the `approve` path may instead carry the
  *  `askId` (approvals don't carry a card id) and the renderer resolves it to the
  *  asking card. So `approve` may arrive with either; the renderer takes whichever
@@ -935,7 +935,7 @@ export interface IssueSnapshot {
 /// One self-authored skill, read-only, for the UI gallery. The mastermind's learned
 /// orchestration procedures live as SKILL.md files; this is a flattened view of one (no
 /// model call to build it). `source` is the audit provenance, e.g.
-/// `episode:<projectId>:<kind>` / `conversation` / `manual-test` — the renderer can pull a
+/// `episode:<projectId>:<kind>` / `window:<projectId>` / `conversation` — the renderer can pull a
 /// canvas id out of it to label where the skill was learned. The library is GLOBAL (not
 /// per-canvas), so the same set shows on every canvas.
 export interface SkillView {
@@ -1083,7 +1083,7 @@ export interface CanvasApi {
   onOrchestratorEvent(cb: (e: OrchestratorEvent) => void): () => void
   /** A command from the orchestrator (main) to execute against the canvas. */
   onOrchestratorCommand(cb: (cmd: OrchestratorCommand) => void): () => void
-  /** The orchestrator acted on an agent — draw a tracer to that card. */
+  /** The orchestrator acted on an agent — draw a comet to that card. */
   onOrchestratorTarget(cb: (target: OrchestratorTarget) => void): () => void
   /** Reply to an OrchestratorCommand by id. */
   orchestratorResult(id: number, result: OrchestratorCommandResult): void

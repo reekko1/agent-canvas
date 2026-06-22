@@ -483,11 +483,6 @@
 @keyframes pulse-ring { 0% { opacity: 0.95; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .pulse-ring-anim { animation: none !important; opacity: 0 !important; } }
 
-/* The node inspector sliding up from the bottom of the sheet body. */
-@keyframes drawer-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.drawer-up { animation: drawer-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-@media (prefers-reduced-motion: reduce) { .drawer-up { animation: none; } }
-
 /* Ambient field — a barely-there drifting cyan lattice behind the whole
    execution board, so the surface reads as a live system even at rest. Faint by
    design; masked to fade at the edges so it never competes with the content. */

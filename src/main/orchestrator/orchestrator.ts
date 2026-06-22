@@ -9,8 +9,7 @@
 // hook is the heartbeat; the input stream is the orchestrator's ear.
 import { query, type PermissionResult, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { buildCanvasServer, READ_ONLY_TOOLS } from './canvasServer'
-import { ensurePlugin, enabledSkillIds } from '../mastermind/skills'
-import { skillsPluginDir } from '../mastermind/paths'
+import { skillLoadingOptions } from '../mastermind/skills'
 import type { CommandBus } from './contract'
 import type { OrchestratorEvent } from '../../shared/types'
 
@@ -70,11 +69,8 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
   const { bus, input, gate, onEvent, beforeTool, onSession, resume, onSessionId } = opts
 
   // The skill library is a plugin dir the SDK loads at query() construction (it can't
-  // hot-swap mid-session). Ensure it exists so the loader is happy even before the
-  // reactor has authored anything. A skill create/patch recycles this session (resume),
-  // and the fresh query() re-reads this dir — that's how the orchestrator picks up what
-  // the reactor learned.
-  ensurePlugin()
+  // hot-swap mid-session); a skill create/patch recycles this session (resume) so the
+  // fresh query() re-reads the dir. The dir is ensured + scoped via skillLoadingOptions().
 
   // Subscription auth: a stray ANTHROPIC_API_KEY outranks CLAUDE_CODE_OAUTH_TOKEN
   // and would silently bill pay-as-you-go. Force the subscription path by dropping
@@ -125,17 +121,11 @@ export async function runOrchestrator(opts: RunOptions): Promise<void> {
       // re-reads the plugin dir at construction, so the resumed session loads the latest
       // skills. Omitted on the first run → fresh session.
       ...(resume ? { resume } : {}),
-      // The mastermind's learned skill library (authored by the reactor's reviewers) — the
-      // orchestrator loads it so it can invoke a procedure when a situation matches. The
-      // `skills` filter is an EXPLICIT list of ONLY our plugin's namespaced skills
-      // (`enabledSkillIds()`), NOT `'all'`: that hides both the host's ~/.claude skills and
-      // the bundled built-in CLI skills, so the model sees only what the mastermind learned.
-      // settingSources:[] adds belt-and-suspenders isolation (no project/user CLAUDE.md or
-      // settings, which the conductor doesn't need). Refreshed on the next session start —
-      // a skill change recycles this one (see manager.notifySkillsChanged).
-      plugins: [{ type: 'local', path: skillsPluginDir() }],
-      skills: enabledSkillIds(),
-      settingSources: [],
+      // The mastermind's learned skill library (authored by the reactor's reviewers) — see
+      // skillLoadingOptions for the EXPLICIT-list scoping (our skills only, not `'all'`) +
+      // host-CLAUDE.md isolation. Same recipe the reactor uses. Refreshed on the next
+      // session start — a skill change recycles this one (see manager.notifySkillsChanged).
+      ...skillLoadingOptions(),
       // No `allowedTools`: every tool — read-only included — falls through to
       // `canUseTool`. Listing reads there would auto-approve them BEFORE the
       // callback (per the SDK's eval order), skipping the speech-pacing in

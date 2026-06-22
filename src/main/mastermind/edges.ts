@@ -12,6 +12,7 @@ import { ensurePlugin, applySkill, listSkills, skillExists, archivedExists, arch
 import { initTriggers, onReaction, type MilestoneKind } from './triggers'
 import { ageSkills } from './curator'
 import { isToolAllowed } from './reactor'
+import { READ_ONLY_TOOLS } from '../orchestrator/canvasServer'
 import { reactionLog, ReactionLog } from './reactions'
 import { computeWorldView } from './world'
 import type { IssueMilestone, IssueSnapshot } from '../../shared/types'
@@ -118,7 +119,7 @@ const DESTRUCTIVE = [
   'browser_type', 'browser_scroll', 'browser_select', 'browser_history', 'rename_agent',
   'kill_card', 'approve_ask', 'notify_user',
 ]
-const READS = ['list_world', 'get_agent_reply', 'browser_read', 'browser_screenshot']
+const READS = READ_ONLY_TOOLS as readonly string[] // the single source of truth — drift here is caught at compile, not silently
 
 function toolGateSection(): void {
   console.log('\n— reactor tool gate (observe / nudge) —')

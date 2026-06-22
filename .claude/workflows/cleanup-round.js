@@ -99,6 +99,11 @@ const DIMENSIONS = [
       'CROSS-CUTTING / SEAMS — the findings only visible when you hold the WHOLE change at once. Trace each value that crosses a module or process boundary in this diff end-to-end (e.g. shared types -> main producer -> preload bridge -> renderer consumer). Flag where the same shape is redefined on two sides instead of imported from one, where a type is wider at one end than the producer actually emits, or where a contract changed on one side of a boundary but not the other. Read BOTH ends of every boundary you assess, not just one file.',
   },
   {
+    key: 'architecture',
+    brief:
+      'ARCHITECTURE / STRUCTURAL — whole-file and whole-module problems the line-level lenses miss. (1) ORPHANS: for each ADDED file in scope, trace whether it is actually reachable from a real entry point (main/index.ts wiring, the React render tree, server route or MCP registration, a smoke/CLI entry). Flag any added file that nothing imports or mounts — a whole dead file is the highest-value cut; say what currently references it (or that nothing does). (2) NEAR-DUPLICATE / SUPERSEDED FILES: sibling files that are competing or superseded implementations of the same thing (e.g. an earlier UI iteration left beside its replacement). Name BOTH files and which one is actually live in the render/import graph. (3) MISPLACED MODULES: a file in the wrong directory/layer for what it does. Prove reachability with a repo-wide grep before calling a file an orphan; cite the exact search in evidence.',
+  },
+  {
     key: 'anti-patterns',
     brief:
       'ANTI-PATTERNS — error swallowing, leaky abstractions, prop drilling, god functions/modules, stringly-typed interfaces, race-prone async, mutation where immutability is expected, re-deriving state that already exists.',

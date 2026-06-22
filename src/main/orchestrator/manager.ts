@@ -13,7 +13,7 @@
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import { makeMainBus, type BrowserDriver, type DispatchCommand, type ResultFor } from './mainBus'
 import type { CommandBus } from './contract'
-import { TRACER_TRAVEL_MS } from '../../shared/types'
+import { COMET_TRAVEL_MS } from '../../shared/types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type {
   IssueMilestone,
@@ -78,7 +78,9 @@ export interface OrchestratorDeps {
 /** Milestones that call for JUDGMENT (vs the mechanical nudges). The mastermind
  *  reactor's clearest genuine job is `stalled` (no deterministic handler at all); it
  *  observes the others, which still route deterministically, so the reviewers can learn
- *  from each reaction. */
+ *  from each reaction. NB: the FRICTION kinds (issue-blocked / retire / amend) that lower
+ *  triggers.ts's skill backstop are deliberately NOT here yet, so that backstop is
+ *  reserved, not live — add a kind here to make the reactor (and friction) react to it. */
 const REACTOR_JUDGMENT = new Set<IssueMilestone['kind']>([
   'plan-ready',
   'idea-ready',
@@ -242,7 +244,7 @@ export class Orchestrator {
     // still wake the orchestrator as a fleet event (and the human sees the prompt).
     if (card?.role) {
       this.signalTarget({ kind: 'approve', cardId: ask.cardId })
-      setTimeout(() => this.deps.decideAsk(ask.askId, 'allow'), TRACER_TRAVEL_MS)
+      setTimeout(() => this.deps.decideAsk(ask.askId, 'allow'), COMET_TRAVEL_MS)
       this.emit({ kind: 'auto', text: `auto-approved ${who}: ${ask.detail}` })
       return
     }
@@ -262,9 +264,11 @@ export class Orchestrator {
     })
   }
 
-  /** A board milestone fired (e.g. a sprint's plan was approved). In partner /
-   *  autonomous mode this wakes the orchestrator to drive the next cascade step —
-   *  currently PLAN READY → spawn a lead. Manual ignores it, like every event. */
+  /** A board milestone fired. In partner / autonomous mode this is the cascade-routing
+   *  hub: it fires the reactor (`maybeReact`), then routes the milestone — nudge the worker
+   *  (issue-assigned), nudge the lead (issue-done / issue-blocked), spawn the next role
+   *  (plan-ready → lead; idea-ready → planner), escalate (idea-abstained), or re-strategize
+   *  (outcome-verified). Manual ignores it, like every event. */
   notifyMilestone(m: IssueMilestone): void {
     if (this.mode === 'manual') return
     this.maybeReact(m) // mastermind reactor: observe, or drive a stalled worker live (autonomous)
@@ -387,12 +391,12 @@ export class Orchestrator {
       if (r.mode === 'nudge') {
         // Act + narrate: the reactor's send_to_agent already executed; surface its
         // decision as an auto event (like the strategist), noting any denied verbs.
-        const held = r.attemptedActions.length
-          ? ` (held back: ${[...new Set(r.attemptedActions.map((a) => a.tool))].join(', ')})`
+        const held = r.deniedActions.length
+          ? ` (held back: ${[...new Set(r.deniedActions.map((a) => a.tool))].join(', ')})`
           : ''
         this.emit({ kind: 'auto', text: `mastermind handled a stall — ${r.text.trim() || '(no detail)'}${held}` })
       } else {
-        const would = r.attemptedActions.map((a) => `${a.tool}(${JSON.stringify(a.input)})`).join('; ') || '(none)'
+        const would = r.deniedActions.map((a) => `${a.tool}(${JSON.stringify(a.input)})`).join('; ') || '(none)'
         const skills = r.invokedSkills.length ? ` | skills: ${r.invokedSkills.join(', ')}` : ''
         console.log(`[mastermind] observed ${m.kind} → ${r.text.trim() || '(no text)'} | would-do: ${would}${skills}`)
       }
@@ -800,7 +804,7 @@ export class Orchestrator {
   }
 
   /** Tell the renderer the orchestrator just acted on an agent, so it can draw a
-   *  tracer from the chat bar to that card. */
+   *  comet from the chat bar to that card. */
   private signalTarget(target: OrchestratorTarget): void {
     this.deps.send('orchestrator-target', target)
   }

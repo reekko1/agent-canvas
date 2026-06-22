@@ -1,12 +1,12 @@
 import { useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { TRACER_TRAVEL_MS, type OrchestratorTarget } from '@shared/types'
+import { COMET_TRAVEL_MS, type OrchestratorTarget } from '@shared/types'
 
-// A short tracer the orchestrator fires at an agent when it acts on one: a faint
+// A short comet the orchestrator fires at an agent when it acts on one: a faint
 // arc draws from the chat bar to the target card, a bright pulse rides along it,
 // and a ring blooms on the card as the pulse lands — then it all fades. Color is
 // keyed to the action so the gesture also says what happened.
-export const TRACER_COLOR: Record<OrchestratorTarget['kind'], string> = {
+export const COMET_COLOR: Record<OrchestratorTarget['kind'], string> = {
   spawn: 'rgb(34 211 238)', // cyan — the orchestrator identity
   send: 'rgb(34 211 238)',
   rename: 'rgb(34 211 238)',
@@ -14,7 +14,7 @@ export const TRACER_COLOR: Record<OrchestratorTarget['kind'], string> = {
   kill: 'rgb(248 113 113)', // red — destructive
 }
 
-export interface TracerSpec {
+export interface CometSpec {
   id: number
   from: { x: number; y: number }
   to: { x: number; y: number }
@@ -26,7 +26,7 @@ export interface TracerSpec {
   radius?: number
 }
 
-const TRAVEL = TRACER_TRAVEL_MS / 1000 // seconds for the comet to travel the arc
+const TRAVEL = COMET_TRAVEL_MS / 1000 // seconds for the comet to travel the arc
 const LINGER = 0.35 // ring bloom + fade after it lands
 const TRAIL = 7 // tail dots behind the head
 const RIPPLE = 0.62 // grid wavefront sweep across the landed-on window
@@ -121,14 +121,14 @@ function GridRipple({
   )
 }
 
-function Tracer({
+function Comet({
   from,
   to,
   color,
   rect,
   radius,
   onDone,
-}: TracerSpec & { onDone: () => void }): React.JSX.Element {
+}: CometSpec & { onDone: () => void }): React.JSX.Element {
   // Bow the arc above the higher endpoint so it reads as reaching up and over.
   const ctrl = useMemo(
     () => ({ x: (from.x + to.x) / 2, y: Math.min(from.y, to.y) - 80 }),
@@ -201,18 +201,18 @@ function Tracer({
   )
 }
 
-/** Renders the live tracers; each removes itself via onDone when its gesture ends. */
-export function OrchestratorTracers({
-  tracers,
+/** Renders the live comets; each removes itself via onDone when its gesture ends. */
+export function OrchestratorComets({
+  comets,
   onDone,
 }: {
-  tracers: TracerSpec[]
+  comets: CometSpec[]
   onDone: (id: number) => void
 }): React.JSX.Element {
   return (
     <>
-      {tracers.map((t) => (
-        <Tracer key={t.id} {...t} onDone={() => onDone(t.id)} />
+      {comets.map((t) => (
+        <Comet key={t.id} {...t} onDone={() => onDone(t.id)} />
       ))}
     </>
   )

@@ -14,8 +14,8 @@ Each has its own CLAUDE.md — read it before working in that area.
   Defines `SPINE_DIR` (`~/.agentcanvas-web`), the on-disk home for main-process state.
 - **orchestrator/** — the in-app NL orchestrator: drives the canvas via the Agent SDK,
   reads the latest published `RemoteState`, issues mutations/confirms back to the renderer.
-- **remote/** — phone/remote-panel readiness checks (app + remote); the panel server itself
-  lives under spine.
+- **remote/** — the phone/remote panel: the HTTP+WS server (`remoteServer.ts`), web-push,
+  and the app/remote readiness probes. The spine owns the live instance (`spine.remote`).
 - **voice/** — Soniox push-to-talk STT and streaming TTS; main owns the sockets, the
   encrypted key store, and speech-paced delivery of orchestrator events.
 - **git/** — git actions, per-file diffs, repo identity, and the diff watchers that push

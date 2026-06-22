@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCircle2, Circle, GitFork, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Check, Circle, GitFork, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { IssueKind, IssueStatus, SprintState, VisionEditClass } from '@shared/types'
 
@@ -151,21 +151,6 @@ export function VerdictPill({ verdict }: { verdict: 'APPROVED' | 'ISSUES' }) {
   )
 }
 
-/// The icon-only verdict mark for a collapsed issue row — present only when an
-/// audit happened, so it draws the eye exactly when it should.
-export function VerdictMark({ verdict }: { verdict: 'APPROVED' | 'ISSUES' }) {
-  const approved = verdict === 'APPROVED'
-  const color = approved ? 'var(--status-done)' : 'var(--status-blocked)'
-  const Icon = approved ? CheckCircle2 : AlertTriangle
-  return (
-    <Icon
-      className="size-3.5 shrink-0"
-      style={{ color }}
-      aria-label={approved ? 'audit approved' : 'audit found issues'}
-    />
-  )
-}
-
 // ── Issue kind ──────────────────────────────────────────────────────────────
 
 export const KIND_META: Record<
@@ -186,53 +171,4 @@ export function KindGlyph({ kind }: { kind: IssueKind }) {
     Icon: Circle,
   }
   return <Icon className="size-3.5 shrink-0" style={{ color }} strokeWidth={2} aria-label={label} />
-}
-
-// ── Frontier atoms ────────────────────────────────────────────────────────────
-
-/// A compact done/total meter — a thin filled track. The fill goes cyan
-/// (running) until everything lands, then `done` green. This is the ONE honest
-/// number on the board: it counts completed issues. Distance to the vision stays
-/// assessed, never computed, so it is never rendered as a fake gauge.
-export function ProgressMeter({
-  done,
-  total,
-  className,
-}: {
-  done: number
-  total: number
-  className?: string
-}) {
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0
-  const complete = total > 0 && done === total
-  return (
-    <span
-      className={cn('inline-flex items-center gap-1.5', className)}
-      title={`${done} / ${total} done`}
-    >
-      <span className="relative h-1 w-10 overflow-hidden rounded-full bg-border/70">
-        <span
-          className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
-          style={{
-            width: `${pct}%`,
-            backgroundColor: complete ? 'var(--status-done)' : 'var(--status-running)',
-          }}
-        />
-      </span>
-      <span className="text-[11px] tabular-nums text-muted-foreground/80">
-        {done}/{total}
-      </span>
-    </span>
-  )
-}
-
-/// The ambient motion class a node wears, by its LIVE status — only the working
-/// states move, so the field stays calm and the eye lands on what's active. An
-/// in-progress issue breathes cyan; a blocked one pulses amber; everything else
-/// is still. (`onFrontier` is reserved for amplifying the frontier later; today
-/// motion is purely status-driven so a stalled frontier never fakes activity.)
-export function nodeMotionClass(status: IssueStatus): string {
-  if (status === 'in_progress') return 'node-working'
-  if (status === 'blocked') return 'node-blocked'
-  return ''
 }

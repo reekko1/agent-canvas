@@ -110,7 +110,7 @@ export class Spine {
     this.sink.start(this.config.sinkPort, (port) => {
       this.config.sinkPort = port
       saveConfig(this.config)
-      this.adapter.installConfig(SPINE_DIR, port, this.config.token)
+      this.adapter.stageHooks(SPINE_DIR, port, this.config.token)
       console.log(`[spine] sink ready on 127.0.0.1:${port}`)
     })
     this.remote.push = new PushService(join(SPINE_DIR, 'push.json'))

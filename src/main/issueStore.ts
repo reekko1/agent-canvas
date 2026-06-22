@@ -156,9 +156,11 @@ export class IssueStore {
     return result
   }
 
-  /** No-op in v1 (each apply is already durable). Seam for future compaction
-   *  (write the materialized state as one snapshot line, truncate the log). */
-  flush(): void {}
+  /** No-op in v1 (each apply is already durable — nothing is buffered). Seam for future
+   *  compaction (write the materialized state as one snapshot line, truncate the log).
+   *  Named `compact`, not `flush`: cf. WorkspaceStore.flush, a real write-or-lose-data on
+   *  quit; this store has nothing to flush. */
+  compact(): void {}
 
   // The reducer — validates fully BEFORE mutating, so a rejected action leaves
   // state untouched and generates no ids. Shared by apply (live) and load (replay).

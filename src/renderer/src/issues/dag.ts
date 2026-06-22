@@ -54,7 +54,6 @@ export function frontierStats(issues: Issue[]): {
   waveCount: number
   landed: number
   frontierWidth: number
-  done: number
   total: number
   charge: number
 } {
@@ -69,7 +68,6 @@ export function frontierStats(issues: Issue[]): {
     waveCount: waves.length,
     landed,
     frontierWidth,
-    done,
     total,
     charge: total > 0 ? done / total : 0,
   }

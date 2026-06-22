@@ -53,8 +53,8 @@ export interface CardData extends Record<string, unknown> {
   kind: CardKind
   /** Display name — defaults to "Agent N" for agents; user/orchestrator renameable. */
   name?: string
-  /** The agent's Mastermind role (planner/lead/worker) — drives its issue-MCP tool
-   *  grant. Absent = a plain agent (worker). Persisted via CardRecord. */
+  /** The agent's Mastermind role (planner/lead/worker/strategist) — drives its issue-MCP
+   *  tool grant. Absent = a plain agent (worker). Persisted via CardRecord. */
   role?: AgentRole
   /** Current page — only for `kind === 'browser'`. Tracked live from the
    *  webview's navigation and persisted (the card reloads it on restore). */

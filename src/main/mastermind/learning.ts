@@ -1,9 +1,11 @@
-// Learning coordinator: after a reaction completes, record it, advance the triggers, and
-// — on the design's schedule — run the reviewers to grow memory + skills. The reviewers
-// RUN even when the reactor only observes; only the reactor's *actions* are withheld. All
-// reviewer work funnels through ONE serialized worker (the "298s lesson") so concurrent
-// reaction-completions never race on the memory / skill files.
+// Learning coordinator: funnels ALL reviewer work — both reaction-completions
+// (recordReaction) and the operator's direct conversation (recordConversation, any mode) —
+// through ONE serialized worker (the "298s lesson") so concurrent completions never race on
+// the memory / skill files. On the design's schedule it advances the triggers and runs the
+// reviewers to grow memory + skills; the reviewers RUN even when the reactor only observes
+// (only the reactor's *actions* are withheld).
 import type { IssueMilestone } from '../../shared/types'
+import { episodeSource, windowSource } from '../../shared/provenance'
 import type { Reaction } from './reactor'
 import { reactionLog } from './reactions'
 import { runSkillReviewer, runMemoryReviewer, reviewMemory } from './reviewers'
@@ -69,7 +71,7 @@ export function recordReaction(milestone: IssueMilestone, reaction: Reaction): v
       if (!plan || plan.nothing_to_save) return
       let n = 0
       for (const a of plan.skill_actions ?? []) {
-        const r = applySkill(a, `episode:${projectId}:${milestone.kind}`)
+        const r = applySkill(a, episodeSource(projectId, milestone.kind))
         if (r.ok) n++
         else console.warn(`[mastermind-learn] skill ${a.op} "${a.name}" rejected: ${r.error}`)
       }
@@ -86,7 +88,7 @@ export function recordReaction(milestone: IssueMilestone, reaction: Reaction): v
     enqueue(async () => {
       const plan = await runMemoryReviewer(window, projectId, digest)
       if (!plan || plan.nothing_to_save || !plan.memory_writes?.length) return
-      const r = applyMemoryOps(plan.memory_writes, `window:${projectId}`, projectId)
+      const r = applyMemoryOps(plan.memory_writes, windowSource(projectId), projectId)
       console.log(
         r.ok
           ? `[mastermind-learn] memory: applied ${plan.memory_writes.length} write(s) from a ${window.length}-reaction window`

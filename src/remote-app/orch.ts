@@ -3,10 +3,10 @@ import { ensureToken, dropToken } from './net'
 
 /// The orchestrator transport: one WebSocket to /orch making the phone a second
 /// client into the desktop's shared session. Text frames are JSON control/events
-/// (OrchServerFrame); binary frames are raw TTS PCM. The single `dispatch` of a
-/// parsed frame is the only place wire field names are read, so realigning to the
-/// server stays one-file. Reconnects with capped backoff (the session is
-/// long-lived, so — unlike /term — it keeps trying).
+/// (OrchServerFrame); binary frames are raw TTS PCM. This layer only parses a frame and
+/// forwards it to `onFrame`; the single switch that READS wire field names lives in the
+/// chat view (`chat.ts`), so realigning to a server change is one switch there. Reconnects
+/// with capped backoff (the session is long-lived, so — unlike /term — it keeps trying).
 
 export type ConnState = 'live' | 'reconnecting' | 'down'
 

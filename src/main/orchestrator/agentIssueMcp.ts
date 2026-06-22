@@ -33,10 +33,13 @@ import {
   type Issue,
   type IssueActionRequest,
   type IssueActionResult,
+  type IssueKind,
   type IssueSnapshot,
+  type IssueStatus,
   type Plan,
   type RemoteState,
   type Sprint,
+  type SprintState,
 } from '../../shared/types'
 import { failResult, okResult } from './mcpResults'
 
@@ -54,11 +57,15 @@ export interface AgentIssueMcpDeps {
   ) => Promise<{ ok: boolean; workerIds: string[]; message?: string }>
 }
 
-const STATUSES = ['backlog', 'ready', 'claimed', 'in_progress', 'blocked', 'done'] as const
+// `satisfies` anchors these MCP enums to the shared unions: a renamed/removed member
+// they reference fails to compile here too (the renderer already build-breaks on drift;
+// this is the one consumer that otherwise wouldn't). Deliberate subsets — a worker can't
+// set `superseded`, and `REALIGNMENT_PENDING` isn't an agent-settable sprint state.
+const STATUSES = ['backlog', 'ready', 'claimed', 'in_progress', 'blocked', 'done'] as const satisfies readonly IssueStatus[]
 const SPRINT_STATES = [
   'DRAFT', 'PLAN_REVIEW', 'APPROVED', 'DECOMPOSED', 'EXECUTING', 'OUTCOME_REVIEW', 'DONE',
-] as const
-const KINDS = ['task', 'audit-gate', 'decision'] as const
+] as const satisfies readonly SprintState[]
+const KINDS = ['task', 'audit-gate', 'decision'] as const satisfies readonly IssueKind[]
 
 function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve) => {

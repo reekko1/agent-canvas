@@ -7,7 +7,7 @@ import { AskToasts } from '@/cards/AskToasts'
 import { QuestionToasts } from '@/cards/QuestionToasts'
 import { UpdateToast } from '@/cards/UpdateToast'
 import { OrchestratorChatBar } from '@/orchestrator/ChatBar'
-import { OrchestratorTracers } from '@/orchestrator/Tracer'
+import { OrchestratorComets } from '@/orchestrator/Comet'
 import { RemoteAccessDialog } from '@/remote/RemoteAccessDialog'
 import type { BrowserNavPatch } from '@/cards/meta'
 import type {
@@ -43,7 +43,7 @@ import { useProjectAttention } from './useProjectAttention'
 import { useCanvasGit } from './useCanvasGit'
 import { useShellTitles } from './useShellTitles'
 import { useRemotePublish } from './useRemotePublish'
-import { useTracers } from './useTracers'
+import { useComets } from './useComets'
 import { useWorkspace } from './useWorkspace'
 import { VideoBackdrop } from './VideoBackdrop'
 
@@ -69,7 +69,7 @@ function useWindowSize(): { w: number; h: number } {
 /// This is the composition root: it owns the node registry and the small glue
 /// (card lifecycle, project plumbing) and wires the focused hooks that carry the
 /// real weight — `useMasterStackLayout` (geometry), `useBrowserBudget` (webview
-/// eviction), `useTracers` (action comets), and `useOrchestratorCommands` (the
+/// eviction), `useComets` (action comets), and `useOrchestratorCommands` (the
 /// main↔renderer command bus). UI chunks live in their own components.
 export function Canvas() {
   const [nodes, setNodes] = useState<CanvasNode[]>([])
@@ -421,8 +421,8 @@ export function Canvas() {
   // The active canvas's repo — the diff drawer watches it. Null when no canvas.
   const activeDir = active?.dir
 
-  // Live tracers fired when the orchestrator acts on an agent (chat bar → card).
-  const { tracers, clearTracer } = useTracers({ winW, winH, cardNodes, asks, reveal, rectForRef })
+  // Live comets fired when the orchestrator acts on an agent (chat bar → card).
+  const { comets, clearComet } = useComets({ winW, winH, cardNodes, asks, reveal, rectForRef })
 
   // The renderer end of the orchestrator command bus (spawn / navigate / drive /
   // rename / kill / gate-confirm) — runs commands against live project state.
@@ -453,8 +453,8 @@ export function Canvas() {
         <div className="voice-glow__aura" />
       </div>
 
-      {/* Tracers the orchestrator fires at an agent when it acts on one. */}
-      <OrchestratorTracers tracers={tracers} onDone={clearTracer} />
+      {/* Comets the orchestrator fires at an agent when it acts on one. */}
+      <OrchestratorComets comets={comets} onDone={clearComet} />
 
       {/* One stable layer of every card across every project. */}
       <CardLayer

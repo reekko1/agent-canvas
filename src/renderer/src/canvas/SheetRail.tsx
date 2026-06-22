@@ -3,10 +3,11 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { DistanceAssessment } from '@shared/types'
 
-/// The floating right rail — the mirror of the left ActionRail. It toggles the
-/// three right-edge side sheets (the git diff drawer, the Mastermind vision board,
-/// and the issue board), which are mutually exclusive: each button opens its sheet
-/// (collapsing the others) and closes it when clicked again, reflected by the
+/// The floating right rail — the mirror of the left ActionRail. It toggles four
+/// mutually-exclusive right views: the git diff drawer, the Mastermind vision board,
+/// and the skills gallery are right-edge sheets (they reserve master width); the issues
+/// constellation is a full-viewport takeover (it reserves none). Each button opens its
+/// view (collapsing the others) and closes it when clicked again, reflected by the
 /// `active` press state. It lives in its own RIGHT_GUTTER channel, so an open sheet
 /// stops short of it and the toggles stay reachable.
 export function SheetRail(props: {

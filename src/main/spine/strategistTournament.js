@@ -24,7 +24,6 @@ export const meta = {
     { title: 'Round 1' },
     { title: 'Round 2' },
     { title: 'Round 3' },
-    { title: 'Refine' },
     { title: 'Gate' },
   ],
 }
@@ -216,6 +215,7 @@ let runnerUp = null
 for (let r = 0; r < CULL.length; r++) {
   const rig = RIGOR[r] || { ord: 1, K: 1 }
   const phaseName = 'Round ' + (r + 1)
+  phase(phaseName) // enter the round so the declared meta.phases actually light up
 
   const matches = []
   for (let i = 0; i < field.length; i++) {

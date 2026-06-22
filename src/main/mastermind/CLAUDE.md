@@ -95,6 +95,14 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
   (CONCLUSIVE: outcome-verified/stalled/idea-abstained) + count backstop (10, →5 on
   FRICTION: issue-blocked/retire/amend). Memory = every 10 reactions. Pure; counters are
   persisted by the wiring layer later.
+- **reactions.ts** — the wiring layer for triggers: an append-only `ReactionLog` whose
+  `record()` projects each milestone onto the per-project trigger counters + the skill
+  "episode" / memory "window" session scopes, and computes the recurrence digest the
+  memory reviewer reads. Replay-safe (mirrors issueStore).
+- **learning.ts** — the learning coordinator: funnels reaction-completions
+  (`recordReaction`) AND direct conversation (`recordConversation`) through one serialized
+  worker, firing the reviewers on the trigger schedule. The module `manager.ts` / `index.ts`
+  actually import to drive learning.
 - **curator.ts** — deterministic skill aging (unused 30d→stale, 90d→archived,
   reactivates on use). Skills only — memory self-maintains via the reviewer + budget.
   A pure `ageSkills(now)` function with no cadence/persistence; currently unwired.

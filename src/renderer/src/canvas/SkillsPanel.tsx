@@ -3,16 +3,9 @@ import { ChevronRight } from 'lucide-react'
 import { SheetShell } from './SheetShell'
 import { cn } from '@/lib/utils'
 import { relativeFromSeconds } from '@shared/time'
+import { provenanceCanvas } from '@shared/provenance'
 import type { SkillView } from '@shared/types'
 import type { SkillsPanelApi } from './useSkillsPanel'
-
-/// The skill provenance `source` is an audit string — `episode:<projectId>:<kind>`,
-/// `window:<projectId>`, `conversation`, `manual-test`. Pull the canvas id out of the two
-/// that carry one so the row can name where the skill was learned.
-function learnedOn(source: string): string | null {
-  const m = source.match(/^(?:episode|window):([^:]+)/)
-  return m ? m[1] : null
-}
 
 function SkillRow({
   skill,
@@ -22,7 +15,7 @@ function SkillRow({
   canvasName?: (id: string) => string | undefined
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const pid = learnedOn(skill.source)
+  const pid = provenanceCanvas(skill.source)
   const where = pid ? canvasName?.(pid) : undefined
   const learned = skill.createdAt ? relativeFromSeconds(new Date(skill.createdAt).getTime() / 1000) : null
   const used = skill.lastUsed != null ? relativeFromSeconds(skill.lastUsed / 1000) : null

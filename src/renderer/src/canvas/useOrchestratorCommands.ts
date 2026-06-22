@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction, type MutableRefObject } from 'react'
 import { getBrowser } from '@/cards/browserBridge'
 import type { OrchestratorConfirm } from '@/orchestrator/OrchestratorConfirmToast'
-import { TRACER_TRAVEL_MS } from '@shared/types'
+import { COMET_TRAVEL_MS } from '@shared/types'
 import type {
   AgentRole,
   CardKind,
@@ -69,12 +69,12 @@ export function useOrchestratorCommands(deps: {
 
   /** The shared post-create choreography for a spawned card: attach to its canvas,
    *  bring that canvas forward, and hold it invisible until the delivering comet
-   *  lands (a safety timer reveals it if the tracer never fires — e.g. off-screen). */
+   *  lands (a safety timer reveals it if the comet never fires — e.g. off-screen). */
   const finishSpawn = (target: Project, cardId: string): void => {
     proj.attachCardTo(target.id, cardId)
     if (proj.activeProjectId !== target.id) switchProject(target.id)
     setPendingReveal((s) => new Set(s).add(cardId))
-    setTimeout(() => reveal(cardId), TRACER_TRAVEL_MS + 1500)
+    setTimeout(() => reveal(cardId), COMET_TRAVEL_MS + 1500)
   }
 
   // The orchestrator (main) dispatches canvas mutations and confirms here; we

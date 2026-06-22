@@ -1,7 +1,7 @@
-// Shared MCP tool-result builders for the two browser MCP servers — the
-// in-process canvas server (canvasServer.ts) and the per-card agent server
-// (agentBrowserMcp.ts). Both surface results in the identical `{ content: [...] }`
-// shape, so the ok/fail/error/image builders live here once instead of forking.
+// Shared MCP tool-result builders for all three MCP servers — the in-process canvas
+// server (canvasServer.ts) and the per-card agent servers (agentBrowserMcp.ts +
+// agentIssueMcp.ts). All surface results in the identical `{ content: [...] }` shape,
+// so the ok/fail/error/image builders live here once instead of forking.
 
 /** Flatten an unknown thrown value to a message string. */
 export const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))

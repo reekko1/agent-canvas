@@ -33,7 +33,6 @@ export interface ReactionOutcome {
 }
 
 export class ReactionLog {
-  private replaying = false
   private loaded = false
   private byProject = new Map<string, ProjState>()
   private recent: ReactionEvent[] = [] // capped buffer for the recurrence digest
@@ -58,18 +57,13 @@ export class ReactionLog {
     } catch {
       return // first run
     }
-    this.replaying = true
-    try {
-      for (const line of raw.split('\n')) {
-        if (!line.trim()) continue
-        try {
-          this.fold(JSON.parse(line) as ReactionEvent)
-        } catch {
-          console.warn('[mastermind] skipping unparseable reaction line')
-        }
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        this.fold(JSON.parse(line) as ReactionEvent)
+      } catch {
+        console.warn('[mastermind] skipping unparseable reaction line')
       }
-    } finally {
-      this.replaying = false
     }
   }
 

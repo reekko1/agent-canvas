@@ -1,30 +1,17 @@
 import {
   forwardRef,
-  useEffect,
-  type ComponentType,
   type InputHTMLAttributes,
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react'
-import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { IconComponent } from '@/lib/icon-context'
 
 /// The shared vocabulary for the issue board — the primitives every panel is
 /// built from, so there is exactly one definition of a label, an input, a
 /// composer, a select. Two ideas carry the whole look: a tight type scale
 /// (13px content / 12px body / 11px meta — nothing smaller) and hierarchy by
 /// weight + color, never by shouting (no heavy borders, no uppercase walls).
-
-/// Wrap a Lucide icon as a `Button` leadingIcon (whose prop types are narrower
-/// than Lucide's — `size` differs, so the strict shape won't accept it; the icon
-/// registry uses the same `any` escape hatch). One adapter, not a per-file
-/// re-declaration.
-export const asIcon =
-  (Icon: ComponentType<any>): IconComponent =>
-  (props) =>
-    <Icon {...props} />
 
 /// A small section header: "Sprints 3", "Depends on", "History". Sentence case,
 /// medium weight, muted — the count dims further so the word leads. An optional
@@ -173,64 +160,7 @@ export function EmptyState({ children, className }: { children: ReactNode; class
   )
 }
 
-/// The node inspector: a bottom slide-over scoped to the sheet body (its nearest
-/// `relative` ancestor — the Frontier stays the hero behind a dimmed backdrop).
-/// Esc or a backdrop click closes; mounted only while open so the slide-up plays
-/// fresh each time. `title` is a node so callers own its typography.
-export function Drawer({
-  open,
-  onClose,
-  title,
-  children,
-}: {
-  open: boolean
-  onClose: () => void
-  title?: ReactNode
-  children: ReactNode
-}) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  if (!open) return null
-  return (
-    <div className="absolute inset-0 z-30 flex flex-col justify-end">
-      <button
-        aria-label="Close inspector"
-        className="absolute inset-0 bg-background/45 backdrop-blur-[1px]"
-        onClick={onClose}
-      />
-      <div className="drawer-up relative flex max-h-[80%] flex-col overflow-hidden rounded-t-2xl border-t border-border bg-card shadow-2xl">
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-          <div className="min-w-0 flex-1">{title}</div>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={onClose}
-            title="Close"
-            aria-label="Close"
-          >
-            <X />
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
-      </div>
-    </div>
-  )
-}
-
-// Tiny shared parsers for the comma / newline list fields.
-export const csvToList = (s: string): string[] =>
-  s
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean)
-
+// Tiny shared parser for the newline list fields.
 export const linesToList = (s: string): string[] =>
   s
     .split('\n')

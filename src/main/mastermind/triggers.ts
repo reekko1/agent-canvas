@@ -1,8 +1,10 @@
 // Deterministic reviewer triggers (no model). Skills = event-primary (conclusive
 // milestones) + count backstop (10, ->5 on friction). Memory = count-based (every 10).
 // MilestoneKind is the real IssueMilestone union — single source of truth, not a
-// re-declared copy. CONCLUSIVE + FRICTION are all backed by real milestone emissions
-// (stalled / retire / amend included).
+// re-declared copy. NB: the reactor only reacts to REACTOR_JUDGMENT kinds (manager.ts);
+// FRICTION (issue-blocked / retire / amend) is NOT in that set today, so the friction
+// backstop is reserved for when those kinds are added there — it does not fire in
+// production yet. The CONCLUSIVE kinds (outcome-verified / stalled / idea-abstained) do.
 import type { IssueMilestone } from '../../shared/types'
 
 export type MilestoneKind = IssueMilestone['kind']

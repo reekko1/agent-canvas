@@ -2,7 +2,7 @@ import { Minus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-/// The shared frame for a right-edge side sheet (diff / vision / issues). One
+/// The shared frame for a right-edge side sheet (diff / vision / skills). One
 /// calm treatment so the three siblings are indistinguishable as objects: a
 /// hairline border, a single soft shadow for lift over the busy canvas, and a
 /// flush header separated from the body by a bottom rule — no filled toolbar, no

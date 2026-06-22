@@ -88,10 +88,11 @@ read-only dossier). Esc returns to the fleet.
 
 ### Shared
 - **ui.tsx** — primitives for the Vision sheet's authoring (`Field`/`TextInput`/
-  `TextArea`/`InlineComposer`/`Segmented`/`SectionLabel`/`EmptyState`/`asIcon`/
-  parsers) + `Drawer`.
-- **badges.tsx** — atoms reusing the `--status-*` palette: `StatusDot`/`Tag`, the
-  semantic badges + `*_META` maps, `ProgressMeter`, and `nodeMotionClass`.
+  `TextArea`/`InlineComposer`/`Segmented`/`SectionLabel`/`EmptyState`) + the
+  `linesToList` parser.
+- **badges.tsx** — atoms reusing the `--status-*` palette: `StatusDot`/`Tag` and the
+  semantic badges (`SprintStateBadge`/`IssueStatusBadge`/`ClassTag`/`VerdictPill`/
+  `KindGlyph`) + their `*_META` maps.
 
 ## Motion vocabulary
 

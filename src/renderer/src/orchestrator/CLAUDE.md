@@ -6,7 +6,7 @@ The renderer face of the natural-language orchestrator: a bottom-center chat bar
 
 - **ChatBar.tsx** — `OrchestratorChatBar`, the bottom pill. Owns the input, the mode badge (manual / partner / autonomous, cycled on click), the transient "whisper" caption + collapsed run history, the working pulse, and all push-to-talk wiring. Renders `OrchestratorConfirmToast` directly above itself.
 - **OrchestratorConfirmToast.tsx** — `OrchestratorConfirmToast` + the `OrchestratorConfirm` type. A single Allow/Deny permission gate (cyan-accented to read as the orchestrator, not an agent). Pure presentation; Canvas supplies the value and the decision callback.
-- **Tracer.tsx** — `OrchestratorTracers` and the per-tracer `Tracer`. SVG comet that arcs from the chat bar to a target agent card, with a trailing tail and a ring bloom on landing; color is keyed to the action kind (cyan=identity, amber=approve, red=kill). Each tracer self-removes via `onDone`.
+- **Comet.tsx** — `OrchestratorComets` and the per-comet `Comet`. SVG comet that arcs from the chat bar to a target agent card, with a trailing tail and a ring bloom on landing; color is keyed to the action kind (cyan=identity, amber=approve, red=kill). Each comet self-removes via `onDone`.
 - **voice.ts** — `MicCapture` (getUserMedia → AudioWorklet → 16 kHz pcm_s16le chunks) and `TtsPlayer` (gapless scheduling of 24 kHz pcm_s16le chunks on a Web Audio timeline, plus the loudness analyser that drives the edge glow). No React.
 
 ## Architecture / data flow
@@ -17,7 +17,7 @@ Main streams a turn back as `OrchestratorEvent`s over `onOrchestratorEvent` (one
 
 Confirm-toast approval flow: main asks via an `OrchestratorCommand` (`onOrchestratorCommand`, handled in Canvas, not here). Canvas turns a `confirm` command into an `OrchestratorConfirm` and passes it as the `confirm` prop; clicking Allow/Deny invokes `onConfirmDecide`, which Canvas replies with over the correlation-id channel (`orchestratorResult(id, { allow })`).
 
-Tracers are likewise Canvas's job: main fires `onOrchestratorTarget`, Canvas resolves the target card's rect and pushes a `TracerSpec`. Tracer timing is shared with main via `TRACER_TRAVEL_MS` so the action's visible effect (e.g. a revealed spawn card) lands when the comet does.
+Comets are likewise Canvas's job: main fires `onOrchestratorTarget`, Canvas resolves the target card's rect and pushes a `CometSpec`. Comet timing is shared with main via `COMET_TRAVEL_MS` so the action's visible effect (e.g. a revealed spawn card) lands when the comet does.
 
 Voice ownership split: the renderer owns the audio devices — mic capture, the TTS playback timeline, barge-in (`reset`), and the loudness envelope. Grabbing the mic barges in instantly: `startRecording` calls `reset()` locally rather than waiting for main's `onTtsReset` to round-trip back, and main pairs that with interrupting the orchestrator turn so it stops narrating instead of starting a fresh spoken line a beat later. Main owns the Soniox STT/TTS sockets, the `SONIOX_API_KEY`, and turning text into audio chunks. `TtsPlayer.listen` reports speaking on/off (lifted to Canvas via `onSpeakingChange` for the edge glow, and to main via `notifyVoicePlaying` so main can pace actions to the voice) and writes the per-frame `--voice-level` CSS var directly (no React re-render in the hot path).
 
@@ -29,4 +29,4 @@ Voice ownership split: the renderer owns the audio devices — mic capture, the 
 - Voice is available only when main reports a Soniox key (`voiceAvailable`, refreshable mid-session via `onVoiceAvailable`); the mic button and ⌥ hint are gated on it.
 - Audio is fixed-rate (16 kHz capture, 24 kHz playback) to match the Soniox config in `main`'s `voice/soniox.ts`; the capture worklet is inlined as a Blob URL to avoid a separate bundled asset. `TtsPlayer` reuses one AudioContext (Chromium caps concurrent contexts) and `reset()` stops live sources rather than churning contexts.
 - The `tool` event kind never becomes a whisper, so `WhisperKind` excludes it; the styling tables are keyed only to kinds that can render.
-- These components don't fetch their own state — Canvas owns `orchConfirm`, `tracers`, `speaking`, and the command/target handlers. Trace the full flow through `Canvas.tsx`.
+- These components don't fetch their own state — Canvas owns `orchConfirm`, `comets`, `speaking`, and the command/target handlers. Trace the full flow through `Canvas.tsx`.

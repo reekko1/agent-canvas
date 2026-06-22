@@ -45,7 +45,7 @@ export class ClaudeAdapter {
     'Stop', 'StopFailure', 'SessionEnd',
   ]
 
-  installConfig(dir: string, port: number, token: string): void {
+  stageHooks(dir: string, port: number, token: string): void {
     const url = `http://127.0.0.1:${port}/hook`
     const entry = (timeout: number, statusMessage?: string): Record<string, unknown> => ({
       type: 'http',
@@ -71,7 +71,7 @@ export class ClaudeAdapter {
    *  under SPINE_DIR — `<dir>/<PLUGIN_NAME>/` with a `.claude-plugin/plugin.json`
    *  manifest and one `skills/<name>/SKILL.md` per skill — attached to every
    *  agent card via `--plugin-dir` in launchCommand. Equips skills WITHOUT
-   *  touching the user's `~/.claude/skills`, mirroring how installConfig keeps
+   *  touching the user's `~/.claude/skills`, mirroring how stageHooks keeps
    *  hooks out of user config. The dir is rebuilt from scratch each call so a
    *  removed/renamed skill never lingers; staged at startup, independent of the
    *  sink, so even a pre-bind launch is equipped. */
@@ -118,7 +118,7 @@ export class ClaudeAdapter {
    *  via `--mcp-config`. The card identifies itself with the same `$CANVAS_CARD_ID`
    *  (tmux session env) the hooks use, substituted into the header by the CLI's
    *  `${VAR:-default}` expansion; the spine token authenticates. Written once the
-   *  server's port is known (mirrors installConfig), rebuilt each call. We do NOT
+   *  server's port is known (mirrors stageHooks), rebuilt each call. We do NOT
    *  pass --strict-mcp-config, so an agent keeps any MCP servers the user already
    *  configured globally — this only ADDS the browser tools. */
   stageBrowserMcp(dir: string, port: number, token: string): void {

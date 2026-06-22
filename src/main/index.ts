@@ -417,7 +417,7 @@ app.on('window-all-closed', () => app.quit())
 // Quitting only detaches tmux clients — the fleet keeps working by design.
 app.on('before-quit', () => {
   workspace.flush()
-  issues.flush()
+  issues.compact() // no-op today (each apply is durable); the future-compaction seam
   if (stallSweep) clearInterval(stallSweep)
   if (heartbeatTimer) clearInterval(heartbeatTimer)
   diffWatchers.disposeAll()

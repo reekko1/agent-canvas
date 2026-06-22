@@ -32,10 +32,16 @@ const logPath = (store: Store, projectId?: string): string => {
 function readEvents(store: Store, projectId?: string): MemEvent[] {
   const p = logPath(store, projectId)
   if (!existsSync(p)) return []
-  return readFileSync(p, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as MemEvent)
+  const events: MemEvent[] = []
+  for (const line of readFileSync(p, 'utf8').split('\n')) {
+    if (!line) continue
+    try {
+      events.push(JSON.parse(line) as MemEvent)
+    } catch {
+      console.warn('[mastermind] skipping unparseable memory line')
+    }
+  }
+  return events
 }
 
 // Replay the log into the current entry set. Pure projection of the event log.

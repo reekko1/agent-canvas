@@ -9,8 +9,9 @@ import { makeStubBus } from '../orchestrator/stubBus'
 import { setMastermindRoot, resetMastermind } from './paths'
 import { ensureSubscriptionAuth } from './models'
 import { runReaction } from './reactor'
+import { READ_ONLY_TOOLS } from '../orchestrator/canvasServer'
 
-const READS = ['list_world', 'get_agent_reply', 'browser_read', 'browser_screenshot']
+const READS = READ_ONLY_TOOLS as readonly string[]
 
 async function main(): Promise<void> {
   setMastermindRoot(join(tmpdir(), 'agentcanvas-mastermind-live'))
@@ -29,12 +30,12 @@ async function main(): Promise<void> {
   const r = await runReaction(milestone, makeStubBus(), { mode: 'nudge' })
 
   console.log(`decision: ${r.text.trim() || '(no text)'}`)
-  console.log(`held back (denied destructive verbs): ${r.attemptedActions.map((a) => a.tool).join(', ') || '(none)'}`)
+  console.log(`held back (denied destructive verbs): ${r.deniedActions.map((a) => a.tool).join(', ') || '(none)'}`)
   console.log(`session: ${r.sessionId || '(none)'}`)
 
   // The gate must never have denied a read or a message — only destructive verbs can
   // appear in the held-back list. (Whether the reactor chose to message is its judgment.)
-  const latitudeHeld = r.attemptedActions.every((a) => a.tool !== 'send_to_agent' && !READS.includes(a.tool))
+  const latitudeHeld = r.deniedActions.every((a) => a.tool !== 'send_to_agent' && !READS.includes(a.tool))
   const ok = !!r.sessionId && latitudeHeld
   console.log(`\n${'═'.repeat(48)}`)
   console.log(ok ? '✅ live nudge ran; perception + messaging allowed, destructive verbs denied' : '❌ latitude breached')

@@ -38,11 +38,13 @@ const LINE_CLASS: Record<DiffLine['kind'], string> = {
   ctx: 'text-diff-ctx',
 }
 
-/// A diff object (PRD §4.2): the git diff + changed-file list for a folder as
-/// its own floating canvas item — deliberately not bolted to a card. Observes
-/// via the main-process watcher; mutates only on explicit user actions, the
-/// one scoped exception to "observe, don't orchestrate".
-export function DiffNode({ id, data }: { id: string; data: DiffData }) {
+/// A diff view (PRD §4.2): the git diff + changed-file list for a folder. Despite the
+/// node-shaped `{ id, data }` props (the `id` keys its diff-snapshot stream), it is NOT a
+/// CanvasNode — it's the body of the right-edge diff sheet, never in the node registry /
+/// flat layer / persistence (see `canvas/nodes.ts`). Observes via the main-process
+/// watcher; mutates only on explicit user actions, the one scoped exception to
+/// "observe, don't orchestrate".
+export function DiffPanel({ id, data }: { id: string; data: DiffData }) {
   const { folder } = data
   const folderName = folder.split('/').filter(Boolean).pop() ?? folder
 

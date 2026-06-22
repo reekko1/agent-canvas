@@ -18,8 +18,8 @@ import type { CommandBus } from '../orchestrator/contract'
 import { buildCanvasServer, READ_ONLY_TOOLS } from '../orchestrator/canvasServer'
 import { REACTOR_MODEL } from './models'
 import { snapshot } from './memory'
-import { ensurePlugin, enabledSkillIds } from './skills'
-import { skillsPluginDir, reactorCwd } from './paths'
+import { skillLoadingOptions } from './skills'
+import { reactorCwd } from './paths'
 
 const BASE = `You are one reflex of Rakan's always-on mastermind — the same agent who orchestrates the fleet, here reacting to a single milestone. You react to ONE milestone at a time: read it, decide the single best control action (spawn/route/staff/escalate/repair), and state your decision in 1-3 plain sentences. You never plan, code, or audit yourself. If one of your loaded skills matches the situation, invoke it and follow it.`
 
@@ -27,7 +27,7 @@ export interface Reaction {
   sessionId: string
   text: string
   invokedSkills: string[] // inputs of any Skill tool calls the reactor made
-  attemptedActions: { tool: string; input: unknown }[] // mutations it tried (denied unless nudging)
+  deniedActions: { tool: string; input: unknown }[] // the mutations the gate held back (never the allowed send_to_agent)
   mode: ReactorMode // the latitude this reaction ran under (observe = nothing executed)
 }
 
@@ -80,7 +80,6 @@ export async function runReaction(
   // opts.mode is a smoke-only override.
   const mode: ReactorMode =
     opts.mode ?? (milestone.kind === 'stalled' && opts.isAutonomous ? 'nudge' : 'observe')
-  ensurePlugin() // the SDK plugin loader needs the dir to exist (idempotent)
   const operator = snapshot('operator')
   const product = milestone.projectId ? snapshot('product', milestone.projectId) : ''
   const mem = [operator && `OPERATOR:\n${operator}`, product && `PRODUCT:\n${product}`].filter(Boolean).join('\n\n')
@@ -91,7 +90,7 @@ export async function runReaction(
   const prompt = `${describeMilestone(milestone)}\n\n${board}`
 
   const invokedSkills: string[] = []
-  const attemptedActions: { tool: string; input: unknown }[] = []
+  const deniedActions: { tool: string; input: unknown }[] = []
   let text = ''
   let sessionId = ''
 
@@ -99,7 +98,7 @@ export async function runReaction(
   // mutation so it changes nothing. nudge: additionally allow send_to_agent.
   const canUseTool: CanUseTool = async (toolName, input) => {
     if (isToolAllowed(toolName, mode)) return { behavior: 'allow', updatedInput: input }
-    attemptedActions.push({ tool: toolName.replace(/^mcp__canvas__/, ''), input })
+    deniedActions.push({ tool: toolName.replace(/^mcp__canvas__/, ''), input })
     return { behavior: 'deny', message: `[mastermind:${mode}] action not permitted` }
   }
 
@@ -113,13 +112,10 @@ export async function runReaction(
       // (e.g. "build a CLI to watch my email") becomes another entry in this map — a
       // new arm the same mastermind can reach for. No registry/loader yet, by design.
       mcpServers: { canvas: buildCanvasServer(bus) },
-      plugins: [{ type: 'local', path: skillsPluginDir() }],
-      // Explicit list of ONLY our plugin's skills (not `'all'`) — hides the host's
-      // ~/.claude skills AND the bundled built-in CLI skills, so the reactor sees only what
-      // the mastermind has learned. settingSources:[] adds isolation (no host CLAUDE.md).
-      skills: enabledSkillIds(),
+      // Load the mastermind's learned skill library (see skillLoadingOptions: our skills
+      // only, never `'all'`; + host-CLAUDE.md isolation). Same recipe as the orchestrator.
+      ...skillLoadingOptions(),
       tools: ['Skill'],
-      settingSources: [],
       cwd: reactorCwd(),
       canUseTool,
     },
@@ -136,5 +132,5 @@ export async function runReaction(
       if (m.subtype === 'success' && !text) text = m.result
     }
   }
-  return { sessionId, text, invokedSkills, attemptedActions, mode }
+  return { sessionId, text, invokedSkills, deniedActions, mode }
 }

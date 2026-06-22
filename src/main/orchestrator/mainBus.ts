@@ -4,7 +4,7 @@
 // (focus/spawn/rename/kill), applies the main-owned ones directly (agent I/O and
 // ask decisions, which never touch the renderer), and fires the delivering comet
 // so each action lands with its narration. The offline counterpart is stubBus.ts.
-import { TRACER_TRAVEL_MS } from '../../shared/types'
+import { COMET_TRAVEL_MS } from '../../shared/types'
 import { renderOpenCanvas, type CommandBus, type World } from './contract'
 import type {
   BrowserAction,
@@ -88,7 +88,7 @@ function delay(ms: number): Promise<void> {
 /** Resolve when the comet would reach the card — the action's effect commits here,
  *  so it lands with the dot instead of ahead of it. */
 function landed(): Promise<void> {
-  return delay(TRACER_TRAVEL_MS)
+  return delay(COMET_TRAVEL_MS)
 }
 
 /** Pause between an agent prompt's body and its submitting Enter. The claude TUI

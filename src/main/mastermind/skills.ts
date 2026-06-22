@@ -54,6 +54,22 @@ export function enabledSkillIds(): string[] {
   return listSkills().map((s) => `${PLUGIN_NAME}:${s.name}`)
 }
 
+/** The SDK query() options that load the mastermind's learned skill library — the ONE
+ *  recipe shared by the only two callers that expose those skills (the reactor and the
+ *  orchestrator). Ensures the plugin dir exists, then returns the EXPLICIT-list scoping:
+ *  our namespaced skills only (never `'all'`, which would also surface the host's
+ *  ~/.claude skills and the built-in CLI skills) + settingSources:[] for host-CLAUDE.md
+ *  isolation. Spread into the query options so the two callers can't drift. (Loader-options
+ *  dedup only — NOT the skill-store unification the scope fence forbids.) */
+export function skillLoadingOptions() {
+  ensurePlugin()
+  return {
+    plugins: [{ type: 'local' as const, path: skillsPluginDir() }],
+    skills: enabledSkillIds(),
+    settingSources: [],
+  }
+}
+
 const NAME_RE = /^[a-z0-9-]{1,64}$/
 export function validateSkill(a: SkillAction): string | null {
   if (!a.name || !NAME_RE.test(a.name)) return `bad name "${a.name}" (lowercase/numbers/hyphens, <=64)`
@@ -120,7 +136,13 @@ export function applySkill(a: SkillAction, source: string): { ok: boolean; error
 }
 
 // usage + aging (curator)
-const readUsage = (): Record<string, number> => (existsSync(usagePath()) ? JSON.parse(readFileSync(usagePath(), 'utf8')) : {})
+const readUsage = (): Record<string, number> => {
+  try {
+    return existsSync(usagePath()) ? JSON.parse(readFileSync(usagePath(), 'utf8')) : {}
+  } catch {
+    return {} // a corrupt usage file degrades to "no usage recorded", never throws through callers
+  }
+}
 export function recordSkillUse(name: string, ts = Date.now()): void {
   const u = readUsage()
   u[name] = ts

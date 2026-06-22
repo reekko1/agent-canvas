@@ -17,7 +17,7 @@ hooks it composes, and IPC goes through `window.canvas.*`.
   `createProject`/`deleteProject`/`switchProject`), and naming/title helpers —
   then wires every hook and renders the layer + sheet + toolbars + toasts. The
   heavy concerns are extracted into focused hooks (layout, browser budget,
-  tracers, orchestrator bus, below) and UI chunks into their own components; the
+  comets, orchestrator bus, below) and UI chunks into their own components; the
   root just holds the seams together and passes state down. `useMemo`s for
   `dormantBrowsers` (from the budget hook's `selectDormant`) and
   `ownedBrowserByAgent` live here since they straddle the partition + node set.
@@ -29,9 +29,10 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 - **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
   (disabled with no active canvas) + remote-access entry.
 - **SheetRail.tsx** — the floating **right** rail, mirror of `ActionRail`: the
-  toggles for the diff drawer, the vision sheet, and the issues constellation
-  (diff + vision are right-edge sheets; issues is a full-viewport takeover). Each
-  button is `active` while its view is open and closes it on a second click; they
+  toggles for the diff drawer, the vision sheet, the skills gallery, and the issues
+  constellation (diff + vision + skills are right-edge sheets; issues is a
+  full-viewport takeover). Each button is `active` while its view is open and closes
+  it on a second click; they
   live in the `RIGHT_GUTTER` channel so an open sheet stops short of them. Carries
   the distance-to-vision note on the vision tooltip (the old ProjectToolbar crown).
 - **RenameDialog.tsx** — the rename-a-card modal (Electron has no
@@ -39,13 +40,18 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 - **DiffSheet.tsx** — the right-edge diff drawer; keyed by active project id,
   watches `active.dir`. Toggled from `SheetRail` (no edge tab of its own);
   collapse parks it, the caller dropping `activeDir` tears it down.
+- **SkillsSheet / SkillsPanel** (`useSkillsPanel` backs them) — the right-edge
+  **skills gallery**: a read-only list of the mastermind's learned skills. Global
+  like the diff (NOT per-canvas) — the same library on every canvas. Toggled from
+  `SheetRail`, wraps `SheetShell` like the diff/vision bodies.
 - **VisionSheet / IssueConstellation** (in `src/renderer/src/issues/`, both
   mounted by Canvas) — the two faces of the Mastermind store. `VisionSheet` is the
   calm north-star **right-edge sheet** (shares the diff's width channel);
   `IssueConstellation` is the immersive **full-viewport takeover** (a vision-sun
   with the sprint's issue-DAG orbiting it). Canvas's `rightSheet`
-  (`'diff' | 'vision' | 'issues' | null`) makes all mutually exclusive (toggled
-  from `SheetRail`). The master reserves sheet width for diff/vision; **issues
+  (`'diff' | 'vision' | 'issues' | 'skills' | null`) makes all mutually exclusive
+  (toggled from `SheetRail`). The master reserves sheet width for diff/vision/skills;
+  **issues
   reserves none** (`diffCollapsed: rightSheet === null || === 'issues'`) — the
   takeover overlays the whole canvas. See `src/renderer/src/issues/CLAUDE.md`.
 - **CardContextMenu.tsx** — right-click-a-card menu: Rename / Close card.
@@ -127,7 +133,7 @@ stack index), the receding board's frozen `leavingLayout` during a switch, the
 stack-column `onStackWheel`, and `sheetW`.
 Owns the `scrollRef`/`leaveScrollRef` pair and exposes `beginLeave()` (snapshot
 the leaving scroll, called by `switchProject` before `setStackScroll(0)`) and
-`rectForRef` (live rects for the tracer launcher). Exports `PARKED`.
+`rectForRef` (live rects for the comet launcher). Exports `PARKED`.
 
 **Browser budget** — `useBrowserBudget` owns the app-wide webview eviction: the
 recency map + monotonic `bumpBrowser` (promote/spawn/wake), the kind-aware
@@ -136,8 +142,8 @@ recency map + monotonic `bumpBrowser` (promote/spawn/wake), the kind-aware
 masterId)` — ranks every browser (master always wins) and returns the set past
 `BROWSER_BUDGET` (6). Reads live nodes via the passed `nodesRef`.
 
-**Tracers** — `useTracers` owns the action comets fired chat-bar→card: holds the
-`TracerSpec` list, subscribes once to `onOrchestratorTarget` (via a live ref),
+**Comets** — `useComets` owns the action comets fired chat-bar→card: holds the
+`CometSpec` list, subscribes once to `onOrchestratorTarget` (via a live ref),
 resolves a target (`cardId`, or an `askId` → the asking card) to a visible rect
 through `rectForRef`, retries briefly while a fresh card lays out, and reveals a
 spawned card when its comet lands. Owns `CHAT_BAR_INSET`.
@@ -177,7 +183,7 @@ set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates
   (spawn/rename/kill/focus/confirm + the browser set) over
   `onOrchestratorCommand`; Canvas runs them against live project state and
   replies by id via `orchestratorResult`. A ref holds the latest closure so the
-  listener subscribes once. `onOrchestratorTarget` fires a tracer comet from the
+  listener subscribes once. `onOrchestratorTarget` fires a comet from the
   chat bar to the acted-on card. `spawnBrowser` rides the same reveal dance as
   `spawnAgent` (and stamps the node's `ownerCardId`/`reason`); `navigateBrowser`
   bumps the node's `goto` nonce (the nav request the webview watches) and
@@ -236,7 +242,7 @@ set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates
   (Canvas's rename dialog, the toolbar's inline edit).
 - **Spawn reveal:** orchestrator-spawned cards are held invisible
   (`pendingReveal`) until the delivering comet lands; a safety timer
-  (`TRACER_TRAVEL_MS + 1500`) reveals them if the tracer never fires.
+  (`COMET_TRAVEL_MS + 1500`) reveals them if the comet never fires.
 - **Initial prompt before mount:** spawn queues `setInitialPrompt` BEFORE the
   card mounts so the agent starts working with no keystroke race.
 - **CHAT_BAR_INSET (44)** must track the chat-bar pill's overlay inset/half-height

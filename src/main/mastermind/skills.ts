@@ -11,8 +11,9 @@ import {
   renameSync,
   appendFileSync,
   statSync,
+  rmSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, dirname, sep } from 'node:path'
 import { skillsPluginDir } from './paths'
 import type { SkillView, SkillsSnapshot } from '../../shared/types'
 
@@ -25,8 +26,9 @@ const archiveDir = (): string => join(skillsPluginDir(), '.archive')
 const actionsLog = (): string => join(skillsPluginDir(), 'skills-actions.jsonl')
 const usagePath = (): string => join(skillsPluginDir(), 'usage.json')
 
+// One skill write as the reviewer plans it. No `op` — applySkill is a name-keyed UPSERT
+// (existence decides create-vs-update), so the verb was never read; the name is the key.
 export interface SkillAction {
-  op: 'create' | 'patch'
   name: string
   description?: string
   body?: string
@@ -123,9 +125,9 @@ function writeSkill(name: string, description: string, body: string, source: str
 }
 
 // Single-arbiter UPSERT for one skill: name is the key, existence decides create-vs-update —
-// so `op` is ADVISORY only (a mis-picked op or a slightly-off target can no longer reject and
-// silently drop the write, the old patch failure mode). Validate -> fill any omitted field
-// from the existing skill (so a description-only refine keeps the body) -> write (preserving
+// so there's no create-vs-patch verb to mis-pick (the old failure mode where a slightly-off
+// target would reject and silently drop the write). Validate -> fill any omitted field from
+// the existing skill (so a description-only refine keeps the body) -> write (preserving
 // created_at) -> audit-log. A brand-new skill still needs both description AND body.
 export function applySkill(a: SkillAction, source: string): { ok: boolean; error?: string } {
   const err = validateSkill(a)
@@ -136,6 +138,70 @@ export function applySkill(a: SkillAction, source: string): { ok: boolean; error
   if (!description || !body) return { ok: false, error: 'skill needs description + body' }
   writeSkill(a.name, description, body, source)
   logAction({ op: prior ? 'update' : 'create', name: a.name, source })
+  return { ok: true }
+}
+
+// --- The rest of the hermes-parity action set (create/edit route to applySkill above) ----
+
+// Surgical string edit of an existing skill's BODY (frontmatter untouched). A no-match
+// returns an error and writes NOTHING — that's the difference from the old advisory patch:
+// a missed target can't silently land a half-edit. Re-routes through applySkill so created_at
+// is preserved, the action is logged, and the source carries over. replaceAll OR unique-match.
+export function patchSkillBody(
+  name: string,
+  oldString: string,
+  newString: string,
+  replaceAll = false,
+): { ok: boolean; error?: string } {
+  if (!skillExists(name)) return { ok: false, error: `no skill named "${name}"` }
+  if (!oldString) return { ok: false, error: 'patch needs old_string' }
+  const { fm, body } = parseFrontmatter(readFileSync(skillPath(name), 'utf8'))
+  const count = body.split(oldString).length - 1
+  if (count === 0)
+    return { ok: false, error: `old_string not found in "${name}" — read_skill and resend, or use action:"edit"` }
+  if (count > 1 && !replaceAll)
+    return { ok: false, error: `old_string matches ${count}× — set replace_all or include more context to make it unique` }
+  const next = replaceAll ? body.split(oldString).join(newString) : body.replace(oldString, newString)
+  return applySkill({ name, description: fm.description, body: next.trim() }, fm.source || 'conversation')
+}
+
+// "delete" = archive (history-preserving, the library's one removal semantics). The verb
+// matches hermes; the behaviour stays archive-never-delete.
+export function deleteSkill(name: string): { ok: boolean; error?: string } {
+  if (!skillExists(name)) return { ok: false, error: `no skill named "${name}"` }
+  archiveSkill(name)
+  return { ok: true }
+}
+
+// Supporting files live under a fixed set of subdirs inside the skill dir (the body
+// references them). Resolve refuses traversal and anything outside those subdirs.
+const ALLOWED_SUBDIRS = ['references', 'templates', 'scripts', 'assets']
+function resolveSkillFile(name: string, rel: string): { path?: string; error?: string } {
+  if (!rel || rel.includes('\0')) return { error: 'missing file_path' }
+  if (!ALLOWED_SUBDIRS.includes(rel.split('/')[0]))
+    return { error: `file_path must start with one of ${ALLOWED_SUBDIRS.map((d) => d + '/').join(', ')}` }
+  const skillDir = join(skillsSubdir(), name)
+  const abs = resolve(skillDir, rel)
+  if (abs !== skillDir && !abs.startsWith(skillDir + sep)) return { error: 'file_path escapes the skill dir' }
+  return { path: abs }
+}
+
+export function writeSkillFile(name: string, rel: string, content: string): { ok: boolean; error?: string } {
+  if (!skillExists(name)) return { ok: false, error: `no skill named "${name}" — create it first` }
+  const { path, error } = resolveSkillFile(name, rel)
+  if (error || !path) return { ok: false, error }
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, content)
+  logAction({ op: 'write_file', name, file: rel })
+  return { ok: true }
+}
+
+export function removeSkillFile(name: string, rel: string): { ok: boolean; error?: string } {
+  const { path, error } = resolveSkillFile(name, rel)
+  if (error || !path) return { ok: false, error }
+  if (!existsSync(path)) return { ok: false, error: `no file "${rel}" in "${name}"` }
+  rmSync(path)
+  logAction({ op: 'remove_file', name, file: rel })
   return { ok: true }
 }
 

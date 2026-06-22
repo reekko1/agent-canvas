@@ -55,10 +55,12 @@ loads lazily on first reaction.
 **Who learns vs who uses:** the **reactor** authors skills (its reviewers) AND loads them;
 the **orchestrator** (the agent Rakan talks to, and that drives the cascade) ALSO loads the
 same library now, so what's learned actually reaches the agent that acts — and can **author
-into it directly**: the `save_skill` canvas tool writes the SKILL.md inline (the orchestrator
+into it directly**: the `manage_skill` canvas tool writes the SKILL.md inline (the orchestrator
 is Opus; it drafts the body itself, no skill-creator sub-agent) via the same `applySkill`
-arbiter, provenance `conversation`. Both authoring paths (reviewer + save_skill) recycle
-through one seam (`fireSkillsChanged`). Because the SDK
+arbiter, provenance `conversation`. It carries the full hermes-parity action set —
+`create`/`edit` (whole body), `patch` (surgical string edit), `delete` (→archive), and
+`write_file`/`remove_file` for supporting files the body references. Both authoring paths
+(reviewer + manage_skill) recycle through one seam (`fireSkillsChanged`). Because the SDK
 can't hot-swap skills mid-session, a skill create/patch fires `setSkillsChangedListener`
 (here) → `Orchestrator.notifySkillsChanged()`, which recycles the orchestrator session
 (resumed, so the conversation survives) to reload the library. Memory reaches the
@@ -91,11 +93,16 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
   Budgets: operator 2000, product 4000 chars.
 - **skills.ts** — the skill library as real `SKILL.md` files in a plugin dir (the SDK
   `plugins` loader needs files). `applySkill` is a single-arbiter **UPSERT** keyed by name
-  (existence decides create-vs-update; `op` is advisory, so a mis-picked op / slightly-off
-  target can't reject and silently drop the write — the old patch failure mode). A partial
+  (existence decides create-vs-update — there's no create-vs-patch verb to mis-pick, the old
+  failure mode where a slightly-off target rejected and silently dropped the write). A partial
   refine inherits the omitted field from the existing skill; updates preserve `created_at`
-  (+ stamp `updated_at`). archive-never-delete to `.archive/`; usage tracked for curator
-  aging. Paths are computed at call time because the root is configurable.
+  (+ stamp `updated_at`). The hermes-parity action set rounds it out: `patchSkillBody` (a
+  surgical string edit that writes NOTHING on a no-match, routed through applySkill so age +
+  log + recycle still hold), `deleteSkill` (= archive, the one removal semantics), and
+  `writeSkillFile`/`removeSkillFile` for supporting files under a fixed set of subdirs
+  (`references/templates/scripts/assets`, traversal-guarded). archive-never-delete to
+  `.archive/`; usage tracked for curator aging. Paths are computed at call time because the
+  root is configurable.
 - **constitutions.ts** — the two reviewer system prompts, verbatim from the design §6.
 - **triggers.ts** — deterministic reviewer triggers. `MilestoneKind = IssueMilestone['kind']`
   (imported, not re-declared — the single source of truth). Skills = event-primary
@@ -113,7 +120,7 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
   same coalesced window — facts (`reviewMemory`, common) and procedures (`reviewSkills`, rare,
   provenance `conversation`) — kept separate so the proven memory path is untouched and either
   can be tuned alone. A conversation-authored skill recycles via `fireSkillsChanged` (the one
-  recycle seam, shared with the reaction reviewer and the orchestrator's `save_skill` tool).
+  recycle seam, shared with the reaction reviewer and the orchestrator's `manage_skill` tool).
 - **curator.ts** — deterministic skill aging (unused 30d→stale, 90d→archived,
   reactivates on use). Skills only — memory self-maintains via the reviewer + budget.
   A pure `ageSkills(now)` function with no cadence/persistence; currently unwired.

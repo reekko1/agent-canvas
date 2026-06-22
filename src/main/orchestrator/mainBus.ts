@@ -6,7 +6,14 @@
 // so each action lands with its narration. The offline counterpart is stubBus.ts.
 import { COMET_TRAVEL_MS } from '../../shared/types'
 import { renderOpenCanvas, type CommandBus, type World } from './contract'
-import { applySkill, skillsSnapshot } from '../mastermind/skills'
+import {
+  applySkill,
+  patchSkillBody,
+  deleteSkill,
+  writeSkillFile,
+  removeSkillFile,
+  skillsSnapshot,
+} from '../mastermind/skills'
 import { fireSkillsChanged } from '../mastermind/learning'
 import type {
   BrowserAction,
@@ -417,16 +424,41 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       return { ok: true, message: `pushed to Rakan's phone: ${message}` }
     },
 
-    saveSkill: async ({ op = 'create', name, description, body }) => {
+    manageSkill: async (input) => {
       // The orchestrator wrote the body itself (Opus, guided by the system prompt) — no
-      // drafting sub-agent. applySkill is the single arbiter (validate → upsert → log);
-      // 'conversation' is the source (parsed by the SkillsPanel). Strip the mastermind:
-      // prefix the model knows skills by, so a "mastermind:foo" name still resolves.
-      const bare = name.replace(/^mastermind:/, '')
-      const r = applySkill({ op, name: bare, description, body }, 'conversation')
-      if (!r.ok) return { ok: false, message: r.error ?? 'save failed' }
-      fireSkillsChanged() // recycle the session at the next idle boundary so it loads
-      return { ok: true, message: `saved skill "${bare}" — loads on my next turn` }
+      // drafting sub-agent. Strip the mastermind: prefix the model knows skills by, so a
+      // "mastermind:foo" name still resolves. create/edit/patch/delete change the SKILL.md
+      // the SDK snapshots → recycle; write_file/remove_file are assets the body reads live
+      // off disk during a turn → no recycle. 'conversation' is the source (parsed by SkillsPanel).
+      const name = input.name.replace(/^mastermind:/, '')
+      let r: { ok: boolean; error?: string }
+      let recycle = true
+      switch (input.action) {
+        case 'create':
+        case 'edit':
+          r = applySkill({ name, description: input.description, body: input.body }, 'conversation')
+          break
+        case 'patch':
+          r = patchSkillBody(name, input.oldString ?? '', input.newString ?? '', input.replaceAll)
+          break
+        case 'delete':
+          r = deleteSkill(name)
+          break
+        case 'write_file':
+          r = writeSkillFile(name, input.filePath ?? '', input.fileContent ?? '')
+          recycle = false
+          break
+        case 'remove_file':
+          r = removeSkillFile(name, input.filePath ?? '')
+          recycle = false
+          break
+        default:
+          r = { ok: false, error: `unknown action "${input.action}"` }
+      }
+      if (!r.ok) return { ok: false, message: r.error ?? 'skill action failed' }
+      if (recycle) fireSkillsChanged() // recycle at the next idle boundary so it loads
+      const done = input.action === 'delete' ? 'archived' : recycle ? 'loads on my next turn' : 'saved'
+      return { ok: true, message: `${input.action} "${name}" — ${done}` }
     },
 
     readSkill: async (name) => {

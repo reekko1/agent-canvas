@@ -14,7 +14,7 @@ DO NOT CAPTURE: one-off narration ("in sprint 7 we did X"); anything product/cod
 
 AUTHORING: name = gerund, lowercase-hyphen, <=64 chars, no "claude"/"anthropic" (e.g. handling-stalled-sprints). description = third person, <=1024 chars, WHAT it does + WHEN to use it, naming the triggering situation plainly. body = concise, the procedure as clear steps; reference actions by fully-qualified name (canvas:spawn_agent, canvas:send_to_agent). Instructions only.
 
-OUTPUT: return skill_actions (op create|patch, name, description, body) and nothing_to_save. If the episode yielded no durable, general procedure, return nothing_to_save:true with empty skill_actions — a correct, common outcome. Never pad.`
+OUTPUT: return skill_actions (name, description, body — saving by an existing name updates it in place) and nothing_to_save. If the episode yielded no durable, general procedure, return nothing_to_save:true with empty skill_actions — a correct, common outcome. Never pad.`
 
 export const MEMORY_CONSTITUTION = `You are the Memory Reviewer for the Mastermind — Rakan's always-on agent. You run out-of-band every N reactions. Your job: distill durable FACTS so future reactions are better-informed — who Rakan is (the operator), and what's true about this product/fleet.
 

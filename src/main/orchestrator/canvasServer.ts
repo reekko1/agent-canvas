@@ -339,21 +339,28 @@ export function buildCanvasServer(bus: CommandBus) {
     { annotations: { readOnlyHint: true } },
   )
 
-  const saveSkill = tool(
-    'save_skill',
-    "Author or refine one of your OWN skills — a reusable procedure you carry forward. Use when Rakan asks you to learn/build a skill, or when you notice a durable, repeatable way of handling a recurring situation. Write `body` yourself, inline, as the skill's actual instructions (Markdown): when it applies and the steps to follow — general to a CLASS of situation, not a one-off. Saving by an existing `name` UPDATES that skill (so call read_skill first when refining, and send the full revised body); a new name creates one. Use the bare skill name, no \"mastermind:\" prefix. The skill loads into you on your next turn.",
+  const manageSkill = tool(
+    'manage_skill',
+    "Manage one of your OWN skills — a reusable procedure you carry forward. Use when Rakan asks you to learn/build a skill, or when you notice a durable, repeatable way of handling a recurring situation. Actions: `create` a new skill (needs description + body) or `edit` rewrites an existing one's whole body — write `body` yourself, inline, as the skill's instructions (Markdown): when it applies and the steps, general to a CLASS of situation, not a one-off; `patch` makes a surgical edit (call read_skill first, then give oldString/newString — a no-match changes nothing, so re-read and resend); `delete` archives a skill; `write_file`/`remove_file` attach or drop supporting files the body references (path under references/, templates/, scripts/, or assets/). Use the bare skill name, no \"mastermind:\" prefix. A create/edit/patch/delete loads into you on your next turn.",
     {
+      action: z
+        .enum(['create', 'edit', 'patch', 'delete', 'write_file', 'remove_file'])
+        .describe('What to do to the skill'),
       name: z.string().describe('Short kebab-case id, e.g. "handling-stalled-sprints" (lowercase/numbers/hyphens, ≤64)'),
-      description: z.string().describe('One line: what the skill is for and when to reach for it'),
-      body: z.string().describe("The skill's instructions in Markdown — when it applies and the steps to follow"),
-      op: z.enum(['create', 'patch']).optional().describe('"create" a new skill (default) or "patch" an existing one by name'),
+      description: z.string().optional().describe('create/edit: one line — what the skill is for and when to reach for it'),
+      body: z.string().optional().describe('create/edit: the full skill instructions in Markdown'),
+      oldString: z.string().optional().describe('patch: the exact text to find in the current body'),
+      newString: z.string().optional().describe('patch: the replacement (empty string deletes the matched text)'),
+      replaceAll: z.boolean().optional().describe('patch: replace every occurrence instead of requiring a unique match'),
+      filePath: z.string().optional().describe('write_file/remove_file: path under references/ templates/ scripts/ assets/'),
+      fileContent: z.string().optional().describe('write_file: the file contents'),
     },
     async (args) => {
       try {
-        const r = await bus.saveSkill(args)
+        const r = await bus.manageSkill(args)
         return r.ok ? okResult(r) : failResult(r.message)
       } catch (e) {
-        return failResult(`save_skill failed: ${errText(e)}`)
+        return failResult(`manage_skill failed: ${errText(e)}`)
       }
     },
   )
@@ -381,7 +388,7 @@ export function buildCanvasServer(bus: CommandBus) {
       approveAsk,
       notifyUser,
       readSkill,
-      saveSkill,
+      manageSkill,
     ],
   })
 }

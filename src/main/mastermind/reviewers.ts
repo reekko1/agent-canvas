@@ -109,9 +109,8 @@ const SKILL_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['op', 'name', 'description', 'body'],
+        required: ['name', 'description', 'body'],
         properties: {
-          op: { type: 'string', enum: ['create', 'patch'] },
           name: { type: 'string' },
           description: { type: 'string' },
           body: { type: 'string' },

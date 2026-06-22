@@ -779,11 +779,20 @@ export class Orchestrator {
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
       case 'notify_user':
         return { title: 'Notify you', detail: clip(str(input.message)) }
-      case 'save_skill':
-        return {
-          title: `${str(input.op) === 'patch' ? 'Refine' : 'Author'} skill “${str(input.name)}”`,
-          detail: clip(str(input.description)),
+      case 'manage_skill': {
+        const action = str(input.action)
+        const titles: Record<string, string> = {
+          create: 'Author skill',
+          edit: 'Rewrite skill',
+          patch: 'Refine skill',
+          delete: 'Archive skill',
+          write_file: 'Add file to skill',
+          remove_file: 'Remove file from skill',
         }
+        const detail =
+          action === 'write_file' || action === 'remove_file' ? str(input.filePath) : str(input.description)
+        return { title: `${titles[action] ?? 'Edit skill'} “${str(input.name)}”`, detail: clip(detail) }
+      }
       default:
         return { title: verb, detail: clip(JSON.stringify(input)) }
     }

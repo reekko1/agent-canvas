@@ -182,12 +182,13 @@ export interface CommandBus {
   /** Push a one-line notification to Rakan's phone — the mastermind reaching out when he
    *  may not be looking at the app. The agent's own arm for proactive reach-out. */
   notifyUser(message: string): Promise<ActionResult>
-  /** Author or refine one of the mastermind's own skills, written inline by the
-   *  orchestrator. Writes the SKILL.md (via applySkill) and recycles the session so the
-   *  new skill loads. The agent's own arm for self-authored procedures. */
-  saveSkill(input: SaveSkillInput): Promise<ActionResult>
+  /** Author, refine, patch, delete (→archive), or attach supporting files to one of the
+   *  mastermind's own skills. Bodies are written inline by the orchestrator; create/edit/patch/
+   *  delete recycle the session so the change loads. The agent's own arm for self-authored
+   *  procedures. */
+  manageSkill(input: ManageSkillInput): Promise<ActionResult>
   /** One of the mastermind's learned skills by name (its full current body), so the
-   *  orchestrator can SEE the real text before refining it with saveSkill — a patch edits
+   *  orchestrator can SEE the real text before refining it with manageSkill — a patch edits
    *  the real body rather than reconstructing it from memory. null if no such skill. The
    *  model already knows skill names + descriptions (the loader surfaces them); it only
    *  needs the body, fetched one at a time. */
@@ -200,13 +201,25 @@ export interface SkillBrief {
   body: string
 }
 
-export interface SaveSkillInput {
-  /** "create" a new skill (default) or "patch" an existing one by name. */
-  op?: 'create' | 'patch'
+export interface ManageSkillInput {
+  /** The operation. create/edit write the whole body; patch is a surgical string edit;
+   *  delete archives; write_file/remove_file manage supporting files under the skill dir. */
+  action: 'create' | 'edit' | 'patch' | 'delete' | 'write_file' | 'remove_file'
   /** Short kebab-case id, e.g. "handling-stalled-sprints". */
   name: string
-  /** One line: what the skill is for and when to reach for it. */
-  description: string
-  /** The skill's instructions in Markdown — when it applies and the steps. */
-  body: string
+  /** create/edit: one line — what the skill is for and when to reach for it. */
+  description?: string
+  /** create/edit: the skill's instructions in Markdown — when it applies and the steps. */
+  body?: string
+  /** patch: the exact text to find in the current body. */
+  oldString?: string
+  /** patch: what to replace it with (empty string deletes the matched text). */
+  newString?: string
+  /** patch: replace every occurrence instead of requiring a unique match. */
+  replaceAll?: boolean
+  /** write_file/remove_file: path under the skill dir, e.g. "scripts/run.sh"
+   *  (must start with references/, templates/, scripts/, or assets/). */
+  filePath?: string
+  /** write_file: the file's contents. */
+  fileContent?: string
 }

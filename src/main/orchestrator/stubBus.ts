@@ -9,7 +9,7 @@ import type {
   BrowserReadResult,
   BrowserShotResult,
   CommandBus,
-  SaveSkillInput,
+  ManageSkillInput,
   SkillBrief,
   SpawnAgentInput,
   SpawnBrowserInput,
@@ -196,8 +196,8 @@ export function makeStubBus(): CommandBus {
       return { ok: true, message: `(stub) pushed to Rakan's phone: ${message}` }
     },
 
-    async saveSkill(input: SaveSkillInput): Promise<ActionResult> {
-      return { ok: true, message: `(stub) saved skill "${input.name}"` }
+    async manageSkill(input: ManageSkillInput): Promise<ActionResult> {
+      return { ok: true, message: `(stub) ${input.action} skill "${input.name}"` }
     },
 
     async readSkill(_name: string): Promise<SkillBrief | null> {

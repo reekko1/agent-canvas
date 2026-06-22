@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setMastermindRoot, resetMastermind, productMemoryPath } from './paths'
 import { applyMemoryOps, materialize, snapshot, BUDGET } from './memory'
-import { ensurePlugin, applySkill, listSkills, skillExists, archivedExists, archiveSkill, recordSkillUse, skillBody } from './skills'
+import { ensurePlugin, applySkill, patchSkillBody, deleteSkill, writeSkillFile, removeSkillFile, listSkills, skillExists, archivedExists, archiveSkill, recordSkillUse, skillBody } from './skills'
 import { initTriggers, onReaction, type MilestoneKind } from './triggers'
 import { ageSkills } from './curator'
 import { isToolAllowed } from './reactor'
@@ -68,20 +68,36 @@ function storeSplitSection(): void {
 
 function skillsSection(): void {
   console.log('\n— skills validation + archive —')
-  check('bad name rejected', !applySkill({ op: 'create', name: 'Bad Name', description: 'd', body: 'b' }, 't').ok)
-  check('reserved word rejected', !applySkill({ op: 'create', name: 'claude-helper', description: 'd', body: 'b' }, 't').ok)
-  check('oversized body rejected', !applySkill({ op: 'create', name: 'huge', description: 'd', body: Array(600).fill('line').join('\n') }, 't').ok)
-  check('valid create ok', applySkill({ op: 'create', name: 'handling-stalls', description: 'when a sprint stalls', body: 'step 1' }, 't').ok)
-  // upsert: same name (whatever the op) updates in place instead of rejecting on collision
-  check('upsert: same name updates in place', applySkill({ op: 'create', name: 'handling-stalls', description: 'when a sprint stalls', body: 'step 1 revised' }, 't').ok && skillBody('handling-stalls') === 'step 1 revised')
-  // a NEW skill still needs full content — a body-only "patch" of an absent name can't land
-  check('new skill without description rejected', !applySkill({ op: 'patch', name: 'no-such-skill', body: 'b' }, 't').ok)
-  const p = applySkill({ op: 'patch', name: 'handling-stalls', body: 'step 1 improved' }, 't')
+  check('bad name rejected', !applySkill({ name: 'Bad Name', description: 'd', body: 'b' }, 't').ok)
+  check('reserved word rejected', !applySkill({ name: 'claude-helper', description: 'd', body: 'b' }, 't').ok)
+  check('oversized body rejected', !applySkill({ name: 'huge', description: 'd', body: Array(600).fill('line').join('\n') }, 't').ok)
+  check('valid create ok', applySkill({ name: 'handling-stalls', description: 'when a sprint stalls', body: 'step 1' }, 't').ok)
+  // upsert: same name updates in place instead of rejecting on collision
+  check('upsert: same name updates in place', applySkill({ name: 'handling-stalls', description: 'when a sprint stalls', body: 'step 1 revised' }, 't').ok && skillBody('handling-stalls') === 'step 1 revised')
+  // a NEW skill still needs full content — a body-only refine of an absent name can't land
+  check('new skill without description rejected', !applySkill({ name: 'no-such-skill', body: 'b' }, 't').ok)
+  const p = applySkill({ name: 'handling-stalls', body: 'step 1 improved' }, 't')
   check('valid patch updates body', p.ok && skillBody('handling-stalls').includes('improved'))
   // partial update: description-only refine keeps the existing body (no blind overwrite)
-  check('partial update inherits existing body', applySkill({ op: 'patch', name: 'handling-stalls', description: 'sharper desc' }, 't').ok && skillBody('handling-stalls') === 'step 1 improved')
+  check('partial update inherits existing body', applySkill({ name: 'handling-stalls', description: 'sharper desc' }, 't').ok && skillBody('handling-stalls') === 'step 1 improved')
   archiveSkill('handling-stalls')
   check('archive-never-delete (recoverable, hidden from active)', archivedExists('handling-stalls') && !skillExists('handling-stalls') && !listSkills().some((s) => s.name === 'handling-stalls'))
+
+  // hermes-parity actions: string patch, delete→archive, supporting files
+  applySkill({ name: 'patch-me', description: 'd', body: 'alpha\nbeta\nalpha' }, 't')
+  check('patch no-match writes nothing', !patchSkillBody('patch-me', 'zzz', 'x').ok && skillBody('patch-me') === 'alpha\nbeta\nalpha')
+  check('patch non-unique without replaceAll rejected', !patchSkillBody('patch-me', 'alpha', 'A').ok)
+  check('patch replaceAll hits every match', patchSkillBody('patch-me', 'alpha', 'A', true).ok && skillBody('patch-me') === 'A\nbeta\nA')
+  check('patch unique match edits in place', patchSkillBody('patch-me', 'beta', 'B').ok && skillBody('patch-me') === 'A\nB\nA')
+  check('delete archives (history preserved)', deleteSkill('patch-me').ok && archivedExists('patch-me') && !skillExists('patch-me'))
+  check('delete of unknown skill rejected', !deleteSkill('no-such-skill').ok)
+
+  applySkill({ name: 'with-files', description: 'd', body: 'b' }, 't')
+  check('write_file under allowed subdir ok', writeSkillFile('with-files', 'scripts/run.sh', 'echo hi').ok)
+  check('write_file traversal rejected', !writeSkillFile('with-files', '../escape.sh', 'x').ok)
+  check('write_file outside allowed subdir rejected', !writeSkillFile('with-files', 'secrets/x', 'x').ok)
+  check('write_file to missing skill rejected', !writeSkillFile('no-such-skill', 'scripts/x', 'x').ok)
+  check('remove_file drops the file', removeSkillFile('with-files', 'scripts/run.sh').ok && !removeSkillFile('with-files', 'scripts/run.sh').ok)
 }
 
 function triggersSection(): void {
@@ -196,8 +212,8 @@ function worldSection(): void {
 function curatorSection(): void {
   console.log('\n— curator aging —')
   const now = Date.now()
-  applySkill({ op: 'create', name: 'old-unused', description: 'd', body: 'b' }, 't')
-  applySkill({ op: 'create', name: 'recently-used', description: 'd', body: 'b' }, 't')
+  applySkill({ name: 'old-unused', description: 'd', body: 'b' }, 't')
+  applySkill({ name: 'recently-used', description: 'd', body: 'b' }, 't')
   const future = now + 100 * DAY
   recordSkillUse('recently-used', future - 10 * DAY) // used 10 days before "now"
   const { archived } = ageSkills(future) // 100 days later

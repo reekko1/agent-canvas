@@ -25,7 +25,7 @@ export function setSkillsChangedListener(fn: (() => void) | null): void {
 }
 /** Recycle the orchestrator session so it reloads the skill library (the SDK can't
  *  hot-swap). Fired after the reviewer authors a skill AND after the orchestrator
- *  saves one itself via save_skill — one path to the same recycle. */
+ *  saves one itself via manage_skill — one path to the same recycle. */
 export function fireSkillsChanged(): void {
   onSkillsChanged?.()
 }
@@ -73,7 +73,7 @@ async function learnFactsFromConversation(job: { transcript: string; projectId?:
 
 // The skill half of conversation learning: the agent capturing a durable ORCHESTRATION
 // procedure Rakan taught or implied — proactive authoring, the out-of-band twin of the
-// orchestrator's own save_skill. Same SKILL_CONSTITUTION + applySkill + recycle as the
+// orchestrator's own manage_skill. Same SKILL_CONSTITUTION + applySkill + recycle as the
 // reaction path; provenance 'conversation'. Skills are global (no projectId).
 async function learnSkillsFromConversation(job: { transcript: string }): Promise<void> {
   const plan = await reviewSkills(job.transcript, 'OPERATOR CONVERSATION')
@@ -82,7 +82,7 @@ async function learnSkillsFromConversation(job: { transcript: string }): Promise
   for (const a of plan.skill_actions) {
     const r = applySkill(a, 'conversation')
     if (r.ok) n++
-    else console.warn(`[mastermind] conversation skill ${a.op} "${a.name}" rejected: ${r.error}`)
+    else console.warn(`[mastermind] conversation skill "${a.name}" rejected: ${r.error}`)
   }
   if (n) {
     console.log(`[mastermind] learned ${n} skill(s) from the conversation`)
@@ -105,7 +105,7 @@ export function recordReaction(milestone: IssueMilestone, reaction: Reaction): v
       for (const a of plan.skill_actions ?? []) {
         const r = applySkill(a, episodeSource(projectId, milestone.kind))
         if (r.ok) n++
-        else console.warn(`[mastermind-learn] skill ${a.op} "${a.name}" rejected: ${r.error}`)
+        else console.warn(`[mastermind-learn] skill "${a.name}" rejected: ${r.error}`)
       }
       if (n) {
         console.log(`[mastermind-learn] skills: applied ${n} action(s) from a ${episode.length}-reaction episode`)

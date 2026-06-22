@@ -309,6 +309,20 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
+  const notifyUser = tool(
+    'notify_user',
+    "Send Rakan a push notification on his phone — reach him when he may not be looking at the app (e.g. on a quiet heartbeat, when something across his canvases genuinely needs his attention). One short line, in your own voice. Use sparingly: only when it earns the interruption.",
+    { message: z.string().describe('The one-line notification to push to Rakan') },
+    async (args) => {
+      try {
+        const r = await bus.notifyUser(args.message)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`notify_user failed: ${errText(e)}`)
+      }
+    },
+  )
+
   return createSdkMcpServer({
     name: 'canvas',
     version: '0.1.0',
@@ -330,6 +344,7 @@ export function buildCanvasServer(bus: CommandBus) {
       renameAgent,
       killCard,
       approveAsk,
+      notifyUser,
     ],
   })
 }

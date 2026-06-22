@@ -731,6 +731,11 @@ export interface Issue {
    *  the replacement issue id, so the lineage of a restructure stays legible. */
   supersededBy?: string
   createdAt: number
+  /** Epoch ms a stall was detected on the current claim (set by the stall sweep via
+   *  `issue.setStall`, cleared when the owner shows life or the claim changes). A
+   *  de-dup latch: the `stalled` milestone fires only on the not-stalled → stalled
+   *  edge. */
+  stalledAt?: number
 }
 
 /// A qualitative gap judgment — distance to the vision is ASSESSED, never
@@ -847,6 +852,11 @@ export type IssueActionRequest =
   | { kind: 'issue.setStatus'; id: string; status: IssueStatus }
   | { kind: 'issue.claim'; id: string; owner: string } // atomic test-and-set on owner
   | { kind: 'issue.release'; id: string }
+  // Stall latch — set by the main-process stall sweep (NOT an agent-facing action).
+  // Idempotent + edge-triggered: `stalled: true` on a not-yet-stalled owned issue
+  // stamps `stalledAt` and fires the `stalled` milestone; `stalled: false` clears the
+  // latch when the owner shows life again. No-op when already in the target state.
+  | { kind: 'issue.setStall'; id: string; stalled: boolean }
   | { kind: 'issue.setDeps'; id: string; deps: string[] }
   | {
       kind: 'issue.postVerdict'
@@ -922,11 +932,40 @@ export interface IssueSnapshot {
   conceptions: Conception[]
 }
 
+/// One self-authored skill, read-only, for the UI gallery. The mastermind's learned
+/// orchestration procedures live as SKILL.md files; this is a flattened view of one (no
+/// model call to build it). `source` is the audit provenance, e.g.
+/// `episode:<projectId>:<kind>` / `conversation` / `manual-test` — the renderer can pull a
+/// canvas id out of it to label where the skill was learned. The library is GLOBAL (not
+/// per-canvas), so the same set shows on every canvas.
+export interface SkillView {
+  name: string
+  description: string
+  body: string
+  /** ISO timestamp the skill was authored (frontmatter `created_at`); '' if absent. */
+  createdAt: string
+  /** Provenance of the authoring (frontmatter `source`). */
+  source: string
+  /** Epoch ms it was last invoked, or null if never. */
+  lastUsed: number | null
+  archived: boolean
+}
+
+/// The whole skill library as the UI sees it: active skills + archived (curator-aged)
+/// ones, each newest-first. Pushed on every change via `onSkillsUpdate`.
+export interface SkillsSnapshot {
+  active: SkillView[]
+  archived: SkillView[]
+}
+
 /// A board milestone the IssueStore emits on a meaningful transition — the
 /// mastermind's wake signal (it sees only these, never the work). Fires `plan-ready`
 /// (plan approved → spawn a lead), the issue-cascade signals, and the strategist's
 /// `idea-ready` (a tournament decided → spawn a planner with the winner) /
-/// `idea-abstained` (no winner → escalate to the human).
+/// `idea-abstained` (no winner → escalate to the human). The learning layer adds
+/// the friction signals `retire` / `amend` (a lead repaired a flawed issue) and
+/// `stalled` (an assigned worker went silent past the heartbeat threshold).
+/// NB `sprint-ready` is reserved in this union but is not emitted anywhere yet.
 export interface IssueMilestone {
   kind:
     | 'plan-ready'
@@ -937,12 +976,15 @@ export interface IssueMilestone {
     | 'outcome-verified'
     | 'idea-ready'
     | 'idea-abstained'
+    | 'stalled'
+    | 'retire'
+    | 'amend'
   projectId: string
   sprintId?: string
   issueId?: string
   /** The strategist deliberation (on `idea-ready` / `idea-abstained`). */
   conceptionId?: string
-  /** The worker an issue was assigned to (on `issue-assigned`) — nudged to start. */
+  /** The worker an issue was assigned to (on `issue-assigned` / `stalled`). */
   ownerId?: string
   /** Human context (e.g. the sprint outcome, or an issue title) for the brief. */
   detail?: string
@@ -1066,6 +1108,12 @@ export interface CanvasApi {
   issueAction(action: IssueActionRequest): Promise<IssueActionResult>
   /** The store changed — main re-pushes the whole projection on every action. */
   onIssueUpdate(cb: (snapshot: IssueSnapshot) => void): () => void
+  // MARK: Mastermind skills (read-only gallery)
+  /** Load the mastermind's self-authored skill library (active + archived). */
+  loadMastermindSkills(): Promise<SkillsSnapshot>
+  /** The skill library changed (the reviewer authored/patched a skill) — main
+   *  re-pushes the whole snapshot so the gallery refreshes live. */
+  onSkillsUpdate(cb: (snapshot: SkillsSnapshot) => void): () => void
   // MARK: Voice — push-to-talk speech-to-text and spoken orchestrator replies.
   /** Whether Soniox voice is configured (a key is present in main). */
   voiceAvailable(): Promise<boolean>

@@ -26,6 +26,8 @@ import { DiffSheet } from './DiffSheet'
 import { IssueConstellation } from '@/issues/IssueConstellation'
 import { VisionSheet } from '@/issues/VisionSheet'
 import { useIssueBoard } from '@/issues/useIssueBoard'
+import { SkillsSheet } from './SkillsSheet'
+import { useSkillsPanel } from './useSkillsPanel'
 import { ProjectToolbar } from './ProjectToolbar'
 import { RenameDialog } from './RenameDialog'
 import { useActivityFeed, type ActivityNotification } from './useActivityFeed'
@@ -79,7 +81,7 @@ export function Canvas() {
   // The three right-edge sheets (diff + vision board + issue board) share one
   // width channel and are mutually exclusive: at most one is expanded. null = all
   // collapsed (the master uses full width). Expanding one collapses the others.
-  const [rightSheet, setRightSheet] = useState<'diff' | 'vision' | 'issues' | null>(null)
+  const [rightSheet, setRightSheet] = useState<'diff' | 'vision' | 'issues' | 'skills' | null>(null)
   const [stackScroll, setStackScroll] = useState(0)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ cardId: string; x: number; y: number } | null>(
@@ -95,7 +97,7 @@ export function Canvas() {
   // Toggle a right-edge sheet: clicking its rail button again collapses it,
   // otherwise it opens (and the mutual-exclusion makes the others collapse).
   const toggleSheet = useCallback(
-    (s: 'diff' | 'vision' | 'issues') => setRightSheet((cur) => (cur === s ? null : s)),
+    (s: 'diff' | 'vision' | 'issues' | 'skills') => setRightSheet((cur) => (cur === s ? null : s)),
     [],
   )
   const reveal = (cardId: string): void =>
@@ -120,6 +122,8 @@ export function Canvas() {
   const proj = useProjects(makeProjectId)
   // The Mastermind issue board: per-canvas vision + sprints + issues.
   const issueBoard = useIssueBoard({ activeProjectId: proj.activeProjectId })
+  // The mastermind's learned skill library (global, not per-canvas) for the Skills sheet.
+  const skillsPanel = useSkillsPanel()
 
   const { hydrateTodos } = useCardMeta(setNodes)
   const { asks, decide, releaseCard } = usePendingAsks()
@@ -489,6 +493,16 @@ export function Canvas() {
         board={issueBoard}
         sheetW={sheetW}
         collapsed={rightSheet !== 'vision'}
+        onCollapse={() => setRightSheet(null)}
+      />
+
+      {/* Skills: the mastermind's learned skill library (read-only, global — same on
+          every canvas). A 4th right-edge sheet sharing the diff/vision width channel. */}
+      <SkillsSheet
+        panel={skillsPanel}
+        canvasName={(id) => proj.projects.find((p) => p.id === id)?.name}
+        sheetW={sheetW}
+        collapsed={rightSheet !== 'skills'}
         onCollapse={() => setRightSheet(null)}
       />
 

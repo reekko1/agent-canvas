@@ -146,6 +146,11 @@ export interface CommandBus {
    *  other canvases by name. Injected into every turn so the orchestrator can act
    *  on what's on screen without a list_world round-trip. */
   openCanvas(): Promise<string>
+  /** The open-canvas snapshot PLUS what the mastermind knows about Rakan (operator
+   *  memory) and a terse cross-canvas "your whole world" view — the full context block
+   *  the standing conversation gets injected each turn. Superset of openCanvas(); the
+   *  reactor still uses the leaner openCanvas() for its board snapshot. */
+  worldContext(): Promise<string>
   focusCanvas(canvasId: string): Promise<ActionResult>
   spawnAgent(input: SpawnAgentInput): Promise<SpawnResult>
   /** Open a browser card (an in-app web view), optionally at a starting url. */
@@ -174,4 +179,7 @@ export interface CommandBus {
   /** Allow or deny a permission request an agent is blocked on (askId from
    *  the world's approvals). */
   approveAsk(askId: string, decision: 'allow' | 'deny'): Promise<ActionResult>
+  /** Push a one-line notification to Rakan's phone — the mastermind reaching out when he
+   *  may not be looking at the app. The agent's own arm for proactive reach-out. */
+  notifyUser(message: string): Promise<ActionResult>
 }

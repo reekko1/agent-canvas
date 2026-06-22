@@ -10,6 +10,7 @@ import type {
   BrowserAction,
   BrowserActionResult,
   BrowserSnapshot,
+  IssueSnapshot,
   OrchestratorActionResult,
   OrchestratorCommand,
   OrchestratorConfirmResult,
@@ -56,6 +57,9 @@ export interface MainBusDeps {
   /** The orchestrator's current mode — a role card's spawn prompt invokes its role
    *  skill in this mode (partner → interview; autonomous → unattended). */
   getMode: () => OrchestratorMode
+  /** The issue-store read projection — the cross-canvas "your whole world" view reads
+   *  each canvas's vision + sprint state from it (worldContext, injected each turn). */
+  issueSnapshot: () => IssueSnapshot
   /** Dispatch a renderer-owned mutation and await it. */
   dispatch: Dispatch
   /** Write input to a card's terminal (keystroke injection). */
@@ -72,6 +76,9 @@ export interface MainBusDeps {
   /** Tell the renderer to play the scan-line flourish on a browser card — fired
    *  when its page is screenshotted, as see-it-happening feedback. */
   notifyBrowserScan: (cardId: string) => void
+  /** Push a one-line notification to Rakan's phone (the `notify_user` tool's arm).
+   *  No-op when absent. */
+  pushToPhone?: (title: string, body: string) => void
 }
 
 function delay(ms: number): Promise<void> {
@@ -101,6 +108,12 @@ const STRICT_CDP = !!process.env.CANVAS_BROWSER_STRICT_CDP
 export function makeMainBus(deps: MainBusDeps): CommandBus {
   const findCard = (id: string): RemoteState['cards'][number] | undefined =>
     deps.getState()?.cards.find((c) => c.id === id)
+
+  // Per-card serialization for keystroke delivery: a send is body + (settle) + Enter,
+  // two separate pty writes. Concurrent callers to the SAME card (orchestrator + the
+  // mastermind reactor, or two reactors on one lead) would otherwise interleave into
+  // garbled input. Chain per card so each send's two writes stay contiguous.
+  const sendChains = new Map<string, Promise<void>>()
 
   /** Resolve a card that must be a browser, or the failure result to return. The
    *  single owner of the "no card / not a browser" guard the browser methods share
@@ -147,6 +160,36 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
     }
   }
 
+  /** The open-canvas snapshot text — shared by openCanvas() and worldContext(). */
+  const renderOpen = async (): Promise<string> => {
+    const s = deps.getState()
+    const active = s?.canvases.find((c) => c.active)
+    if (!active) return '[Open canvas] none.'
+    return renderOpenCanvas({
+      name: active.name,
+      id: active.id,
+      branch: active.branch,
+      dirty: active.dirty,
+      cards: s!.cards
+        .filter((c) => c.projectId === active.id)
+        .map((c) => ({
+          name: c.name,
+          id: c.id,
+          kind: c.kind,
+          status: c.status,
+          task: c.task,
+          url: c.url,
+          running: c.running,
+        })),
+      asks: s!.approvals
+        .filter((a) => a.projectId === active.id)
+        .map((a) => ({ name: a.name, detail: a.detail, id: a.id })),
+      others: s!.canvases
+        .filter((c) => !c.active)
+        .map((c) => ({ name: c.name, id: c.id, attention: c.attention })),
+    })
+  }
+
   return {
     listWorld: async (): Promise<World> => {
       const s = deps.getState()
@@ -179,33 +222,27 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       }
     },
 
-    openCanvas: async (): Promise<string> => {
-      const s = deps.getState()
-      const active = s?.canvases.find((c) => c.active)
-      if (!active) return '[Open canvas] none.'
-      return renderOpenCanvas({
-        name: active.name,
-        id: active.id,
-        branch: active.branch,
-        dirty: active.dirty,
-        cards: s!.cards
-          .filter((c) => c.projectId === active.id)
-          .map((c) => ({
-            name: c.name,
-            id: c.id,
-            kind: c.kind,
-            status: c.status,
-            task: c.task,
-            url: c.url,
-            running: c.running,
-          })),
-        asks: s!.approvals
-          .filter((a) => a.projectId === active.id)
-          .map((a) => ({ name: a.name, detail: a.detail, id: a.id })),
-        others: s!.canvases
-          .filter((c) => !c.active)
-          .map((c) => ({ name: c.name, id: c.id, attention: c.attention })),
-      })
+    openCanvas: renderOpen,
+
+    worldContext: async (): Promise<string> => {
+      const open = await renderOpen()
+      // Operator memory (who Rakan is) + the cross-canvas world view, both computed on
+      // demand from existing stores — NO third "world" store (the scope fence). Degrade
+      // to just the open canvas if the mastermind module can't load.
+      try {
+        const { snapshot } = await import('../mastermind/memory')
+        const { computeWorldView } = await import('../mastermind/world')
+        const operator = snapshot('operator')
+        const canvases = (deps.getState()?.canvases ?? []).map((c) => ({ id: c.id, name: c.name }))
+        const world = computeWorldView(canvases, deps.issueSnapshot(), (id) => snapshot('product', id))
+        return (
+          open +
+          (operator ? `\n\nABOUT RAKAN (treat as true):\n${operator}` : '') +
+          (world ? `\n\n${world}` : '')
+        )
+      } catch {
+        return open
+      }
     },
 
     focusCanvas: async (canvasId) => {
@@ -307,19 +344,26 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no agent with id ${cardId}` }
       if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
-      // The comet delivers the message: fly first, inject when it lands. Claude
-      // queues input when busy, so this is safe at any status.
-      deps.signalTarget({ kind: 'send', cardId })
-      await landed()
-      // Strip trailing whitespace and any dangling backslash before submitting:
-      // a body ending in `\` makes the TUI read the following Enter as an escaped
-      // newline (the manual `\`+Enter line-continuation), not a submit. Then write
-      // the body and the Enter as two separated writes — see SUBMIT_SETTLE_MS for
-      // why a glued-on `\r` gets swallowed as a paste newline instead of sending.
-      const body = message.replace(/[\s\\]+$/, '')
-      deps.writeToCard(cardId, body)
-      await delay(SUBMIT_SETTLE_MS)
-      deps.writeToCard(cardId, '\r')
+      // Serialize against any in-flight send to THIS card so the two writes below stay
+      // contiguous (a prior failure mustn't break the chain, hence the catch).
+      const prior = sendChains.get(cardId) ?? Promise.resolve()
+      const run = prior.catch(() => {}).then(async () => {
+        // The comet delivers the message: fly first, inject when it lands. Claude
+        // queues input when busy, so this is safe at any status.
+        deps.signalTarget({ kind: 'send', cardId })
+        await landed()
+        // Strip trailing whitespace and any dangling backslash before submitting:
+        // a body ending in `\` makes the TUI read the following Enter as an escaped
+        // newline (the manual `\`+Enter line-continuation), not a submit. Then write
+        // the body and the Enter as two separated writes — see SUBMIT_SETTLE_MS for
+        // why a glued-on `\r` gets swallowed as a paste newline instead of sending.
+        const body = message.replace(/[\s\\]+$/, '')
+        deps.writeToCard(cardId, body)
+        await delay(SUBMIT_SETTLE_MS)
+        deps.writeToCard(cardId, '\r')
+      })
+      sendChains.set(cardId, run)
+      await run
       return {
         ok: true,
         message: card.status === 'running' ? `queued for ${card.name} (busy)` : `sent to ${card.name}`,
@@ -361,6 +405,14 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       // Main-owned decision — straight to spine.decide, no renderer round-trip.
       deps.decideAsk(askId, decision)
       return { ok: true, message: `${decision === 'allow' ? 'approved' : 'denied'} ${ask.name}'s request` }
+    },
+
+    notifyUser: async (message) => {
+      // The mastermind reaching out: push to Rakan's phone. The spoken line (this turn's
+      // narration) already covers the desktop + any connected phone; this is the push so
+      // it lands even with the app backgrounded.
+      deps.pushToPhone?.('Mastermind', message)
+      return { ok: true, message: `pushed to Rakan's phone: ${message}` }
     },
   }
 }

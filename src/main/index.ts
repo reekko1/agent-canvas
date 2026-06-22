@@ -6,6 +6,9 @@ import { Spine, SPINE_DIR } from './spine/spine'
 import { PtyRegistry } from './ptys'
 import { WorkspaceStore } from './workspace'
 import { IssueStore } from './issueStore'
+import { setMastermindRoot } from './mastermind/paths'
+import { setSkillsChangedListener } from './mastermind/learning'
+import { skillsSnapshot } from './mastermind/skills'
 import { execFile } from 'node:child_process'
 import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
@@ -37,6 +40,9 @@ const workspace = new WorkspaceStore(join(SPINE_DIR, 'workspace.json'))
 // The Mastermind substrate: the Vision → Sprint → Plan → Issue store (see
 // MASTERMIND.md). Main owns it; the renderer board reads/writes it over IPC.
 const issues = new IssueStore(join(SPINE_DIR, 'issues.jsonl'))
+// The mastermind's learning state lives under SPINE_DIR (kept explicit, not reliant on
+// paths.ts's homedir default). Harmless when the reactor is off — just sets a path.
+setMastermindRoot(join(SPINE_DIR, 'mastermind'))
 const diffWatchers = new DiffWatchers((diffId, snap) => send('diff-snapshot', diffId, snap))
 const browserController = new BrowserController({
   // Ask the renderer to wake a dormant (evicted) browser so it can be driven.
@@ -44,6 +50,8 @@ const browserController = new BrowserController({
 })
 let orchestrator: Orchestrator | null = null
 let voice: SonioxVoice | null = null
+let stallSweep: ReturnType<typeof setInterval> | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let nextItem = 1
 /** Initial prompts queued for a card before its pty spawns — delivered as
  *  claude's initial prompt by ensure-card (one-shot, so a spawned agent boots
@@ -313,6 +321,9 @@ app.whenReady().then(() => {
     remoteConfirm: (id, title, detail) => spine.remote.broadcastConfirm(id, title, detail),
     remoteClearConfirm: (id) => spine.remote.broadcastConfirmClear(id),
     remoteMode: (mode) => spine.remote.broadcastMode(mode),
+    // Proactive reach-out: a web-push so the mastermind's unprompted line reaches Rakan
+    // even with the app backgrounded (skipped when the desktop is focused).
+    pushToPhone: (title, body) => spine.remote.pushNote(title, body),
   })
   // Echo every agent's finished turn into the supervision chat the instant its
   // Stop hook fires — the orchestrator becomes aware of the fleet, not just
@@ -321,6 +332,14 @@ app.whenReady().then(() => {
   // Board milestones (e.g. a plan was approved) wake the mastermind to drive the
   // next cascade step — partner/autonomous only; manual ignores them.
   issues.onMilestone = (m) => orchestrator?.notifyMilestone(m)
+  // When the reactor's reviewers author/patch a skill: recycle the orchestrator session so
+  // it reloads the library (the SDK can't hot-swap skills mid-session — the reactor learns,
+  // the orchestrator uses), AND push the fresh snapshot so the renderer's Skills gallery
+  // refreshes live.
+  setSkillsChangedListener(() => {
+    orchestrator?.notifySkillsChanged()
+    send('skills-update', skillsSnapshot())
+  })
   // Agent-facing browser tools: a loopback HTTP MCP server attached to every
   // card via --mcp-config, driving browsers through the orchestrator's bus. It
   // shares the spine's token (cards authenticate as their hooks do) and a stable
@@ -337,7 +356,7 @@ app.whenReady().then(() => {
   })
   // Agent-facing issue tools: a second loopback MCP server attached per card via
   // --mcp-config, talking directly to the IssueStore (main is the single arbiter),
-  // scoped to the caller card's canvas. The worker slice of Milestone 2.
+  // scoped to the caller card's canvas.
   const orch = orchestrator // non-null here; captured for the deferred dep below
   const agentIssueMcp = new AgentIssueMcp({
     apply: (action) => issues.apply(action),
@@ -351,6 +370,41 @@ app.whenReady().then(() => {
     spine.attachIssueMcp(port)
     console.log(`[issue-mcp] ready on 127.0.0.1:${port}`)
   })
+  // Stall detection: an assigned worker can go silent (hung, not just slow). A card's
+  // statusSince only moves on a status change, so a long `running` task is indistinguishable
+  // from a hang — the true signal is the per-card last hook event (spine.lastEventAt). Sweep
+  // owned, in-flight issues each minute; when the owner is `running` yet silent past the
+  // threshold, latch the issue stalled (fires the `stalled` milestone). Edge-triggered via
+  // issue.setStall, so the log only grows on an actual transition.
+  const STALL_THRESHOLD_MS = 8 * 60 * 1000
+  stallSweep = setInterval(() => {
+    const state = spine.remote.getLatestState()
+    if (!state) return
+    const now = Date.now()
+    const cardStatus = new Map(state.cards.map((c) => [c.id, c.status]))
+    for (const issue of issues.snapshot().issues) {
+      if (!issue.owner) continue
+      if (issue.status !== 'claimed' && issue.status !== 'in_progress') continue
+      const last = spine.lastEventAt(issue.owner)
+      // Judge only on positive evidence. No heartbeat yet (e.g. just after a restart,
+      // before the reattached card has emitted) → can't tell hung from quiet, so leave
+      // the latch untouched (a persisted stall survives until the card shows life).
+      if (last === undefined) continue
+      // A stall = the card thinks it's working yet has gone silent past the threshold.
+      // waiting-on-human / done flips status off `running`, which clears the latch.
+      const silent = cardStatus.get(issue.owner) === 'running' && now - last > STALL_THRESHOLD_MS
+      if (silent === (issue.stalledAt != null)) continue // no edge → nothing to do
+      issues.apply({ kind: 'issue.setStall', id: issue.id, stalled: silent })
+    }
+  }, 60 * 1000)
+  // ponytail: skill-library aging (mastermind/curator.ts ageSkills) is unwired — the
+  // library is empty until the reviewer authors skills over weeks, so there's nothing to
+  // age yet. Wire a timer here when the library is worth aging.
+  // Heartbeat: a slow idle tick that wakes the mastermind in a quiet moment. It looks
+  // over Rakan's whole world (already in its context) and decides for itself whether
+  // anything needs him — reaching out via the notify_user tool if so, staying silent if
+  // not. Manual mode and a live turn skip it (guarded in heartbeat()). Cleared in before-quit.
+  heartbeatTimer = setInterval(() => orchestrator?.heartbeat(), 20 * 60 * 1000)
   createWindow()
   // Updates ride GitHub releases (latest-mac.yml, the appcast equivalent):
   // download in the background, notify, install on quit. Dev builds have no
@@ -364,6 +418,8 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   workspace.flush()
   issues.flush()
+  if (stallSweep) clearInterval(stallSweep)
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
   diffWatchers.disposeAll()
   orchestrator?.dispose()
   voice?.dispose()
@@ -459,6 +515,7 @@ ipcMain.handle('load-workspace', () => workspace.load())
 ipcMain.on('save-workspace', (_e, snapshot: MultiProjectSnapshot) => workspace.save(snapshot))
 ipcMain.handle('load-issue-store', () => issues.snapshot())
 ipcMain.handle('issue-action', (_e, action: IssueActionRequest) => issues.apply(action))
+ipcMain.handle('load-mastermind-skills', () => skillsSnapshot())
 
 ipcMain.handle('kill-card', (_e, cardId: string) => {
   ptys.kill(cardId)

@@ -70,7 +70,22 @@ export interface OrchestratorDeps {
   /** Reflect a mode change to connected phones so their badge stays in sync,
    *  whichever device flipped it. */
   remoteMode?: (mode: OrchestratorMode) => void
+  /** Fire a one-off web-push to subscribed phones — the mastermind reaching out
+   *  proactively, so it lands even with the app backgrounded. No-op when absent. */
+  pushToPhone?: (title: string, body: string) => void
 }
+
+/** Milestones that call for JUDGMENT (vs the mechanical nudges). The mastermind
+ *  reactor's clearest genuine job is `stalled` (no deterministic handler at all); it
+ *  observes the others, which still route deterministically, so the reviewers can learn
+ *  from each reaction. */
+const REACTOR_JUDGMENT = new Set<IssueMilestone['kind']>([
+  'plan-ready',
+  'idea-ready',
+  'idea-abstained',
+  'outcome-verified',
+  'stalled',
+])
 
 export class Orchestrator {
   private readonly pending = new Map<number, (r: OrchestratorCommandResult) => void>()
@@ -99,6 +114,19 @@ export class Orchestrator {
   /** A turn is producing output right now — gates `interrupt()` so a barge-in
    *  while idle is a no-op. Flipped from the event stream in `emit`. */
   private turnActive = false
+  /** The live session's id — captured from the SDK stream so a recycle can `resume` it
+   *  (keeping the conversation). Stable across recycles (the SDK continues the same id). */
+  private lastSessionId: string | undefined
+  /** A skill was created/updated, so the session must recycle to load it (the SDK can't
+   *  hot-swap skills mid-session). Set by `notifySkillsChanged`; the input generator ends
+   *  the session at the next idle boundary, and it restarts resumed with the fresh skills. */
+  private skillsDirty = false
+  /** The session is ending specifically to recycle (vs dispose / error) — tells the
+   *  `startSession` finally to bring a fresh (resumed) session back up. */
+  private recycling = false
+  /** A rolling window of the user's recent chat messages — the memory reviewer reads it
+   *  to grow the OPERATOR MODEL (who the user is) from direct conversation, in any mode. */
+  private convoWindow: string[] = []
   /** We just interrupted the turn — so the SDK's resulting non-success `result`
    *  (it reports an aborted turn as `error_during_execution`) is expected, not a
    *  failure, and must be swallowed instead of whispered as a red error. Cleared
@@ -149,6 +177,27 @@ export class Orchestrator {
       parent_tool_use_id: null,
       priority: 'now',
     })
+    this.learnFromConversation(text)
+  }
+
+  /** Grow the operator model from what the user says to the orchestrator — in EVERY
+   *  mode (manual included; this is the mastermind-as-assistant, not the coding fleet).
+   *  Buffers the message and hands the recent window to the (coalesced, serialized)
+   *  memory reviewer; operator facts are global, product facts land on the active canvas.
+   *  Fire-and-forget so chat is never blocked. */
+  private learnFromConversation(text: string): void {
+    this.convoWindow.push(`USER: ${text}`)
+    if (this.convoWindow.length > 12) this.convoWindow.shift()
+    const projectId = this.deps.getState()?.canvases.find((c) => c.active)?.id
+    const window = this.convoWindow.join('\n')
+    void (async () => {
+      try {
+        const { recordConversation } = await import('../mastermind/learning')
+        recordConversation(window, projectId)
+      } catch (e) {
+        console.warn('[mastermind] conversation learning failed:', e)
+      }
+    })()
   }
 
   /** A supervised agent finished a turn. When autonomous, push a "[fleet event]"
@@ -218,6 +267,7 @@ export class Orchestrator {
    *  currently PLAN READY → spawn a lead. Manual ignores it, like every event. */
   notifyMilestone(m: IssueMilestone): void {
     if (this.mode === 'manual') return
+    this.maybeReact(m) // mastermind reactor: observe, or drive a stalled worker live (autonomous)
     if (m.kind === 'issue-assigned') {
       if (!m.ownerId) return
       // Deterministic nudge — deliver the assignment to the worker directly so it
@@ -317,6 +367,44 @@ export class Orchestrator {
     })
   }
 
+  /** Mastermind reactor hook on a judgment milestone — always on in partner/autonomous
+   *  (manual returns before this, so manual mode is the only off switch, by design). A
+   *  `stalled` worker on an autonomous canvas is driven LIVE in nudge-only latitude
+   *  (message the worker/lead; no spawn/kill); every other judgment milestone is OBSERVED
+   *  so the reviewers can learn from it while the deterministic cascade drives it. The
+   *  reactor computes its own latitude from the milestone + autonomy — we just tell it
+   *  whether we're autonomous. The module loads lazily on first use; fire-and-forget so
+   *  the deterministic routing below is never blocked. */
+  private maybeReact(m: IssueMilestone): void {
+    if (!REACTOR_JUDGMENT.has(m.kind)) return
+    void this.runMastermindReaction(m)
+  }
+
+  private async runMastermindReaction(m: IssueMilestone): Promise<void> {
+    try {
+      const { runReaction } = await import('../mastermind/reactor') // lazy: loaded on first reaction
+      const r = await runReaction(m, this.bus, { isAutonomous: this.mode === 'autonomous' })
+      if (r.mode === 'nudge') {
+        // Act + narrate: the reactor's send_to_agent already executed; surface its
+        // decision as an auto event (like the strategist), noting any denied verbs.
+        const held = r.attemptedActions.length
+          ? ` (held back: ${[...new Set(r.attemptedActions.map((a) => a.tool))].join(', ')})`
+          : ''
+        this.emit({ kind: 'auto', text: `mastermind handled a stall — ${r.text.trim() || '(no detail)'}${held}` })
+      } else {
+        const would = r.attemptedActions.map((a) => `${a.tool}(${JSON.stringify(a.input)})`).join('; ') || '(none)'
+        const skills = r.invokedSkills.length ? ` | skills: ${r.invokedSkills.join(', ')}` : ''
+        console.log(`[mastermind] observed ${m.kind} → ${r.text.trim() || '(no text)'} | would-do: ${would}${skills}`)
+      }
+      // Learning runs for BOTH observed and live reactions — records it, advances the
+      // triggers, fires the reviewers (serialized) to grow memory + skills.
+      const { recordReaction } = await import('../mastermind/learning')
+      recordReaction(m, r)
+    } catch (e) {
+      console.warn('[mastermind] reaction failed:', e)
+    }
+  }
+
   /** Birth a strategist on an idle autonomous canvas — the head that runs the idea
    *  tournament to find the next sprint. Guarded against double-spawn (an existing
    *  strategist) and against starting a contest while a sprint is in flight. Direct
@@ -389,6 +477,40 @@ export class Orchestrator {
       text: `hired ${workerIds.length} worker${workerIds.length === 1 ? '' : 's'} for the lead`,
     })
     return { ok: workerIds.length > 0, workerIds, message: `spawned ${workerIds.length} workers` }
+  }
+
+  /** Heartbeat: a quiet-moment tick (the idle timer in index.ts). It just wakes the
+   *  mastermind — its full context (operator memory + the whole world) is already injected
+   *  each turn — and lets IT decide whether anything needs Rakan: if so it says a line and
+   *  calls notify_user to ping his phone; if not, it ends the turn silently. No separate
+   *  judgment, no cooldown — the 20-min cadence is the rate limit and the agent is the bar.
+   *  Skipped in manual (acts only on command) and mid-turn (not an idle moment). */
+  heartbeat(): void {
+    if (this.mode === 'manual') return
+    if (this.turnActive) return
+    this.enqueue({
+      type: 'user',
+      message: {
+        role: 'user',
+        content:
+          `[heartbeat] A quiet moment — nobody is talking to you. Look over everything Rakan is building ` +
+          `(it's already in your context). If something genuinely needs his attention right now, reach out: ` +
+          `say it in one short line and call notify_user to ping his phone. If nothing does — usually the ` +
+          `case — end your turn silently: no message, no tools.`,
+      },
+      parent_tool_use_id: null,
+      priority: 'next',
+    })
+  }
+
+  /** The reactor's reviewers just authored/updated a skill. The orchestrator can't hot-swap
+   *  its skill library mid-session, so recycle: end the live session at the next idle
+   *  boundary; it restarts resumed (conversation intact) with the new skills loaded. No live
+   *  session → nothing to do (the next session start loads them anyway). */
+  notifySkillsChanged(): void {
+    if (!this.sessionActive) return
+    this.skillsDirty = true
+    this.wake?.() // nudge the idle generator so it can recycle now (no-op mid-turn)
   }
 
   /** Barge-in: stop the current turn so it stops narrating and runs no further
@@ -464,6 +586,10 @@ export class Orchestrator {
         onEvent: (e) => this.emit(e),
         beforeTool: this.deps.awaitVoiceCaughtUp,
         onSession: (c) => (this.interruptTurn = c.interrupt),
+        // Resume the prior conversation across recycles; the resumed query() re-reads the
+        // skill plugin dir, which is the whole point of the recycle.
+        resume: this.lastSessionId,
+        onSessionId: (id) => (this.lastSessionId = id),
       })
     } catch (e) {
       this.emit({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
@@ -472,19 +598,29 @@ export class Orchestrator {
       this.interruptTurn = null
       this.turnActive = false
       this.interrupted = false
-      // The SDK ended the session (error / process abort) but work is waiting —
-      // bring a fresh session up to drain it.
-      if (!this.disposed && this.queue.length) this.ensureSession()
+      // Bring a fresh session back up if we ended to recycle (load new skills, resumed) or
+      // if the SDK ended (error / process abort) with work still waiting.
+      const restart = this.recycling || this.queue.length > 0
+      this.recycling = false
+      if (!this.disposed && restart) this.ensureSession()
     }
   }
 
   /** The live input stream: yield everything queued, then idle until the next
-   *  `enqueue()` wakes us. Returns only on dispose, which ends the session.
+   *  `enqueue()` wakes us. Returns on dispose (ends for good) or to recycle (ends so a
+   *  fresh, resumed session loads newly-learned skills). The recycle check sits AFTER the
+   *  queue drains, so pending work is never dropped and an in-flight turn is never cut.
    *  Must never throw — a throwing generator aborts the SDK session opaquely. */
   private async *input(): AsyncGenerator<SDKUserMessage> {
     while (!this.disposed) {
       while (this.queue.length) yield this.queue.shift() as SDKUserMessage
       if (this.disposed) break
+      if (this.skillsDirty) {
+        // Recycle at this idle boundary so the next session reloads the skill library.
+        this.skillsDirty = false
+        this.recycling = true
+        return
+      }
       await new Promise<void>((resolve) => {
         this.wake = resolve
       })
@@ -524,6 +660,8 @@ export class Orchestrator {
   private readonly bus = makeMainBus({
     getState: () => this.deps.getState(),
     getMode: () => this.mode,
+    issueSnapshot: () => this.deps.issueSnapshot(),
+    pushToPhone: (title, body) => this.deps.pushToPhone?.(title, body),
     dispatch: (command) => this.dispatch(command),
     writeToCard: (cardId, data) => this.deps.writeToCard(cardId, data),
     getReply: (cardId) => this.deps.getReply(cardId),
@@ -635,6 +773,8 @@ export class Orchestrator {
       }
       case 'focus_canvas':
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
+      case 'notify_user':
+        return { title: 'Notify you', detail: clip(str(input.message)) }
       default:
         return { title: verb, detail: clip(JSON.stringify(input)) }
     }

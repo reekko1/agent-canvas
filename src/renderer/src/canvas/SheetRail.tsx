@@ -1,4 +1,4 @@
-import { Crown, GitCompare, ListTodo } from 'lucide-react'
+import { Crown, GitCompare, ListTodo, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { DistanceAssessment } from '@shared/types'
@@ -10,8 +10,8 @@ import type { DistanceAssessment } from '@shared/types'
 /// `active` press state. It lives in its own RIGHT_GUTTER channel, so an open sheet
 /// stops short of it and the toggles stay reachable.
 export function SheetRail(props: {
-  sheet: 'diff' | 'vision' | 'issues' | null
-  onToggle: (sheet: 'diff' | 'vision' | 'issues') => void
+  sheet: 'diff' | 'vision' | 'issues' | 'skills' | null
+  onToggle: (sheet: 'diff' | 'vision' | 'issues' | 'skills') => void
   /** The diff sheet only exists while a canvas (with a folder) is active. */
   hasDiff: boolean
   /** Latest distance-to-vision judgment — surfaced on the vision tooltip. */
@@ -73,6 +73,22 @@ export function SheetRail(props: {
           }
         />
         <TooltipContent side="left">Issues</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Skills"
+              active={sheet === 'skills'}
+              onClick={() => onToggle('skills')}
+            >
+              <Sparkles />
+            </Button>
+          }
+        />
+        <TooltipContent side="left">Skills the mastermind has learned</TooltipContent>
       </Tooltip>
     </div>
   )

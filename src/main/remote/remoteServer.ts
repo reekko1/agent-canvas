@@ -346,6 +346,14 @@ export class RemoteServer {
     return this.orchClients.size > 0
   }
 
+  /** Fire a one-off web-push to subscribed phones — the mastermind reaching out
+   *  proactively. Skipped when the desktop window is focused (Rakan's already looking),
+   *  mirroring `maybeNotify`. Fire-and-forget; no-op without a PushService. */
+  pushNote(title: string, body: string): void {
+    if (this.isDesktopFocused?.()) return
+    void this.push?.notify({ title, body })
+  }
+
   publish(state: RemoteState): void {
     this.stateJSON = JSON.stringify(state)
     this.latestState = state

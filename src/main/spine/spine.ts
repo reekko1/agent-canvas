@@ -94,6 +94,10 @@ export class Spine {
   /** Last full assistant reply per card, captured from the Stop hook's
    *  `last_assistant_message` — read by the orchestrator's get_agent_reply. */
   private replies = new Map<string, string>()
+  /** Epoch ms of the last hook event seen per card — the true liveness heartbeat
+   *  (every hook refreshes it, unlike CardMeta.statusSince which only moves on a
+   *  status change). The stall sweep reads it to tell a hung worker from a slow one. */
+  private lastEvent = new Map<string, number>()
 
   start(): void {
     this.tmux.prepare()
@@ -195,6 +199,13 @@ export class Spine {
    *  the unsupervised state the canvas exists to prevent. */
   killSession(cardId: string): void {
     this.tmux.kill(this.sessionName(cardId))
+    this.lastEvent.delete(cardId)
+  }
+
+  /** Epoch ms of the last hook event from a card, or undefined if it hasn't spoken
+   *  this session — the stall sweep's liveness read. */
+  lastEventAt(cardId: string): number | undefined {
+    return this.lastEvent.get(cardId)
   }
 
   /** Snap a card's session out of scrollback (tmux copy-mode), if it's in
@@ -284,6 +295,7 @@ export class Spine {
   }
 
   private handle(req: HookRequest): void {
+    this.lastEvent.set(req.cardId, Date.now()) // any hook = proof the agent is alive
     // AskUserQuestion rides the PermissionRequest channel but is a question, not
     // a gate — siphon it off first so it gets the chooser, never an Allow/Deny.
     if (this.adapter.isQuestionAsk(req.event, req.payload)) {

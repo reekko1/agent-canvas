@@ -329,6 +329,7 @@ export class IssueStore {
         const issue = s.issues.find((x) => x.id === action.id)
         if (!issue) return fail('no such issue')
         issue.status = action.status
+        issue.stalledAt = undefined // a status report is proof of life — clear any stall latch
         // A worker reaching a terminal state notifies the lead (no polling): done
         // → assign the next frontier / finish the sprint; blocked → unstick it.
         if (action.status === 'done' || action.status === 'blocked') {
@@ -351,6 +352,7 @@ export class IssueStore {
         if (issue.owner) return fail(`already owned by ${issue.owner}`)
         issue.owner = action.owner
         issue.status = 'claimed'
+        issue.stalledAt = undefined // fresh claim — re-arm the stall latch
         // The lead assigned this issue to a worker — nudge that worker to start, so
         // the assignment can't be missed if it already checked (the timing race).
         const plan = s.plans.find((p) => p.id === issue.planRef)
@@ -369,7 +371,36 @@ export class IssueStore {
         const issue = s.issues.find((x) => x.id === action.id)
         if (!issue) return fail('no such issue')
         issue.owner = null
+        issue.stalledAt = undefined // no owner — no lease, no stall latch
         if (issue.status === 'claimed' || issue.status === 'in_progress') issue.status = 'ready'
+        return ok(issue.id)
+      }
+
+      case 'issue.setStall': {
+        // Main-process stall sweep only (not agent-facing). Edge-triggered: fire the
+        // `stalled` milestone once on the not-stalled → stalled transition; clear the
+        // latch when the owner shows life. Idempotent, so a re-applied edge is a no-op.
+        const issue = s.issues.find((x) => x.id === action.id)
+        if (!issue) return fail('no such issue')
+        const wasStalled = issue.stalledAt != null
+        if (action.stalled && !wasStalled) {
+          if (!issue.owner) return fail('cannot stall an unowned issue')
+          if (issue.status === 'done' || issue.status === 'superseded')
+            return fail(`cannot stall a ${issue.status} issue`)
+          issue.stalledAt = ctx.now()
+          const plan = s.plans.find((p) => p.id === issue.planRef)
+          const sprint = plan && s.sprints.find((sp) => sp.id === plan.sprintRef)
+          this.milestone({
+            kind: 'stalled',
+            projectId: sprint?.projectId ?? '',
+            sprintId: sprint?.id,
+            issueId: issue.id,
+            ownerId: issue.owner ?? undefined,
+            detail: issue.title,
+          })
+        } else if (!action.stalled && wasStalled) {
+          issue.stalledAt = undefined
+        }
         return ok(issue.id)
       }
 
@@ -433,6 +464,17 @@ export class IssueStore {
           body: `AMENDED ${changed.join(' + ')}${action.note ? `: ${action.note}` : ''}`,
           postedAt: ctx.now(),
         })
+        // A lead repaired a flawed issue in place — a friction signal for the learner.
+        const aplan = s.plans.find((p) => p.id === issue.planRef)
+        const asprint = aplan && s.sprints.find((sp) => sp.id === aplan.sprintRef)
+        this.milestone({
+          kind: 'amend',
+          projectId: asprint?.projectId ?? '',
+          sprintId: asprint?.id,
+          issueId: issue.id,
+          ownerId: issue.owner ?? undefined,
+          detail: issue.title,
+        })
         return ok(issue.id)
       }
 
@@ -445,8 +487,10 @@ export class IssueStore {
           if (!s.issues.some((x) => x.id === action.supersededBy))
             return fail('no such replacement issue — create it before retiring this one')
         }
+        const retiredOwner = issue.owner // capture before the line below nulls it
         issue.status = 'superseded'
         issue.owner = null // free the worker, if any — its work is orphaned for re-review
+        issue.stalledAt = undefined // terminal — drop any stall latch
         issue.supersededBy = action.supersededBy
         issue.comments.push({
           id: ctx.id(),
@@ -463,6 +507,17 @@ export class IssueStore {
           dep.deps = dep.deps.filter((d) => d !== action.id)
           if (dep.status === 'backlog' && dep.deps.every((d) => done.has(d))) dep.status = 'ready'
         }
+        // A lead voided a flawed issue — the richest friction signal for the learner.
+        const rplan = s.plans.find((p) => p.id === issue.planRef)
+        const rsprint = rplan && s.sprints.find((sp) => sp.id === rplan.sprintRef)
+        this.milestone({
+          kind: 'retire',
+          projectId: rsprint?.projectId ?? '',
+          sprintId: rsprint?.id,
+          issueId: issue.id,
+          ownerId: retiredOwner ?? undefined,
+          detail: issue.title,
+        })
         return ok(issue.id)
       }
 

@@ -144,13 +144,22 @@ const MEMORY_SCHEMA = {
   },
 }
 
-export async function runSkillReviewer(episodeSessionIds: string[]): Promise<SkillPlan | null> {
-  const transcript = await transcriptOf(episodeSessionIds)
+// Core skill review over a raw transcript — used for BOTH reaction episodes and the
+// operator's direct conversation (the agent learning a procedure Rakan taught or implied).
+// `kind` only labels the transcript; the reaction path keeps its original label byte-for-byte.
+export async function reviewSkills(
+  transcript: string,
+  kind = 'EPISODE REACTIONS',
+): Promise<SkillPlan | null> {
   const skills = listSkills()
   const index = skills.map((s) => `- ${s.name}: ${s.description}`).join('\n') || '(none)'
   const bodies = skills.map((s) => `### ${s.name}\n${skillBody(s.name)}`).join('\n\n') || '(none)'
-  const input = `EPISODE REACTIONS (transcript):\n${transcript}\n\nEXISTING SKILLS (index):\n${index}\n\nEXISTING SKILL BODIES:\n${bodies}`
+  const input = `${kind} (transcript):\n${transcript}\n\nEXISTING SKILLS (index):\n${index}\n\nEXISTING SKILL BODIES:\n${bodies}`
   return runReviewer<SkillPlan>(SKILL_CONSTITUTION, input, SKILL_SCHEMA)
+}
+
+export async function runSkillReviewer(episodeSessionIds: string[]): Promise<SkillPlan | null> {
+  return reviewSkills(await transcriptOf(episodeSessionIds))
 }
 
 // Core memory review over a raw transcript — used for BOTH fleet-reaction windows and

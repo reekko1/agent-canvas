@@ -111,27 +111,31 @@ function logAction(rec: object): void {
 
 function writeSkill(name: string, description: string, body: string, source: string): void {
   mkdirSync(join(skillsSubdir(), name), { recursive: true })
+  // Preserve the original created_at across updates so a refine doesn't reset the skill's age
+  // (which would re-sort it to the top of the gallery and erase when it was first learned).
+  // updated_at records the latest write; source records who wrote it.
+  const prior = skillExists(name) ? parseFrontmatter(readFileSync(skillPath(name), 'utf8')).fm : {}
+  const created = prior.created_at || new Date().toISOString()
   const fm =
-    `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  provenance: reviewer\n` +
-    `  created_at: ${new Date().toISOString()}\n  source: ${source}\n---\n`
+    `---\nname: ${name}\ndescription: ${description}\nmetadata:\n` +
+    `  created_at: ${created}\n  updated_at: ${new Date().toISOString()}\n  source: ${source}\n---\n`
   writeFileSync(skillPath(name), fm + body.trim() + '\n')
 }
 
-// Single-arbiter apply for one skill action: validate -> apply -> audit-log.
+// Single-arbiter UPSERT for one skill: name is the key, existence decides create-vs-update —
+// so `op` is ADVISORY only (a mis-picked op or a slightly-off target can no longer reject and
+// silently drop the write, the old patch failure mode). Validate -> fill any omitted field
+// from the existing skill (so a description-only refine keeps the body) -> write (preserving
+// created_at) -> audit-log. A brand-new skill still needs both description AND body.
 export function applySkill(a: SkillAction, source: string): { ok: boolean; error?: string } {
   const err = validateSkill(a)
   if (err) return { ok: false, error: err }
-  if (a.op === 'create') {
-    if (skillExists(a.name)) return { ok: false, error: `create collision: "${a.name}" exists (should patch)` }
-    if (!a.description || !a.body) return { ok: false, error: 'create needs description+body' }
-    writeSkill(a.name, a.description, a.body, source)
-    logAction({ op: 'create', name: a.name, source })
-  } else {
-    if (!skillExists(a.name)) return { ok: false, error: `patch target missing: "${a.name}"` }
-    const { fm } = parseFrontmatter(readFileSync(skillPath(a.name), 'utf8'))
-    writeSkill(a.name, a.description || fm.description, a.body ?? skillBody(a.name), source)
-    logAction({ op: 'patch', name: a.name, source })
-  }
+  const prior = skillExists(a.name) ? parseFrontmatter(readFileSync(skillPath(a.name), 'utf8')) : null
+  const description = a.description || prior?.fm.description
+  const body = a.body ?? prior?.body.trim()
+  if (!description || !body) return { ok: false, error: 'skill needs description + body' }
+  writeSkill(a.name, description, body, source)
+  logAction({ op: prior ? 'update' : 'create', name: a.name, source })
   return { ok: true }
 }
 

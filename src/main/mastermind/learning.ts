@@ -8,7 +8,7 @@ import type { IssueMilestone } from '../../shared/types'
 import { episodeSource, windowSource } from '../../shared/provenance'
 import type { Reaction } from './reactor'
 import { reactionLog } from './reactions'
-import { runSkillReviewer, runMemoryReviewer, reviewMemory } from './reviewers'
+import { runSkillReviewer, runMemoryReviewer, reviewMemory, reviewSkills } from './reviewers'
 import { applySkill } from './skills'
 import { applyMemoryOps } from './memory'
 
@@ -22,6 +22,12 @@ function enqueue(job: () => Promise<void>): void {
 let onSkillsChanged: (() => void) | null = null
 export function setSkillsChangedListener(fn: (() => void) | null): void {
   onSkillsChanged = fn
+}
+/** Recycle the orchestrator session so it reloads the skill library (the SDK can't
+ *  hot-swap). Fired after the reviewer authors a skill AND after the orchestrator
+ *  saves one itself via save_skill — one path to the same recycle. */
+export function fireSkillsChanged(): void {
+  onSkillsChanged?.()
 }
 
 /** Await all currently-queued reviewer work (for tests / shutdown). */
@@ -44,18 +50,44 @@ export function recordConversation(transcript: string, projectId?: string): void
     convoQueued = false // clear before the review so messages arriving during it re-queue once
     const job = convoLatest
     if (!job) return
-    const plan = await reviewMemory(job.transcript, job.projectId)
-    if (!plan || plan.nothing_to_save || !plan.memory_writes?.length) return
-    // operator facts always apply; product facts need an active canvas to land on
-    const writes = job.projectId ? plan.memory_writes : plan.memory_writes.filter((w) => w.store === 'operator')
-    if (!writes.length) return
-    const r = applyMemoryOps(writes, 'conversation', job.projectId)
-    console.log(
-      r.ok
-        ? `[mastermind] learned ${writes.length} fact(s) about you from the conversation`
-        : `[mastermind] conversation memory rejected: ${r.error}`,
-    )
+    // Two independent reviews over the same window — facts (common) and procedures (rare).
+    // Kept separate so the proven memory path is untouched and either can be tuned alone.
+    await learnFactsFromConversation(job)
+    await learnSkillsFromConversation(job)
   })
+}
+
+async function learnFactsFromConversation(job: { transcript: string; projectId?: string }): Promise<void> {
+  const plan = await reviewMemory(job.transcript, job.projectId)
+  if (!plan || plan.nothing_to_save || !plan.memory_writes?.length) return
+  // operator facts always apply; product facts need an active canvas to land on
+  const writes = job.projectId ? plan.memory_writes : plan.memory_writes.filter((w) => w.store === 'operator')
+  if (!writes.length) return
+  const r = applyMemoryOps(writes, 'conversation', job.projectId)
+  console.log(
+    r.ok
+      ? `[mastermind] learned ${writes.length} fact(s) about you from the conversation`
+      : `[mastermind] conversation memory rejected: ${r.error}`,
+  )
+}
+
+// The skill half of conversation learning: the agent capturing a durable ORCHESTRATION
+// procedure Rakan taught or implied — proactive authoring, the out-of-band twin of the
+// orchestrator's own save_skill. Same SKILL_CONSTITUTION + applySkill + recycle as the
+// reaction path; provenance 'conversation'. Skills are global (no projectId).
+async function learnSkillsFromConversation(job: { transcript: string }): Promise<void> {
+  const plan = await reviewSkills(job.transcript, 'OPERATOR CONVERSATION')
+  if (!plan || plan.nothing_to_save || !plan.skill_actions?.length) return
+  let n = 0
+  for (const a of plan.skill_actions) {
+    const r = applySkill(a, 'conversation')
+    if (r.ok) n++
+    else console.warn(`[mastermind] conversation skill ${a.op} "${a.name}" rejected: ${r.error}`)
+  }
+  if (n) {
+    console.log(`[mastermind] learned ${n} skill(s) from the conversation`)
+    fireSkillsChanged() // recycle so the orchestrator loads what it just learned
+  }
 }
 
 /** Record one handled reaction and fire the reviewers on schedule. Returns immediately;
@@ -77,7 +109,7 @@ export function recordReaction(milestone: IssueMilestone, reaction: Reaction): v
       }
       if (n) {
         console.log(`[mastermind-learn] skills: applied ${n} action(s) from a ${episode.length}-reaction episode`)
-        onSkillsChanged?.() // recycle the orchestrator session so it loads the new skills
+        fireSkillsChanged() // recycle the orchestrator session so it loads the new skills
       }
     })
   }

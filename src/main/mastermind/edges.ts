@@ -72,10 +72,14 @@ function skillsSection(): void {
   check('reserved word rejected', !applySkill({ op: 'create', name: 'claude-helper', description: 'd', body: 'b' }, 't').ok)
   check('oversized body rejected', !applySkill({ op: 'create', name: 'huge', description: 'd', body: Array(600).fill('line').join('\n') }, 't').ok)
   check('valid create ok', applySkill({ op: 'create', name: 'handling-stalls', description: 'when a sprint stalls', body: 'step 1' }, 't').ok)
-  check('create collision rejected', !applySkill({ op: 'create', name: 'handling-stalls', description: 'd', body: 'b' }, 't').ok)
-  check('patch missing target rejected', !applySkill({ op: 'patch', name: 'no-such-skill', body: 'b' }, 't').ok)
+  // upsert: same name (whatever the op) updates in place instead of rejecting on collision
+  check('upsert: same name updates in place', applySkill({ op: 'create', name: 'handling-stalls', description: 'when a sprint stalls', body: 'step 1 revised' }, 't').ok && skillBody('handling-stalls') === 'step 1 revised')
+  // a NEW skill still needs full content — a body-only "patch" of an absent name can't land
+  check('new skill without description rejected', !applySkill({ op: 'patch', name: 'no-such-skill', body: 'b' }, 't').ok)
   const p = applySkill({ op: 'patch', name: 'handling-stalls', body: 'step 1 improved' }, 't')
   check('valid patch updates body', p.ok && skillBody('handling-stalls').includes('improved'))
+  // partial update: description-only refine keeps the existing body (no blind overwrite)
+  check('partial update inherits existing body', applySkill({ op: 'patch', name: 'handling-stalls', description: 'sharper desc' }, 't').ok && skillBody('handling-stalls') === 'step 1 improved')
   archiveSkill('handling-stalls')
   check('archive-never-delete (recoverable, hidden from active)', archivedExists('handling-stalls') && !skillExists('handling-stalls') && !listSkills().some((s) => s.name === 'handling-stalls'))
 }

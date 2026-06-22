@@ -13,6 +13,7 @@ export const READ_ONLY_TOOLS = [
   'get_agent_reply',
   'browser_read',
   'browser_screenshot',
+  'read_skill',
 ] as const
 
 /** Build the `canvas` MCP server backed by a CommandBus implementation. */
@@ -323,6 +324,40 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
+  const readSkill = tool(
+    'read_skill',
+    "Read one of your OWN skills by name — its full current body. Call this before refining a skill (saving by an existing name) so you edit the REAL current text instead of reconstructing it from memory — that's what makes a refine reliable. You already know your skills' names and descriptions; use this to fetch the one body you're about to change.",
+    { name: z.string().describe('The bare skill name, e.g. "handling-stalled-sprints"') },
+    async (args) => {
+      try {
+        const s = await bus.readSkill(args.name)
+        return s ? okResult(s) : failResult(`no skill named "${args.name}"`)
+      } catch (e) {
+        return failResult(`read_skill failed: ${errText(e)}`)
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  )
+
+  const saveSkill = tool(
+    'save_skill',
+    "Author or refine one of your OWN skills — a reusable procedure you carry forward. Use when Rakan asks you to learn/build a skill, or when you notice a durable, repeatable way of handling a recurring situation. Write `body` yourself, inline, as the skill's actual instructions (Markdown): when it applies and the steps to follow — general to a CLASS of situation, not a one-off. Saving by an existing `name` UPDATES that skill (so call read_skill first when refining, and send the full revised body); a new name creates one. Use the bare skill name, no \"mastermind:\" prefix. The skill loads into you on your next turn.",
+    {
+      name: z.string().describe('Short kebab-case id, e.g. "handling-stalled-sprints" (lowercase/numbers/hyphens, ≤64)'),
+      description: z.string().describe('One line: what the skill is for and when to reach for it'),
+      body: z.string().describe("The skill's instructions in Markdown — when it applies and the steps to follow"),
+      op: z.enum(['create', 'patch']).optional().describe('"create" a new skill (default) or "patch" an existing one by name'),
+    },
+    async (args) => {
+      try {
+        const r = await bus.saveSkill(args)
+        return r.ok ? okResult(r) : failResult(r.message)
+      } catch (e) {
+        return failResult(`save_skill failed: ${errText(e)}`)
+      }
+    },
+  )
+
   return createSdkMcpServer({
     name: 'canvas',
     version: '0.1.0',
@@ -345,6 +380,8 @@ export function buildCanvasServer(bus: CommandBus) {
       killCard,
       approveAsk,
       notifyUser,
+      readSkill,
+      saveSkill,
     ],
   })
 }

@@ -9,6 +9,8 @@ import type {
   BrowserReadResult,
   BrowserShotResult,
   CommandBus,
+  SaveSkillInput,
+  SkillBrief,
   SpawnAgentInput,
   SpawnBrowserInput,
   SpawnResult,
@@ -192,6 +194,14 @@ export function makeStubBus(): CommandBus {
 
     async notifyUser(message: string): Promise<ActionResult> {
       return { ok: true, message: `(stub) pushed to Rakan's phone: ${message}` }
+    },
+
+    async saveSkill(input: SaveSkillInput): Promise<ActionResult> {
+      return { ok: true, message: `(stub) saved skill "${input.name}"` }
+    },
+
+    async readSkill(_name: string): Promise<SkillBrief | null> {
+      return null
     },
   }
 }

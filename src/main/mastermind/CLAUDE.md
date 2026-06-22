@@ -54,7 +54,11 @@ loads lazily on first reaction.
 
 **Who learns vs who uses:** the **reactor** authors skills (its reviewers) AND loads them;
 the **orchestrator** (the agent Rakan talks to, and that drives the cascade) ALSO loads the
-same library now, so what's learned actually reaches the agent that acts. Because the SDK
+same library now, so what's learned actually reaches the agent that acts — and can **author
+into it directly**: the `save_skill` canvas tool writes the SKILL.md inline (the orchestrator
+is Opus; it drafts the body itself, no skill-creator sub-agent) via the same `applySkill`
+arbiter, provenance `conversation`. Both authoring paths (reviewer + save_skill) recycle
+through one seam (`fireSkillsChanged`). Because the SDK
 can't hot-swap skills mid-session, a skill create/patch fires `setSkillsChangedListener`
 (here) → `Orchestrator.notifySkillsChanged()`, which recycles the orchestrator session
 (resumed, so the conversation survives) to reload the library. Memory reaches the
@@ -86,9 +90,12 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
   budget, then commits atomically. `remove` is just an event → history preserved.
   Budgets: operator 2000, product 4000 chars.
 - **skills.ts** — the skill library as real `SKILL.md` files in a plugin dir (the SDK
-  `plugins` loader needs files). create/patch via a reviewer plan; archive-never-delete
-  to `.archive/`; provenance in frontmatter; usage tracked for curator aging. Paths are
-  computed at call time because the root is configurable.
+  `plugins` loader needs files). `applySkill` is a single-arbiter **UPSERT** keyed by name
+  (existence decides create-vs-update; `op` is advisory, so a mis-picked op / slightly-off
+  target can't reject and silently drop the write — the old patch failure mode). A partial
+  refine inherits the omitted field from the existing skill; updates preserve `created_at`
+  (+ stamp `updated_at`). archive-never-delete to `.archive/`; usage tracked for curator
+  aging. Paths are computed at call time because the root is configurable.
 - **constitutions.ts** — the two reviewer system prompts, verbatim from the design §6.
 - **triggers.ts** — deterministic reviewer triggers. `MilestoneKind = IssueMilestone['kind']`
   (imported, not re-declared — the single source of truth). Skills = event-primary
@@ -102,7 +109,11 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
 - **learning.ts** — the learning coordinator: funnels reaction-completions
   (`recordReaction`) AND direct conversation (`recordConversation`) through one serialized
   worker, firing the reviewers on the trigger schedule. The module `manager.ts` / `index.ts`
-  actually import to drive learning.
+  actually import to drive learning. Conversation learning is TWO independent reviews over the
+  same coalesced window — facts (`reviewMemory`, common) and procedures (`reviewSkills`, rare,
+  provenance `conversation`) — kept separate so the proven memory path is untouched and either
+  can be tuned alone. A conversation-authored skill recycles via `fireSkillsChanged` (the one
+  recycle seam, shared with the reaction reviewer and the orchestrator's `save_skill` tool).
 - **curator.ts** — deterministic skill aging (unused 30d→stale, 90d→archived,
   reactivates on use). Skills only — memory self-maintains via the reviewer + budget.
   A pure `ageSkills(now)` function with no cadence/persistence; currently unwired.
@@ -112,7 +123,9 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
 - **reviewers.ts** — the two reviewers: each a separate `query()` returning a validated
   plan via `outputFormat` (no write tools). Reads in-scope reaction transcripts via
   `getSessionMessages({ dir: reactorCwd() })`. Memory reviewer takes a `projectId`
-  (product memory is per-canvas). `persistSession:false`.
+  (product memory is per-canvas). `persistSession:false`. Both have a transcript-based core
+  (`reviewMemory` / `reviewSkills`) reused by the conversation path in `learning.ts` — same
+  constitutions, fed a raw transcript instead of session ids.
 - **reactor.ts** — a fresh `query()` per milestone. systemPrompt = base identity +
   frozen memory snapshot; user message = the milestone + `bus.openCanvas()` board
   snapshot. Wires the canvas MCP (`buildCanvasServer(bus)` — the real addition over the
@@ -128,7 +141,7 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
 - **world.ts** — `computeWorldView`: the cross-canvas "your whole world" synthesis
   (each canvas's vision headline + sprint state + a product-memory clip) the standing
   conversation gets each turn. Pure; no store (computed on demand). Covered by `edges.ts`.
-- **edges.ts** — the model-free deterministic suite (44 checks): memory ops/budget/
+- **edges.ts** — the model-free deterministic suite (45 checks): memory ops/budget/
   recoverability/replay, the operator/product split + per-project isolation, skill
   validation + archive, triggers, the world view, curator. `npm run mastermind:edges`.
 

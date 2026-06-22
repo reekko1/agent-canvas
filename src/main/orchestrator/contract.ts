@@ -182,4 +182,31 @@ export interface CommandBus {
   /** Push a one-line notification to Rakan's phone — the mastermind reaching out when he
    *  may not be looking at the app. The agent's own arm for proactive reach-out. */
   notifyUser(message: string): Promise<ActionResult>
+  /** Author or refine one of the mastermind's own skills, written inline by the
+   *  orchestrator. Writes the SKILL.md (via applySkill) and recycles the session so the
+   *  new skill loads. The agent's own arm for self-authored procedures. */
+  saveSkill(input: SaveSkillInput): Promise<ActionResult>
+  /** One of the mastermind's learned skills by name (its full current body), so the
+   *  orchestrator can SEE the real text before refining it with saveSkill — a patch edits
+   *  the real body rather than reconstructing it from memory. null if no such skill. The
+   *  model already knows skill names + descriptions (the loader surfaces them); it only
+   *  needs the body, fetched one at a time. */
+  readSkill(name: string): Promise<SkillBrief | null>
+}
+
+export interface SkillBrief {
+  name: string
+  description: string
+  body: string
+}
+
+export interface SaveSkillInput {
+  /** "create" a new skill (default) or "patch" an existing one by name. */
+  op?: 'create' | 'patch'
+  /** Short kebab-case id, e.g. "handling-stalled-sprints". */
+  name: string
+  /** One line: what the skill is for and when to reach for it. */
+  description: string
+  /** The skill's instructions in Markdown — when it applies and the steps. */
+  body: string
 }

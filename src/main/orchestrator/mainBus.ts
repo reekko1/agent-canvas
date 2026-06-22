@@ -6,6 +6,8 @@
 // so each action lands with its narration. The offline counterpart is stubBus.ts.
 import { COMET_TRAVEL_MS } from '../../shared/types'
 import { renderOpenCanvas, type CommandBus, type World } from './contract'
+import { applySkill, skillsSnapshot } from '../mastermind/skills'
+import { fireSkillsChanged } from '../mastermind/learning'
 import type {
   BrowserAction,
   BrowserActionResult,
@@ -413,6 +415,24 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       // it lands even with the app backgrounded.
       deps.pushToPhone?.('Mastermind', message)
       return { ok: true, message: `pushed to Rakan's phone: ${message}` }
+    },
+
+    saveSkill: async ({ op = 'create', name, description, body }) => {
+      // The orchestrator wrote the body itself (Opus, guided by the system prompt) — no
+      // drafting sub-agent. applySkill is the single arbiter (validate → upsert → log);
+      // 'conversation' is the source (parsed by the SkillsPanel). Strip the mastermind:
+      // prefix the model knows skills by, so a "mastermind:foo" name still resolves.
+      const bare = name.replace(/^mastermind:/, '')
+      const r = applySkill({ op, name: bare, description, body }, 'conversation')
+      if (!r.ok) return { ok: false, message: r.error ?? 'save failed' }
+      fireSkillsChanged() // recycle the session at the next idle boundary so it loads
+      return { ok: true, message: `saved skill "${bare}" — loads on my next turn` }
+    },
+
+    readSkill: async (name) => {
+      const bare = name.replace(/^mastermind:/, '')
+      const s = skillsSnapshot().active.find((x) => x.name === bare)
+      return s ? { name: s.name, description: s.description, body: s.body } : null
     },
   }
 }

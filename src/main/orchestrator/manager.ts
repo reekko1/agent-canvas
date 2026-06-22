@@ -779,6 +779,11 @@ export class Orchestrator {
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
       case 'notify_user':
         return { title: 'Notify you', detail: clip(str(input.message)) }
+      case 'save_skill':
+        return {
+          title: `${str(input.op) === 'patch' ? 'Refine' : 'Author'} skill “${str(input.name)}”`,
+          detail: clip(str(input.description)),
+        }
       default:
         return { title: verb, detail: clip(JSON.stringify(input)) }
     }

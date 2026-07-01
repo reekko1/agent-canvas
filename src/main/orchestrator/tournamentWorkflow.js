@@ -1,24 +1,24 @@
 // The PINNED idea tournament — run OFF-CARD by the mastermind's own headless `claude`
-// via the Workflow tool by absolute scriptPath (see orchestrator/tournament.ts). Never
+// via the Workflow tool by absolute scriptPath (see ./tournament.ts). Never
 // authored by the model, so it is byte-identical every run; only `args` varies. It runs
 // with cwd = the product repo — so the generators/judges perceive the REAL codebase. The
 // canvas vision is passed in `args.vision`. Running it off any card is what makes it
 // CLI-agnostic: identical for every canvas regardless of its cards' CLI.
 //
-// Shape of the result (consumed by orchestrator/tournament.ts → the issue store):
+// Shape of the result (consumed by ./tournament.ts → the issue store):
 //   { gapRead, candidates: [{idea, why, outcome, visionLink, lens, rating, eliminatedRound?}],
 //     winnerLens: string|null, abstainReason: string|null }
-// The card then calls record_conception(gapRead, candidates) and either
-// set_conception_winner(id, winnerLens) or abstain_conception(id, abstainReason).
+// tournament.ts records it as a Conception (`conception.create`, then
+// `conception.setWinner` or `conception.abstain`) via applyIssue.
 //
 // The engine is the one validated by dogfood (agent-canvas + a cold-repo hard test):
 // 10 lensed generators -> pairwise round-robin aggregated by Bradley-Terry -> cull +
 // refine 10->6->3->1 (refinement RE-READS the code: accuracy over bravado) -> an
 // absolute-bar gate (does even the winner genuinely serve the vision? else abstain).
 export const meta = {
-  name: 'strategist-tournament',
+  name: 'idea-tournament',
   description:
-    'Pinned strategist idea tournament: 10 lensed generators -> pairwise round-robin (Bradley-Terry) -> cull+refine 10->6->3->1 (refinement re-reads the code) -> absolute-bar gate -> a winning next-sprint idea or an abstention, judged against this canvas vision (args.vision).',
+    'Pinned idea tournament: 10 lensed generators -> pairwise round-robin (Bradley-Terry) -> cull+refine 10->6->3->1 (refinement re-reads the code) -> absolute-bar gate -> a winning next-sprint idea or an abstention, judged against this canvas vision (args.vision).',
   phases: [
     { title: 'Generate' },
     { title: 'Round 1' },
@@ -140,7 +140,7 @@ Return the revised idea object.`
 }
 
 function gatePrompt(winner, runnerUp) {
-  return `A strategist tournament has chosen a WINNING "next sprint idea" for this product. Before it becomes real work, judge it against an ABSOLUTE bar (not relative to other ideas): is it genuinely worth a sprint right now?
+  return `An idea tournament has chosen a WINNING "next sprint idea" for this product. Before it becomes real work, judge it against an ABSOLUTE bar (not relative to other ideas): is it genuinely worth a sprint right now?
 
 VISION:
 ${VISION}

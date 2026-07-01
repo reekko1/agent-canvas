@@ -12,7 +12,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { IssueActionRequest, IssueActionResult, IssueSnapshot } from '../../shared/types'
-import { STRATEGIST_TOURNAMENT_SRC } from '../spine/skills'
+import TOURNAMENT_WORKFLOW_SRC from './tournamentWorkflow.js?raw'
 
 export interface TournamentDeps {
   projectId: string
@@ -40,10 +40,10 @@ interface TournamentResult {
  *  Best-effort — a headless-run or parse failure records nothing and reports why. */
 export async function runTournament(deps: TournamentDeps): Promise<{ ok: boolean; message: string }> {
   // Materialize the workflow to a stable path (main runs it directly; it is no longer
-  // bundled into a card plugin). Rewritten each run so a skills.ts edit ships.
-  const wfPath = join(deps.spineDir, 'strategist-tournament.js')
+  // bundled into a card plugin). Rewritten each run so a tournamentWorkflow.js edit ships.
+  const wfPath = join(deps.spineDir, 'idea-tournament.js')
   mkdirSync(deps.spineDir, { recursive: true })
-  writeFileSync(wfPath, STRATEGIST_TOURNAMENT_SRC)
+  writeFileSync(wfPath, TOURNAMENT_WORKFLOW_SRC)
 
   let result: TournamentResult | null
   try {
@@ -95,9 +95,13 @@ function runWorkflowHeadless(
     `completion. Then output ONLY the workflow's raw return value as a single JSON object — no prose, ` +
     `no markdown fences, nothing else.\n\n<vision>\n${vision}\n</vision>`
   return new Promise((resolve, reject) => {
+    // Via the login shell, like every other CLI launch in this app: a packaged
+    // (Finder-launched) Electron process has a minimal PATH that won't resolve
+    // `claude`; `-lc` resolves it from the user's real PATH.
+    const shell = process.env.SHELL ?? '/bin/zsh'
     const child = spawn(
-      'claude',
-      ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions'],
+      shell,
+      ['-lc', 'exec claude -p --output-format stream-json --verbose --permission-mode bypassPermissions'],
       { cwd: repoDir },
     )
     child.stdin.end(prompt) // over stdin so no flag can swallow it

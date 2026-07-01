@@ -89,11 +89,12 @@ Each has its own CLAUDE.md — read it before working in that area.
   map fed by the `browser-ready` IPC. Browser-card guests run in their own process/session,
   carry no preload, and so can't reach the `CanvasApi` bridge.
 - **Ask/question ownership:** a `q-<n>` id (`ask_user`, the canvas MCP) is held by
-  `agentCanvasMcp`; an `ask-<n>` id (a permission hook ask) is held by the spine. `decide-ask` /
-  `answer-question` / `release-asks` (and the remote panel's `onDecide`/`onAnswer`/`onDecline`)
-  all try `agentCanvasMcp` first — its `decline`/`answer`/`releaseFor` return `false` when they
-  don't own the id — and fall through to `spine.decide`/`answerQuestion`/`releaseFor` so the
-  same IPC/remote paths serve both holders without branching on ask kind.
+  `agentCanvasMcp`; an `ask-<n>` id (a permission hook ask) is held by the spine. Questions
+  have exactly ONE holder — the canvas MCP (`AskUserQuestion` is disallowed on every card, so
+  a question can never be a spine ask): `answer-question` (and the remote `onAnswer`) go
+  straight to `agentCanvasMcp.answer`. Permission decisions (`decide-ask`, remote `onDecline`)
+  try `agentCanvasMcp.decline` first — it returns `false` when it doesn't own the id — and
+  fall through to `spine.decide`; `release-asks` releases both holders.
 - **Stall detection:** the 60s sweep in `index.ts` does two independent things — the pre-existing
   per-`Issue` silence check (`issue.setStall`, edge-triggered off `spine.lastEventAt` vs each
   issue's own threshold) is unchanged, and a second, card-level pass flips any `agent` card stuck

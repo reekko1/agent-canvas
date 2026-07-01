@@ -26,7 +26,8 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     CLI lifecycle event (status flip, metadata, feed line, plan delta).
   - `PermissionAskInfo` / `AskDecision` — a held permission gate (allow/deny/
     release); `QuestionAskInfo` / `Question` / `QuestionOption` /
-    `QuestionAnswers` — a held AskUserQuestion (choose options, not allow/deny).
+    `QuestionAnswers` — a held `ask_user` question from the canvas MCP (choose
+    options, not allow/deny).
   - `CardRecord` / `Project` / `MultiProjectSnapshot` — multi-project
     persistence (global card registry + per-project layout). A browser card's
     `url` is the only kind-specific field persisted (reload-on-restore; the live

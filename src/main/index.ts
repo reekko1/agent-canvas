@@ -268,7 +268,6 @@ app.whenReady().then(() => {
     send('permission-ask', ask)
     orchestrator?.notifyAsk(ask) // second heartbeat: wake on blocks, not just turns
   }
-  spine.onQuestion = (ask) => send('question-ask', ask)
   spine.start()
   // The issue store: replay the log into memory before the window can ask for it,
   // and re-push the whole projection to the board on every applied action.
@@ -612,15 +611,17 @@ ipcMain.handle('leave-scrollback', (_e, cardId: string) => spine.leaveScrollback
 ipcMain.on('pty-resize', (_e, cardId: string, cols: number, rows: number) =>
   ptys.resize(cardId, cols, rows),
 )
-// Question/ask decisions route to whichever holder owns the id: a `q-<n>` ask_user
-// call lives in the canvas MCP (answer/decline settle the held tool call); an
-// `ask-<n>` hook ask lives in the spine. The canvas MCP's methods return false when
-// they don't own the id, so we fall through to the spine.
+// Ask decisions route to whichever holder owns the id: a `q-<n>` ask_user call
+// lives in the canvas MCP (answer/decline settle the held tool call); an
+// `ask-<n>` permission ask lives in the spine. The canvas MCP's methods return
+// false when they don't own the id, so decide falls through to the spine.
+// Questions have exactly one holder — the canvas MCP (AskUserQuestion is
+// disallowed on every card, so a question can never be a spine ask).
 ipcMain.on('decide-ask', (_e, askId: string, decision: AskDecision) => {
   if (!agentCanvasMcp?.decline(askId)) spine.decide(askId, decision)
 })
 ipcMain.on('answer-question', (_e, askId: string, answers: QuestionAnswers) => {
-  if (!agentCanvasMcp?.answer(askId, answers)) spine.answerQuestion(askId, answers)
+  agentCanvasMcp?.answer(askId, answers)
 })
 ipcMain.on('release-asks', (_e, cardId: string) => {
   spine.releaseFor(cardId)
@@ -644,7 +645,7 @@ spine.remote.onDecide = (askId, allow) => {
   send('ask-decided', askId)
 }
 spine.remote.onAnswer = (askId, answers) => {
-  if (!agentCanvasMcp?.answer(askId, answers)) spine.answerQuestion(askId, answers)
+  agentCanvasMcp?.answer(askId, answers)
   send('question-decided', askId)
 }
 spine.remote.onDecline = (askId) => {

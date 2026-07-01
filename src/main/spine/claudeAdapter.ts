@@ -1,15 +1,15 @@
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { UNKNOWN_CARD, type CardEvent, type QuestionAnswers } from '../../shared/types'
-import { shellQuote, type CliAdapter, type HookAsk, type McpStageOpts } from './cliAdapter'
+import { UNKNOWN_CARD } from '../../shared/types'
+import { shellQuote, type CliAdapter, type Interpretation, type McpStageOpts } from './cliAdapter'
 import * as events from './hookEvents'
-import { BASELINE_SUPERVISION, CANVAS_SKILLS, PLUGIN_NAME, PLUGIN_VERSION } from './skills'
+import { BASELINE_SUPERVISION, CANVAS_SKILLS, PLUGIN_NAME, PLUGIN_VERSION, materializeSkill } from './instructions'
 
 /// Claude Code adapter — the transport/config seam and the REFERENCE CliAdapter.
 /// Installs scoped HTTP hooks (via --settings, leaving user config untouched) and
-/// launches `claude` with them. The pure event mapping lives in ./hookEvents;
-/// this class delegates to it so the I/O seam stays separate from the (testable)
-/// mapping.
+/// launches `claude` with them. The pure event interpretation lives in
+/// ./hookEvents; this class delegates to it so the I/O seam stays separate from
+/// the (testable) mapping.
 export class ClaudeAdapter implements CliAdapter {
   readonly name = 'claude-code'
   readonly binary = 'claude'
@@ -24,16 +24,16 @@ export class ClaudeAdapter implements CliAdapter {
 
   private settingsFile: string | null = null
   /** The materialized curated-skills plugin dir, attached to every card via
-   *  `--plugin-dir`. Set by stageSkills() at startup; null until then. */
+   *  `--plugin-dir`. Set by stageInstructions() at startup; null until then. */
   private pluginDir: string | null = null
   /** The materialized agent-MCP configs (server id → file path), all attached to
    *  every card via one variadic `--mcp-config`. Each entry is set by stageMcp()
    *  as its loopback server binds; a card launched before a server binds simply
    *  lacks that server's tools. */
   private mcpConfigFiles = new Map<string, string>()
-  /** The always-on supervision briefing, written to disk by stageSkills() and folded
-   *  into launchCommand as `--append-system-prompt-file` — so every card boots with it
-   *  guaranteed in context (not a soft auto-invoked skill). */
+  /** The always-on supervision briefing, written to disk by stageInstructions() and
+   *  folded into launchCommand as `--append-system-prompt-file` — so every card boots
+   *  with it guaranteed in context (not a soft auto-invoked skill). */
   private baselineFile: string | null = null
 
   /** Events acked instantly (status/feed material). PermissionRequest is
@@ -73,10 +73,10 @@ export class ClaudeAdapter implements CliAdapter {
    *  staged at startup independent of the sink, so even a pre-bind launch is equipped.
    *   1. The always-on baseline briefing → `<dir>/baseline.md`, folded into the launch
    *      as `--append-system-prompt-file` (guaranteed in context, not auto-discovered).
-   *   2. The on-demand role library (./skills) → a Claude Code plugin under
+   *   2. The on-demand role library (./instructions) → a Claude Code plugin under
    *      `<dir>/<PLUGIN_NAME>/` (a `.claude-plugin/plugin.json` manifest + one
    *      `skills/<name>/SKILL.md` per skill), attached via `--plugin-dir`. */
-  stageSkills(): void {
+  stageInstructions(): void {
     mkdirSync(this.dir, { recursive: true })
     const baselineFile = join(this.dir, 'baseline.md')
     writeFileSync(baselineFile, BASELINE_SUPERVISION)
@@ -97,15 +97,7 @@ export class ClaudeAdapter implements CliAdapter {
         2,
       ),
     )
-    for (const s of CANVAS_SKILLS) {
-      const skillDir = join(pluginDir, 'skills', s.name)
-      mkdirSync(skillDir, { recursive: true })
-      // name is constrained to [a-z0-9-] so it's YAML-safe bare; description is
-      // free text (may contain ':'), so emit it as a double-quoted scalar —
-      // JSON string escaping is valid YAML flow-scalar syntax.
-      const md = `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${s.body}\n`
-      writeFileSync(join(skillDir, 'SKILL.md'), md)
-    }
+    for (const s of CANVAS_SKILLS) materializeSkill(join(pluginDir, 'skills'), s)
     this.pluginDir = pluginDir
     console.log(`[adapter] staged baseline + ${CANVAS_SKILLS.length} role skill(s) → ${this.dir}`)
   }
@@ -177,27 +169,8 @@ export class ClaudeAdapter implements CliAdapter {
     return `/${PLUGIN_NAME}:${name}`
   }
 
-  classifyAsk(name: string, payload: Record<string, any>): HookAsk | null {
-    return events.classifyAsk(name, payload)
-  }
-
-  questionAnswerBody(input: Record<string, unknown> | undefined, answers: QuestionAnswers): string {
-    return events.questionAnswerBody(input, answers)
-  }
-
-  permissionAllowBody(): string {
-    return events.permissionAllowBody()
-  }
-
-  permissionDenyBody(): string {
-    return events.permissionDenyBody()
-  }
-
-  event(name: string, p: Record<string, any>): CardEvent | null {
-    return events.mapEvent(name, p)
-  }
-
-  finalReply(name: string, p: Record<string, any>): string | null {
-    return events.finalReply(name, p)
+  /** Claude Code IS the canonical hook schema — delegate wholesale. */
+  interpret(name: string, payload: Record<string, any>): Interpretation {
+    return events.interpret(name, payload)
   }
 }

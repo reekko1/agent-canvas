@@ -113,33 +113,8 @@ export function applyCardEvent(m: CardMeta, ev: CardEvent): CardMeta {
   if (ev.subagentDelta) {
     meta.subagents = Math.max(0, (meta.subagents ?? 0) + ev.subagentDelta)
   }
-  if (ev.todoChange) meta.todos = applyTodoChange(meta.todos, ev.todoChange)
+  // The plan: `replace` swaps the whole checklist (update_plan), `clear` drops
+  // it at a session boundary.
+  if (ev.todoChange) meta.todos = ev.todoChange.kind === 'replace' ? ev.todoChange.todos : undefined
   return meta
-}
-
-function applyTodoChange(
-  todos: AgentTodo[] | undefined,
-  tc: NonNullable<CardEvent['todoChange']>,
-): AgentTodo[] | undefined {
-  switch (tc.kind) {
-    case 'replace':
-      return tc.todos
-    case 'clear':
-      return undefined
-    case 'add':
-      return [...(todos ?? []), tc.todo]
-    case 'update':
-      return (todos ?? []).flatMap((t) => {
-        if (t.id !== tc.id) return [t]
-        if (tc.status === 'deleted') return []
-        return [
-          {
-            ...t,
-            status: tc.status ?? t.status,
-            content: tc.content ?? t.content,
-            activeForm: tc.activeForm ?? t.activeForm,
-          },
-        ]
-      })
-  }
 }

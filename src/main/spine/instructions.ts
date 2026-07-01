@@ -1,4 +1,4 @@
-// Agent instructions, authored once and CLI-neutral. Two kinds:
+// The CLI-neutral agent INSTRUCTIONS, authored once as pure data. Two kinds:
 //   BASELINE_SUPERVISION — always-on guidance EVERY supervised card gets. Each
 //     adapter renders it in its own always-on channel (Claude via
 //     `--append-system-prompt-file`, codex via `AGENTS.md`) — never a skill, so
@@ -7,13 +7,15 @@
 //     materialized as a plugin and invoked when a card is spawned as that role.
 //
 // Neither carries any CLI assumption; the adapter owns every CLI-specific detail
-// (packaging, invocation syntax, delivery channel). See CliAdapter / skillRef.
+// (packaging, invocation syntax, delivery channel) — each renders both channels
+// in its `stageInstructions`. See CliAdapter / skillRef. (Distinct from
+// ../mastermind/skills.ts, the orchestrator's own self-authored skill library —
+// this file is what the supervised CARDS are told.)
 //
-// The role library is materialized into a Claude Code plugin under
-// SPINE_DIR (`<SPINE_DIR>/canvas-skills/`) at spine startup and attached to
-// every `claude` session via `--plugin-dir` — see ClaudeAdapter.stageSkills /
-// launchCommand. We keep the source in-process (not as on-disk SKILL.md files
-// behind extraResources) so there's no dev-vs-packaged path resolution: the
+// The role library is materialized into a per-CLI plugin under SPINE_DIR at
+// spine startup (each adapter's `stageInstructions`, via `materializeSkill`
+// below). We keep the source in-process (not as on-disk SKILL.md files behind
+// extraResources) so there's no dev-vs-packaged path resolution: the
 // materializer rebuilds the plugin dir from this array each launch, so editing
 // a skill ships on the next relaunch and a removed/renamed skill doesn't linger.
 //
@@ -24,7 +26,8 @@
 // grant enforces what it can actually do — so a worker that opened the lead skill
 // still has no lead tools.
 
-import STRATEGIST_TOURNAMENT_SRC from './strategistTournament.js?raw'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export interface CanvasSkill {
   /** SKILL.md `name`: lowercase, `[a-z0-9-]`, ≤64 chars. Becomes the namespaced
@@ -44,11 +47,17 @@ export interface CanvasSkill {
 export const PLUGIN_NAME = 'canvas-skills'
 export const PLUGIN_VERSION = '0.1.0'
 
-/** The pinned idea-tournament workflow source (authored in strategistTournament.js,
- *  inlined at build via `?raw`). Run OFF-CARD by the mastermind's own headless
- *  `claude` (orchestrator/tournament.ts) — no longer bundled into a card skill, so
- *  it's identical for every canvas regardless of its cards' CLI. */
-export { STRATEGIST_TOURNAMENT_SRC }
+/** Write one skill as `<skillsRoot>/<name>/SKILL.md` — the one SKILL.md
+ *  serializer, shared by every adapter's plugin materializer. `name` is
+ *  constrained to `[a-z0-9-]` so it's YAML-safe bare; `description` is free text
+ *  (may contain ':'), so it's emitted as a double-quoted scalar — JSON string
+ *  escaping is valid YAML flow-scalar syntax. */
+export function materializeSkill(skillsRoot: string, s: CanvasSkill): void {
+  const dir = join(skillsRoot, s.name)
+  mkdirSync(dir, { recursive: true })
+  const md = `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${s.body}\n`
+  writeFileSync(join(dir, 'SKILL.md'), md)
+}
 
 /** The always-on supervision briefing every card boots with — CLI-neutral, delivered
  *  by each adapter in its own always-on channel (NOT a skill, so auto-discovery can't

@@ -2,12 +2,11 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { CardEvent, QuestionAnswers } from '../../shared/types'
-import { shellQuote, type CliAdapter, type HookAsk, type McpStageOpts } from './cliAdapter'
+import { shellQuote, type CliAdapter, type Interpretation, type McpStageOpts } from './cliAdapter'
 import * as events from './hookEvents'
-import { BASELINE_SUPERVISION, CANVAS_SKILLS } from './skills'
+import { BASELINE_SUPERVISION, CANVAS_SKILLS, materializeSkill } from './instructions'
 
-/// The codex plugin + local-marketplace identifiers (see stageSkills). One plugin
+/// The codex plugin + local-marketplace identifiers (see stageInstructions). One plugin
 /// bundles the shipped role skills; the marketplace is a thin local wrapper codex
 /// requires to install it.
 const CODEX_MARKET = 'canvas'
@@ -57,9 +56,10 @@ function stripMcpTables(toml: string): string {
 ///    `$CODEX_HOME/config.toml` (`[mcp_servers.*]`, streamable-HTTP, same loopback
 ///    servers Claude uses). So a codex card is MCP-complete — including the issue
 ///    board tools, the mechanical half of a Mastermind role.
-///  - The role *skills* that drive those tools ARE shipped: stageSkills materializes a
-///    plugin under CODEX_HOME (`.codex-plugin/plugin.json` + `skills/<n>/SKILL.md`) listed
-///    by a local marketplace (`.agents/plugins/marketplace.json`), and installSkills runs
+///  - The role *skills* that drive those tools ARE shipped: stageInstructions
+///    materializes a plugin under CODEX_HOME (`.codex-plugin/plugin.json` +
+///    `skills/<n>/SKILL.md`) listed by a local marketplace
+///    (`.agents/plugins/marketplace.json`), and installSkills runs
 ///    `codex plugin marketplace add` + `codex plugin add` lazily on the first codex launch
 ///    (idempotent; coexists with our `[mcp_servers.*]` via a table-scoped RMW). The whole
 ///    CANVAS_SKILLS library ships as-is — the bodies are CLI-neutral (they name only the
@@ -67,10 +67,6 @@ function stripMcpTables(toml: string): string {
 ///    works on codex too, which has its own subagents), so there is nothing to exclude.
 ///    (`[[skills.config]]` is toggle-only and `$CODEX_HOME/.agents/skills` isn't a root —
 ///    both dead ends; the plugin path is the one that works.)
-///  - Todo hydration and the structured question channel have no Codex parallel
-///    (no readable on-disk plan store; no AskUserQuestion equivalent), so they stay
-///    inert. The spine degrades gracefully throughout — status + replies +
-///    permission holds always work.
 export class CodexAdapter implements CliAdapter {
   readonly name = 'codex'
   readonly binary = 'codex'
@@ -137,13 +133,14 @@ export class CodexAdapter implements CliAdapter {
   /** Deliver the shared always-on baseline (`BASELINE_SUPERVISION`) via
    *  `$CODEX_HOME/AGENTS.md` (read as global guidance; our CODEX_HOME is private) —
    *  codex's always-on channel, parity with Claude's `--append-system-prompt-file`.
-   *  Runs at startup, sink-independent, like Claude's stageSkills.
+   *  Runs at startup, sink-independent, like Claude's stageInstructions.
    *  Also materializes the role-skill plugin + its local marketplace under CODEX_HOME
-   *  (rebuilt from scratch each startup so skills.ts edits ship). The actual `codex
-   *  plugin` install is deferred to the first codex launch (installSkills) so non-codex
-   *  users never pay for it. Ships the whole CLI-neutral CANVAS_SKILLS library; the
-   *  always-on baseline rides AGENTS.md instead (below), so it's not among them. */
-  stageSkills(): void {
+   *  (rebuilt from scratch each startup so instructions.ts edits ship). The actual
+   *  `codex plugin` install is deferred to the first codex launch (installSkills) so
+   *  non-codex users never pay for it. Ships the whole CLI-neutral CANVAS_SKILLS
+   *  library; the always-on baseline rides AGENTS.md instead (above), so it's not
+   *  among them. */
+  stageInstructions(): void {
     mkdirSync(this.home, { recursive: true })
     writeFileSync(join(this.home, 'AGENTS.md'), BASELINE_SUPERVISION)
 
@@ -153,14 +150,7 @@ export class CodexAdapter implements CliAdapter {
     mkdirSync(join(this.marketDir, '.agents', 'plugins'), { recursive: true })
     mkdirSync(join(pluginRoot, '.codex-plugin'), { recursive: true })
     const shipped = CANVAS_SKILLS
-    for (const s of shipped) {
-      const dir = join(pluginRoot, 'skills', s.name)
-      mkdirSync(dir, { recursive: true })
-      // name is [a-z0-9-] (YAML-safe bare); description is JSON-quoted (a `:` can't
-      // break frontmatter) — same scheme ClaudeAdapter.stageSkills uses.
-      const md = `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${s.body}\n`
-      writeFileSync(join(dir, 'SKILL.md'), md)
-    }
+    for (const s of shipped) materializeSkill(join(pluginRoot, 'skills'), s)
     writeFileSync(
       join(pluginRoot, '.codex-plugin', 'plugin.json'),
       JSON.stringify(
@@ -290,35 +280,12 @@ export class CodexAdapter implements CliAdapter {
     return `$${CODEX_PLUGIN}:${name}`
   }
 
-  // Event mapping delegates to the canonical hook schema in ./hookEvents (codex
-  // adopted Claude's names + fields wholesale); any future schema drift belongs
-  // in these methods. Codex has no AskUserQuestion tool, so classifyAsk's
-  // question branch never fires — the channel is inert without a stub.
-  classifyAsk(name: string, p: Record<string, any>): HookAsk | null {
-    return events.classifyAsk(name, p)
-  }
-  questionAnswerBody(input: Record<string, unknown> | undefined, answers: QuestionAnswers): string {
-    return events.questionAnswerBody(input, answers) // unreachable (see classifyAsk)
-  }
-  event(name: string, p: Record<string, any>): CardEvent | null {
-    return events.mapEvent(name, p)
-  }
-  finalReply(name: string, p: Record<string, any>): string | null {
-    return events.finalReply(name, p)
-  }
-
-  // Codex's PermissionRequest decision shape (differs from Claude's response body).
-  permissionAllowBody(): string {
-    return JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
-    })
-  }
-  permissionDenyBody(): string {
-    return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PermissionRequest',
-        decision: { behavior: 'deny', message: 'Denied in Agent Canvas.' },
-      },
-    })
+  /** Codex adopted the canonical hook schema wholesale (same event names, same
+   *  payload fields, same PermissionRequest decision bodies) — delegate to
+   *  ./hookEvents; any future schema drift belongs here. NB the permission-ask
+   *  branch is currently inert anyway: launchCommand passes
+   *  `--ask-for-approval never`, so codex never emits a held PermissionRequest. */
+  interpret(name: string, p: Record<string, any>): Interpretation {
+    return events.interpret(name, p)
   }
 }

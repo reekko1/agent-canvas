@@ -1,4 +1,4 @@
-import type { CardEvent, Question, QuestionAnswers } from '../../shared/types'
+import type { CardEvent } from '../../shared/types'
 
 /** Single-quote a string for the POSIX shell. Used by every adapter's
  *  `launchCommand` and by the spine's tmux inner command — lives here in the CLI
@@ -15,29 +15,38 @@ export interface McpStageOpts {
   toolTimeoutSec?: number
 }
 
-/** A held (bidirectional) hook event, classified: a permission gate to
- *  allow/deny, or a structured question to answer. Telemetry events classify as
- *  null. `input` is the question tool's original input, echoed back by
- *  `questionAnswerBody` so the answer round-trips — opaque to the spine. */
-export type HookAsk =
-  | { kind: 'permission' }
-  | { kind: 'question'; questions: Question[]; input?: Record<string, unknown> }
+/** One hook event, interpreted — everything the spine needs from it in a single
+ *  pass. All fields optional: telemetry may carry only an `event`, a turn-ending
+ *  event adds `reply`, a permission gate adds `ask`. */
+export interface Interpretation {
+  /** The semantic card update (status flip, feed line, plan change), if any. */
+  event?: CardEvent
+  /** The full final assistant reply when this event ends a turn — the spine
+   *  captures it for the orchestrator's get_agent_reply. */
+  reply?: string
+  /** Present when the event must be HELD as a permission gate: the spine keeps
+   *  the hook response open and settles it with `allow()`/`deny()` (each returns
+   *  the CLI's decision body), or responds null to release the ask to the CLI's
+   *  own dialog. The ask carries its own responders, so the spine can never
+   *  answer with the wrong CLI's body. */
+  ask?: { allow(): string; deny(): string }
+}
 
-/// The transport/config/launch + event-mapping seam for one coding-agent CLI.
-/// `ClaudeAdapter` is the reference implementation; `CodexAdapter` (and later
-/// opencode) implement the same contract so the spine can drive any of them
-/// through a single call site. The spine picks one per card by `CliKind`.
+/// The transport/config/launch + event-interpretation seam for one coding-agent
+/// CLI. `ClaudeAdapter` is the reference implementation; `CodexAdapter` (and
+/// later opencode) implement the same contract so the spine can drive any of
+/// them through a single call site. The spine picks one per card by `CliKind`.
 ///
 /// An adapter is constructed with its staging dir (SPINE_DIR) and the spine
 /// token — the two constants of a spine's lifetime — so the methods only carry
 /// what varies. Staging methods (stage*) write per-CLI config into that dir and
 /// remember the paths on the instance; `launchCommand` folds them into the
 /// launch string. A CLI that lacks a given capability (skills, MCP, or a
-/// structured question channel) no-ops the corresponding method — the spine
-/// degrades gracefully rather than branching per CLI.
+/// permission channel) no-ops the corresponding method — the spine degrades
+/// gracefully rather than branching per CLI.
 ///
 /// The spine never reads a CLI's event names or payload fields itself — every
-/// schema fact flows through `classifyAsk` / `event` / `finalReply`.
+/// schema fact flows through `interpret`.
 export interface CliAdapter {
   /** Human-readable adapter id for logs (e.g. 'claude-code', 'codex'). */
   readonly name: string
@@ -47,8 +56,10 @@ export interface CliAdapter {
   /** Write this CLI's hook config, pointed at the loopback sink on `port`.
    *  Held asks ride the same sink. */
   stageHooks(port: number): void
-  /** Materialize the curated skill library for this CLI (no-op if unsupported). */
-  stageSkills(): void
+  /** Materialize the two instruction channels — the always-on supervision
+   *  baseline and the on-demand role-skill library — in this CLI's own delivery
+   *  mechanisms (no-op where unsupported). */
+  stageInstructions(): void
   /** Materialize one agent-facing MCP server's per-card config (no-op if the CLI
    *  lacks MCP). `id` is the server key — it becomes the card's tool namespace
    *  (`mcp__<id>__*`), so it must match what the loopback server registered
@@ -66,20 +77,8 @@ export interface CliAdapter {
    *  Adapter-owned so no CLI-specific syntax leaks into the orchestrator. */
   skillRef(name: string): string
 
-  /** Classify a hook event: a held permission ask, a held structured question
-   *  (with its parsed questions), or null — plain telemetry to ack immediately. */
-  classifyAsk(name: string, payload: Record<string, any>): HookAsk | null
-  /** The hook response body that answers a structured question (`input` is the
-   *  value `classifyAsk` returned for it). */
-  questionAnswerBody(input: Record<string, unknown> | undefined, answers: QuestionAnswers): string
-  /** The hook response body that allows / denies a held permission ask. */
-  permissionAllowBody(): string
-  permissionDenyBody(): string
-
-  /** Map a CLI lifecycle event to a `CardEvent` (or `null` to ignore it). */
-  event(name: string, p: Record<string, any>): CardEvent | null
-  /** The full final assistant reply carried by a turn-ending event, or null for
-   *  every other event — the spine captures it for the orchestrator's
-   *  get_agent_reply. */
-  finalReply(name: string, payload: Record<string, any>): string | null
+  /** Interpret one hook event — the semantic CardEvent (if any), the final reply
+   *  (if turn-ending), and the held permission ask (if it must gate) — in one
+   *  pass. The one place a CLI's event names and payload fields are read. */
+  interpret(name: string, payload: Record<string, any>): Interpretation
 }

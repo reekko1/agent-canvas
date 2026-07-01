@@ -11,14 +11,7 @@ import { Tmux } from './tmux'
 import * as pty from 'node-pty'
 import { RemoteServer, type TermSession } from '../remote/remoteServer'
 import { PushService } from '../remote/push'
-import type {
-  AskDecision,
-  CardEvent,
-  CliKind,
-  PermissionAskInfo,
-  QuestionAnswers,
-  QuestionAskInfo,
-} from '../../shared/types'
+import type { AskDecision, CardEvent, CliKind, PermissionAskInfo } from '../../shared/types'
 
 // DELIBERATELY ISOLATED from the shipping Swift app: own config dir, own tmux
 // socket. The two canvases can run side by side until cutover, when this
@@ -78,9 +71,10 @@ export interface LaunchSpec {
 interface HeldAsk {
   cardId: string
   respond: (body: string | null) => void
-  /** The original tool_input — present for question asks, whose answer body
-   *  must spread it back so `questions` survives the round-trip. */
-  input?: Record<string, unknown>
+  /** The ask's own decision bodies, closed over by the adapter's `interpret` —
+   *  so a decision can never be answered with the wrong CLI's shape. */
+  allow: () => string
+  deny: () => string
 }
 
 /// The attention spine: owns the sink, the adapter, and the tmux launch path;
@@ -89,7 +83,6 @@ interface HeldAsk {
 export class Spine {
   onUpdate?: (cardId: string, event: CardEvent) => void
   onAsk?: (ask: PermissionAskInfo) => void
-  onQuestion?: (ask: QuestionAskInfo) => void
   /** A card just finished a turn, carrying its full final reply — the
    *  orchestrator echoes it into the supervision chat. */
   onReply?: (cardId: string, reply: string) => void
@@ -124,9 +117,9 @@ export class Spine {
 
   start(): void {
     this.tmux.prepare()
-    // Materialize the curated skill plugin up front (no sink/port dependency) so
-    // every card launched after this is equipped via --plugin-dir.
-    for (const a of this.allAdapters) a.stageSkills()
+    // Materialize the instruction channels (baseline + role skills) up front (no
+    // sink/port dependency) so every card launched after this is equipped.
+    for (const a of this.allAdapters) a.stageInstructions()
     this.sink.onRequest = (req) => this.handle(req)
     // hooks.json embeds the sink's URL, so it's written once the port is
     // bound. Cards spawn lazily, long after.
@@ -300,20 +293,9 @@ export class Spine {
     const ask = this.asks.get(askId)
     if (!ask) return
     this.asks.delete(askId)
-    const adapter = this.cardAdapter(ask.cardId)
-    if (decision === 'allow') ask.respond(adapter.permissionAllowBody())
-    else if (decision === 'deny') ask.respond(adapter.permissionDenyBody())
+    if (decision === 'allow') ask.respond(ask.allow())
+    else if (decision === 'deny') ask.respond(ask.deny())
     else ask.respond(null) // no decision → the native dialog falls through to the terminal
-  }
-
-  /** Answer a held AskUserQuestion with the chosen options — allows the tool
-   *  with the answers injected into its input. Declining is `decide(_, 'deny')`,
-   *  which the CLI renders as "User declined to answer questions". */
-  answerQuestion(askId: string, answers: QuestionAnswers): void {
-    const ask = this.asks.get(askId)
-    if (!ask) return
-    this.asks.delete(askId)
-    ask.respond(this.cardAdapter(ask.cardId).questionAnswerBody(ask.input, answers))
   }
 
   /** Attach a fresh tmux client to a card's session for the mobile terminal —
@@ -356,19 +338,17 @@ export class Spine {
 
   private handle(req: HookRequest): void {
     this.lastEvent.set(req.cardId, Date.now()) // any hook = proof the agent is alive
-    const adapter = this.cardAdapter(req.cardId)
     // The payload is opaque here — every schema fact (event names, fields) is
-    // the adapter's. Status first (the card goes loud), then route.
-    const event = adapter.event(req.event, req.payload)
+    // the adapter's, read in ONE interpret pass. Status first (the card goes
+    // loud), then settle or hold the response.
+    const { event, reply, ask } = this.cardAdapter(req.cardId).interpret(req.event, req.payload)
     if (event) this.onUpdate?.(req.cardId, event)
 
-    const ask = adapter.classifyAsk(req.event, req.payload)
     if (!ask) {
       req.respond(null) // telemetry never blocks the agent
       // Capture the agent's full final reply when a turn finishes — the
       // orchestrator reads it back via get_agent_reply.
-      const reply = adapter.finalReply(req.event, req.payload)
-      if (reply !== null) {
+      if (reply !== undefined) {
         this.replies.set(req.cardId, reply)
         this.onReply?.(req.cardId, reply)
       }
@@ -379,21 +359,11 @@ export class Spine {
     // the CLI's own dialog is deferred; nobody to render it → release, so the
     // agent falls through to its terminal dialog rather than stranding.
     const askId = `ask-${this.askSeq++}`
-    if (ask.kind === 'question') {
-      // A structured question gets the chooser, never an Allow/Deny.
-      this.asks.set(askId, { cardId: req.cardId, respond: req.respond, input: ask.input })
-      if (this.onQuestion && ask.questions.length) {
-        this.onQuestion({ askId, cardId: req.cardId, questions: ask.questions })
-      } else {
-        this.decide(askId, 'release') // nothing parseable → terminal picker
-      }
+    this.asks.set(askId, { cardId: req.cardId, respond: req.respond, allow: ask.allow, deny: ask.deny })
+    if (this.onAsk) {
+      this.onAsk({ askId, cardId: req.cardId, detail: event?.detail ?? 'Permission requested' })
     } else {
-      this.asks.set(askId, { cardId: req.cardId, respond: req.respond })
-      if (this.onAsk) {
-        this.onAsk({ askId, cardId: req.cardId, detail: event?.detail ?? 'Permission requested' })
-      } else {
-        this.decide(askId, 'release') // nobody to decide → terminal dialog
-      }
+      this.decide(askId, 'release') // nobody to decide → terminal dialog
     }
   }
 }

@@ -43,7 +43,7 @@ const onCanvas = (name?: string): string => (name ? ` on canvas "${name}"` : '')
 export interface OrchestratorDeps {
   send: (channel: string, ...args: unknown[]) => void
   getState: () => RemoteState | null
-  /** The issue-store projection — the strategist cascade reads the winning idea
+  /** The issue-store projection — the idea-tournament cascade reads the winning idea
    *  (on idea-ready) and a canvas's active sprints (the idle check) from it. */
   issueSnapshot: () => IssueSnapshot
   /** Mutate the issue store — the off-card tournament writes its Conception through it. */
@@ -327,7 +327,7 @@ export class Orchestrator {
         role: 'planner',
         name: 'Planner',
         prompt:
-          `The strategist's idea tournament chose this canvas's next sprint. Create the sprint from this ` +
+          `This canvas's idea tournament chose its next sprint. Create the sprint from this ` +
           `winning idea, then write, self-audit, and approve its plan — work unattended.\n\n` +
           `IDEA: ${winner.idea}\nWHY (the gap it closes): ${winner.why}\n` +
           `OUTCOME (definition of done, intent level): ${winner.outcome}\nVISION LINK: ${winner.visionLink}\n\n` +
@@ -349,7 +349,7 @@ export class Orchestrator {
         message: {
           role: 'user',
           content:
-            `[fleet event] The strategist ABSTAINED${where}: no idea clearly served the vision` +
+            `[fleet event] The idea tournament ABSTAINED${where}: no idea clearly served the vision` +
             `${m.detail ? ` (${m.detail})` : ''}. Tell the user their canvas needs steering — a vision edit ` +
             `or a direct instruction — then stop. Do not spawn anything.`,
         },
@@ -400,7 +400,7 @@ export class Orchestrator {
       const r = await runReaction(m, this.bus, { isAutonomous: this.mode === 'autonomous' })
       if (r.mode === 'nudge') {
         // Act + narrate: the reactor's send_to_agent already executed; surface its
-        // decision as an auto event (like the strategist), noting any denied verbs.
+        // decision as an auto event (like the tournament), noting any denied verbs.
         const held = r.deniedActions.length
           ? ` (held back: ${[...new Set(r.deniedActions.map((a) => a.tool))].join(', ')})`
           : ''
@@ -421,11 +421,11 @@ export class Orchestrator {
 
   /** Run the idea tournament OFF-CARD on an idle autonomous canvas — the head that
    *  finds the next sprint, IDENTICAL for every canvas regardless of its cards' CLI
-   *  (it is a mastermind deliberation, not a card task, so there is no strategist card
+   *  (it is a mastermind deliberation, not a card task, so there is no card
    *  and no CLI dependence). Guarded against a concurrent run (the `contestInFlight`
    *  latch) and against contesting while a sprint is in flight. It writes a Conception
    *  (winner or abstain), firing the idea-ready / idea-abstained milestone the cascade
-   *  below reacts to — exactly as the strategist card used to. */
+   *  below reacts to — exactly as the retired strategist card used to. */
   private async runContest(projectId: string): Promise<void> {
     if (this.mode !== 'autonomous') return
     if (this.contestInFlight.has(projectId)) return

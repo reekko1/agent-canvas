@@ -19,15 +19,11 @@ export interface AgentTodo {
   activeForm?: string
 }
 
-/// How a CLI event changes the agent's plan. Claude Code ≥2.1 streams it
-/// incrementally (TaskCreate/TaskUpdate); older CLIs replace the whole list
-/// per call (TodoWrite). The card owns the accumulated list; adapters stay
-/// stateless. (Port of the Swift TodoChange.)
-export type TodoChange =
-  | { kind: 'replace'; todos: AgentTodo[] }
-  | { kind: 'add'; todo: AgentTodo }
-  | { kind: 'update'; id: string; status?: string; content?: string; activeForm?: string }
-  | { kind: 'clear' }
+/// How an event changes the agent's plan. The plan store is OURS — every card's
+/// checklist flows through the CLI-agnostic `mcp__canvas__update_plan` tool
+/// (the native plan tools are disabled), which replaces the list wholesale;
+/// `clear` marks a session boundary. The card owns the accumulated list.
+export type TodoChange = { kind: 'replace'; todos: AgentTodo[] } | { kind: 'clear' }
 
 /// One semantic update extracted from a CLI lifecycle event — the spine's unit
 /// of delivery. Everything is optional: an event may carry only a status flip,

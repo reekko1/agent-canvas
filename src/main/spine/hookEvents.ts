@@ -1,92 +1,52 @@
 import { basename } from 'node:path'
-import type { AgentTodo, CardEvent, Question, QuestionAnswers, TodoChange } from '../../shared/types'
-import type { HookAsk } from './cliAdapter'
+import type { CardEvent } from '../../shared/types'
+import type { Interpretation } from './cliAdapter'
 
-/// Pure mapping for the CANONICAL hook schema — the wire format Claude Code
-/// defined and codex adopted (same PascalCase event names, same snake_case
+/// Pure interpretation of the CANONICAL hook schema — the wire format Claude
+/// Code defined and codex adopted (same PascalCase event names, same snake_case
 /// payload fields: `hook_event_name`, `tool_name`, `last_assistant_message`, …).
 /// No fs, no process, no class state; split out of the adapters (which keep the
 /// transport/config/launch seam) so this stays testable in isolation. Both
-/// ClaudeAdapter and CodexAdapter delegate here through their own methods — if a
-/// CLI's schema ever drifts, the divergence belongs in that adapter, not in this
-/// file. Siphons AskUserQuestion off the PermissionRequest channel, parses
-/// questions, builds decision bodies, and maps lifecycle events to rich
-/// CardEvents. (Faithful port of the Swift ClaudeCodeAdapter — the event mapping
-/// there is empirically verified against real hook payloads; trust it.)
+/// ClaudeAdapter and CodexAdapter delegate here through their `interpret`
+/// method — if a CLI's schema ever drifts, the divergence belongs in that
+/// adapter, not in this file. (Faithful port of the Swift ClaudeCodeAdapter —
+/// the event mapping there is empirically verified against real hook payloads;
+/// trust it.)
+///
+/// Note there is no structured-question channel here: `AskUserQuestion` is
+/// disallowed on every card (the CLI-agnostic `mcp__canvas__ask_user` replaces
+/// it — see orchestrator/agentCanvasMcp.ts), so a question can never arrive as
+/// a hook. The same goes for the native plan tools (TodoWrite/TaskCreate/
+/// TaskUpdate → `mcp__canvas__update_plan`) — no plan mapping here either.
 
-/** Classify a hook event for routing: a held permission gate, a held structured
- *  question, or null (telemetry). AskUserQuestion is siphoned off first — the
- *  CLI models it as a permission (its checkPermissions returns "ask"), so it
- *  arrives on the PermissionRequest channel, but it's a question to answer, not
- *  an action to gate. The question's original `tool_input` rides along so
- *  `questionAnswerBody` can spread it back into the answer. */
-export function classifyAsk(name: string, payload: Record<string, any>): HookAsk | null {
-  if (name !== 'PermissionRequest') return null
-  if (payload?.tool_name !== 'AskUserQuestion') return { kind: 'permission' }
-  const raw = payload?.tool_input
-  const input =
-    typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : undefined
-  return { kind: 'question', questions: parseQuestions(payload), input }
-}
-
-/** The full final assistant reply carried by a turn-ending event, or null for
- *  every other event. `Stop` carries the complete text in
- *  `last_assistant_message` (the mapped CardEvent keeps only a clipped summary) —
- *  the spine captures it for the orchestrator's get_agent_reply. */
-export function finalReply(name: string, p: Record<string, any>): string | null {
-  return name === 'Stop' && typeof p.last_assistant_message === 'string'
-    ? p.last_assistant_message
-    : null
-}
-
-/** The structured questions from an AskUserQuestion payload, defensively
- *  parsed (the payload is external input). Empty array → fall through to the
- *  terminal rather than show an empty chooser. */
-function parseQuestions(payload: Record<string, any>): Question[] {
-  const raw = payload?.tool_input?.questions
-  if (!Array.isArray(raw)) return []
-  const out: Question[] = []
-  for (const q of raw) {
-    if (typeof q?.question !== 'string' || !Array.isArray(q?.options)) continue
-    const options = q.options.flatMap((o: any) =>
-      typeof o?.label === 'string'
-        ? [{ label: o.label, description: typeof o.description === 'string' ? o.description : undefined }]
-        : [],
-    )
-    if (!options.length) continue
-    out.push({
-      question: q.question,
-      header: typeof q.header === 'string' ? q.header : undefined,
-      options,
-      multiSelect: q.multiSelect === true,
-    })
+/** Interpret one hook event: the semantic CardEvent (if any), the final reply
+ *  (on `Stop`), and the held permission ask (on `PermissionRequest`). */
+export function interpret(name: string, p: Record<string, any>): Interpretation {
+  const out: Interpretation = {}
+  const event = mapEvent(name, p)
+  if (event) out.event = event
+  // `Stop` carries the complete reply in `last_assistant_message` (the mapped
+  // CardEvent keeps only a clipped summary).
+  if (name === 'Stop' && typeof p.last_assistant_message === 'string') {
+    out.reply = p.last_assistant_message
+  }
+  // A PermissionRequest is the held decision channel. An AskUserQuestion riding
+  // it can only come from a session launched before the tool was disallowed —
+  // we can no longer answer those from orbit, so leave `ask` absent and the
+  // spine's immediate null response releases it to the terminal's own picker.
+  if (name === 'PermissionRequest' && p?.tool_name !== 'AskUserQuestion') {
+    out.ask = { allow: permissionAllowBody, deny: permissionDenyBody }
   }
   return out
 }
 
-/** Answer an AskUserQuestion: allow the tool, injecting the chosen answers
- *  into its input via `updatedInput`. The tool's own `call` reads them, so the
- *  agent proceeds as if the human had picked them in the terminal. (The whole
- *  original input is spread back — `questions` must survive the round-trip.) */
-export function questionAnswerBody(
-  input: Record<string, unknown> | undefined,
-  answers: QuestionAnswers,
-): string {
-  return JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PermissionRequest',
-      decision: { behavior: 'allow', updatedInput: { ...(input ?? {}), answers } },
-    },
-  })
-}
-
-export function permissionAllowBody(): string {
+function permissionAllowBody(): string {
   return JSON.stringify({
     hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
   })
 }
 
-export function permissionDenyBody(): string {
+function permissionDenyBody(): string {
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PermissionRequest',
@@ -97,7 +57,7 @@ export function permissionDenyBody(): string {
 
 // MARK: Event mapping
 
-export function mapEvent(name: string, p: Record<string, any>): CardEvent | null {
+function mapEvent(name: string, p: Record<string, any>): CardEvent | null {
   let ev: CardEvent | null = null
   switch (name) {
     case 'SessionStart':
@@ -123,7 +83,7 @@ export function mapEvent(name: string, p: Record<string, any>): CardEvent | null
 
     case 'PreToolUse':
     case 'PostToolUse':
-      ev = { status: 'running', detail: toolDetail(p), todoChange: todoChange(name, p) }
+      ev = { status: 'running', detail: toolDetail(p) }
       break
 
     case 'PostToolUseFailure': {
@@ -242,67 +202,6 @@ export function mapEvent(name: string, p: Record<string, any>): CardEvent | null
   return ev
 }
 
-/** The plan-changing tools, mapped to TodoChange (port of the Swift
- *  todoChange — field paths empirically verified there against real payloads):
- *  - TaskCreate: `tool_input {subject, activeForm}`; the PostToolUse
- *    `tool_response.task.id` carries the assigned id.
- *  - TaskUpdate: `tool_input {taskId, status?, subject?, activeForm?}`
- *    (status includes "deleted"); `tool_response.statusChange.to` confirms.
- *  - TodoWrite (older CLIs): `tool_input.todos` replaces the plan wholesale. */
-function todoChange(name: string, p: Record<string, any>): TodoChange | undefined {
-  const input: Record<string, any> = p.tool_input ?? {}
-  const response: Record<string, any> = p.tool_response ?? {}
-  const isPost = name === 'PostToolUse'
-  switch (p.tool_name) {
-    case 'TodoWrite': {
-      if (!Array.isArray(input.todos)) return undefined
-      const todos: AgentTodo[] = (input.todos as any[]).flatMap((t, i) =>
-        typeof t?.content === 'string'
-          ? [
-              {
-                id: `todo-${i}`,
-                content: t.content,
-                status: typeof t.status === 'string' ? t.status : 'pending',
-                activeForm: typeof t.activeForm === 'string' ? t.activeForm : undefined,
-              },
-            ]
-          : [],
-      )
-      return todos.length ? { kind: 'replace', todos } : undefined
-    }
-    case 'TaskCreate': {
-      const id = response?.task?.id
-      if (!isPost || typeof input.subject !== 'string' || typeof id !== 'string') return undefined
-      return {
-        kind: 'add',
-        todo: {
-          id,
-          content: input.subject,
-          status: 'pending',
-          activeForm: typeof input.activeForm === 'string' ? input.activeForm : undefined,
-        },
-      }
-    }
-    case 'TaskUpdate': {
-      if (!isPost || typeof input.taskId !== 'string') return undefined
-      const confirmed = response?.statusChange?.to
-      return {
-        kind: 'update',
-        id: input.taskId,
-        status:
-          typeof confirmed === 'string'
-            ? confirmed
-            : typeof input.status === 'string'
-              ? input.status
-              : undefined,
-        content: typeof input.subject === 'string' ? input.subject : undefined,
-        activeForm: typeof input.activeForm === 'string' ? input.activeForm : undefined,
-      }
-    }
-  }
-  return undefined
-}
-
 /** "<Tool>: <salient argument>" — the triage line that distinguishes a
  *  rubber-stamp from a think-first ("Bash: rm -rf node_modules"). */
 function toolDetail(p: Record<string, any>): string {
@@ -333,19 +232,6 @@ function toolDetail(p: Record<string, any>): string {
     case 'Task':
       arg = input.description ?? input.subagent_type
       break
-    case 'TaskCreate':
-      arg = input.subject
-      break
-    case 'AskUserQuestion': {
-      const q = Array.isArray(input.questions) ? input.questions[0] : undefined
-      arg = typeof q?.header === 'string' ? q.header : q?.question
-      break
-    }
-    case 'TaskUpdate': {
-      const status = typeof input.status === 'string' ? ` → ${input.status}` : ''
-      arg = typeof input.taskId === 'string' ? `#${input.taskId}${status}` : undefined
-      break
-    }
   }
   if (typeof arg !== 'string' || !arg) return tool
   return `${tool}: ${clip(arg, 80)}`

@@ -232,6 +232,14 @@ export class CodexAdapter implements CliAdapter {
         `url = "http://127.0.0.1:${s.port}/mcp"`,
         'startup_timeout_sec = 20',
         ...(s.toolTimeoutSec ? [`tool_timeout_sec = ${s.toolTimeoutSec}`] : []),
+        // MCP tool approval is a SEPARATE subsystem from `--ask-for-approval never`
+        // (which only auto-approves when the sandbox has full disk write — ours is
+        // workspace-write), and our tools carry no annotations, so codex would
+        // prompt on every call (verified in codex source: maybe_request_mcp_tool_
+        // approval → requires_mcp_tool_approval defaults un-annotated tools to
+        // approval-required). `approve` short-circuits all of it: these are our own
+        // loopback tools on an unattended card — never prompt.
+        'default_tools_approval_mode = "approve"',
         `http_headers = { "X-Canvas-Token" = ${JSON.stringify(this.token)} }`,
         'env_http_headers = { "X-Canvas-Card" = "CANVAS_CARD_ID" }',
         '',

@@ -105,6 +105,10 @@
     --status-stalled: #b07114;
     --status-blocked: #e58e00;
     --status-error: #dd2534;
+    /* The "AI is doing something" accent (comets, glows, scans, constellation) —
+       R G B channels so alpha'd consumers compose it: rgb(var(--accent-ai) / 0.3).
+       Same in both themes today; the token is the retheme handle. */
+    --accent-ai: 34 211 238;
 }
 
 .dark {
@@ -207,6 +211,7 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-accent-ai: rgb(var(--accent-ai));
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
@@ -257,9 +262,9 @@
    transition, so it eases in when work starts and out when it ends instead of
    snapping. The class toggle is the whole state machine. */
 @keyframes orchestrator-glow {
-  0% { box-shadow: 0 0 10px 1px rgb(34 211 238 / 0.24); }
-  50% { box-shadow: 0 0 20px 2px rgb(34 211 238 / 0.42); }
-  100% { box-shadow: 0 0 10px 1px rgb(34 211 238 / 0.24); }
+  0% { box-shadow: 0 0 10px 1px rgb(var(--accent-ai) / 0.24); }
+  50% { box-shadow: 0 0 20px 2px rgb(var(--accent-ai) / 0.42); }
+  100% { box-shadow: 0 0 10px 1px rgb(var(--accent-ai) / 0.24); }
 }
 .orchestrator-pill {
   position: relative;
@@ -302,8 +307,8 @@
   inset: 0;
   /* A tight bright rim plus a soft wide bloom — perimeter only, center clear. */
   box-shadow:
-    inset 0 0 70px 0 rgb(34 211 238 / 0.4),
-    inset 0 0 180px 30px rgb(34 211 238 / 0.3);
+    inset 0 0 70px 0 rgb(var(--accent-ai) / 0.4),
+    inset 0 0 180px 30px rgb(var(--accent-ai) / 0.3);
   opacity: var(--voice-level, 0.4);
 }
 /* Respect reduced-motion: a steady glow while speaking, no loudness pulsing. */
@@ -366,12 +371,12 @@
   inset: 0;
   /* The grid (static, aligned to the card) — same 1px cyan lattice + glow as the
      ripple — over a faint cyan fill so the band has body, not just lines. */
-  background-color: rgb(34 211 238 / 0.06);
+  background-color: rgb(var(--accent-ai) / 0.06);
   background-image:
-    linear-gradient(rgb(34 211 238 / 0.8) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(34 211 238 / 0.8) 1px, transparent 1px);
+    linear-gradient(rgb(var(--accent-ai) / 0.8) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--accent-ai) / 0.8) 1px, transparent 1px);
   background-size: 26px 26px;
-  filter: drop-shadow(0 0 4px rgb(34 211 238 / 0.7));
+  filter: drop-shadow(0 0 4px rgb(var(--accent-ai) / 0.7));
   /* The wavefront: reveal only a horizontal band, brightest at its leading
      (lower) edge, then sweep that band down the card (mask-position animates). */
   mask-image: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.15) 38%, #000 80%, #000 92%, transparent);
@@ -400,7 +405,7 @@
    the fleet works right now) breathes even at rest, dependency edges flow
    downward (data travelling the DAG), and a landing issue fires a radial
    grid-ripple wavefront — the comet / browser-scan cyan lattice, gone circular.
-   Cyan (#22d3ee = rgb(34 211 238)) is the app's "AI is doing something" accent
+   Cyan (--accent-ai) is the app's "AI is doing something" accent
    (cf. orchestrator-glow + browser-scan + the comet ripple), distinct from the
    --status-* attention palette. Everything is compositor-only (box-shadow /
    transform / opacity / background-position) and degrades to a static, legible
@@ -410,16 +415,16 @@
    orchestrator-glow: floor → peak → floor, never returning to 0, so it reads as
    breathing, not blinking. */
 @keyframes frontier-breathe {
-  0%, 100% { box-shadow: inset 0 0 0 1px rgb(34 211 238 / 0.16), 0 0 14px 0 rgb(34 211 238 / 0.08); }
-  50%      { box-shadow: inset 0 0 0 1px rgb(34 211 238 / 0.30), 0 0 24px 2px rgb(34 211 238 / 0.16); }
+  0%, 100% { box-shadow: inset 0 0 0 1px rgb(var(--accent-ai) / 0.16), 0 0 14px 0 rgb(var(--accent-ai) / 0.08); }
+  50%      { box-shadow: inset 0 0 0 1px rgb(var(--accent-ai) / 0.30), 0 0 24px 2px rgb(var(--accent-ai) / 0.16); }
 }
 .frontier-breathe { animation: frontier-breathe 3.4s ease-in-out infinite; }
 
 /* A single in-progress node — lighter and a touch quicker than the band, so an
    actively-worked issue pulses against its wave. */
 @keyframes node-working {
-  0%, 100% { box-shadow: 0 0 0 1px rgb(34 211 238 / 0.32), 0 0 10px 0 rgb(34 211 238 / 0.14); }
-  50%      { box-shadow: 0 0 0 1px rgb(34 211 238 / 0.58), 0 0 18px 1px rgb(34 211 238 / 0.26); }
+  0%, 100% { box-shadow: 0 0 0 1px rgb(var(--accent-ai) / 0.32), 0 0 10px 0 rgb(var(--accent-ai) / 0.14); }
+  50%      { box-shadow: 0 0 0 1px rgb(var(--accent-ai) / 0.58), 0 0 18px 1px rgb(var(--accent-ai) / 0.26); }
 }
 .node-working { animation: node-working 2.4s ease-in-out infinite; }
 
@@ -434,7 +439,7 @@
    flowing through the DAG" read). A 1px dashed channel whose pattern scrolls. */
 @keyframes dag-flow { from { background-position: 0 0; } to { background-position: 0 14px; } }
 .dag-flow {
-  background-image: linear-gradient(to bottom, rgb(34 211 238 / 0.55) 45%, transparent 45%);
+  background-image: linear-gradient(to bottom, rgb(var(--accent-ai) / 0.55) 45%, transparent 45%);
   background-size: 100% 14px;
   background-repeat: repeat-y;
   animation: dag-flow 0.85s linear infinite;
@@ -455,8 +460,8 @@
   pointer-events: none;
   border-radius: 14px;
   background-image:
-    linear-gradient(rgb(34 211 238 / 0.6) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(34 211 238 / 0.6) 1px, transparent 1px);
+    linear-gradient(rgb(var(--accent-ai) / 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--accent-ai) / 0.6) 1px, transparent 1px);
   background-size: 12px 12px;
   mask-image: radial-gradient(circle, #000 0%, #000 38%, transparent 70%);
   -webkit-mask-image: radial-gradient(circle, #000 0%, #000 38%, transparent 70%);
@@ -495,8 +500,8 @@
   z-index: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgb(34 211 238 / 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(34 211 238 / 0.045) 1px, transparent 1px);
+    linear-gradient(rgb(var(--accent-ai) / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--accent-ai) / 0.045) 1px, transparent 1px);
   background-size: 24px 24px;
   mask-image: radial-gradient(130% 70% at 50% 12%, #000, transparent 78%);
   -webkit-mask-image: radial-gradient(130% 70% at 50% 12%, #000, transparent 78%);
@@ -515,7 +520,7 @@
   height: 140px;
   z-index: 0;
   pointer-events: none;
-  background: radial-gradient(120% 90% at 50% 0%, rgb(34 211 238 / 0.08), transparent 62%);
+  background: radial-gradient(120% 90% at 50% 0%, rgb(var(--accent-ai) / 0.08), transparent 62%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -530,7 +535,7 @@
   /* A steady channel instead of a marching dash. */
   .dag-flow {
     animation: none;
-    background-image: linear-gradient(to bottom, rgb(34 211 238 / 0.32), rgb(34 211 238 / 0.32));
+    background-image: linear-gradient(to bottom, rgb(var(--accent-ai) / 0.32), rgb(var(--accent-ai) / 0.32));
   }
   /* The one-shot ripple is pure flourish — drop it entirely. */
   .issue-land { display: none; }

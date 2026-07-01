@@ -28,7 +28,7 @@ export function ConceptionDossier({ conception }: { conception: Conception }) {
             {conception.abstainReason || 'No idea cleared the bar — this canvas needs your steering.'}
           </p>
         ) : winner ? (
-          <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-2.5">
+          <div className="rounded-lg border border-accent-ai/30 bg-accent-ai/5 p-2.5">
             <div className="font-medium text-white">{winner.idea}</div>
             <div className="mt-1 text-xs leading-relaxed text-white/55">{winner.why}</div>
           </div>

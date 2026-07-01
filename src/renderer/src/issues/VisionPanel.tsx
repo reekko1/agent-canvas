@@ -110,7 +110,7 @@ export function VisionPanel({ board }: { board: IssueBoardApi }) {
             <div className="flex items-center gap-2">
               <span
                 className="size-1.5 rounded-full"
-                style={{ backgroundColor: 'rgb(34 211 238)' }}
+                style={{ backgroundColor: 'rgb(var(--accent-ai))' }}
                 aria-hidden
               />
               <span className="font-mono text-[11px] text-muted-foreground">v{viewing.n}</span>
@@ -168,7 +168,7 @@ export function VisionPanel({ board }: { board: IssueBoardApi }) {
                   <span
                     aria-hidden
                     className="absolute -left-[15px] size-1.5 rounded-full ring-2 ring-card"
-                    style={{ backgroundColor: active ? 'rgb(34 211 238)' : 'var(--color-border)' }}
+                    style={{ backgroundColor: active ? 'rgb(var(--accent-ai))' : 'var(--color-border)' }}
                   />
                   <span className="font-mono text-[11px] text-muted-foreground">v{v.n}</span>
                   <ClassTag cls={v.class} />

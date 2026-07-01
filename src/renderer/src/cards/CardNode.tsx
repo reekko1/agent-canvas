@@ -167,6 +167,7 @@ export function CardNode({
             cardId={id}
             folder={folder}
             kind={kind}
+            cli={data.cli}
             // A stacked shell shows its live terminal as the preview; only the
             // agent poster covers its terminal.
             hidden={stacked && !isShell}

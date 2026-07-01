@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { Conception, Idea } from '@shared/types'
 
-const CYAN = 'rgb(34 211 238)'
+const CYAN = 'rgb(var(--accent-ai))'
 const STAR = 'rgb(180 210 255)'
 
 /// The pre-ignition deliberation, made visible — the constellation's missing state.

@@ -229,7 +229,7 @@ export class IssueStore {
         sprint.state = action.state
         if (action.state === 'DONE') {
           // The sprint's outcome was verified — the autonomous loop's "find the
-          // next" trigger (the mastermind spawns a strategist for this canvas).
+          // next" trigger (the mastermind runs the off-card idea tournament here).
           this.milestone({
             kind: 'outcome-verified',
             projectId: sprint.projectId,

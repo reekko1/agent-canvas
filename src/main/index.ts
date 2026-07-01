@@ -3,6 +3,7 @@ import { autoUpdater } from 'electron-updater'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
+import type { McpStageOpts } from './spine/cliAdapter'
 import { PtyRegistry } from './ptys'
 import { WorkspaceStore } from './workspace'
 import { IssueStore } from './issueStore'
@@ -14,7 +15,9 @@ import { gitAction, gitFileDiff, gitIdentity } from './git/git'
 import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import { Orchestrator } from './orchestrator/manager'
+import type { AgentMcpServer } from './orchestrator/agentMcp'
 import { AgentBrowserMcp } from './orchestrator/agentBrowserMcp'
+import { AgentCanvasMcp } from './orchestrator/agentCanvasMcp'
 import { AgentIssueMcp } from './orchestrator/agentIssueMcp'
 import { BrowserController } from './orchestrator/browserController'
 import { SonioxVoice, validateSonioxKey } from './voice/soniox'
@@ -22,6 +25,7 @@ import { storeSonioxKey } from './voice/keyStore'
 import type { WebSocket as RemoteWebSocket } from 'ws'
 import type {
   AskDecision,
+  CliKind,
   GitActionRequest,
   GitChange,
   IssueActionRequest,
@@ -49,6 +53,12 @@ const browserController = new BrowserController({
   wake: (cardId) => send('browser-wake', cardId),
 })
 let orchestrator: Orchestrator | null = null
+// The agent canvas-core MCP (update_plan / ask_user). Module-scoped so the
+// question IPC handlers can route ask_user answers to it (vs the spine's hook asks).
+let agentCanvasMcp: AgentCanvasMcp | null = null
+// The renderer owns canvas state and pushes whole snapshots; we keep the latest so
+// main can resolve a canvas's repo dir (the off-card tournament runs there).
+let latestWorkspace: MultiProjectSnapshot | null = null
 let voice: SonioxVoice | null = null
 let stallSweep: ReturnType<typeof setInterval> | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -303,10 +313,16 @@ app.whenReady().then(() => {
     speak: (e) => voice?.speakEvent(e),
     awaitVoiceCaughtUp: () => voice?.awaitCaughtUp() ?? Promise.resolve(),
     getState: () => spine.remote.getLatestState(),
-    // The strategist cascade reads the winning idea + a canvas's active sprints here.
+    // The autonomous cascade reads the winning idea + a canvas's active sprints here.
     issueSnapshot: () => issues.snapshot(),
+    // The off-card idea tournament writes its Conception and runs in the canvas repo.
+    applyIssue: (a) => issues.apply(a),
+    canvasDir: (projectId) => latestWorkspace?.projects.find((p) => p.id === projectId)?.dir,
     writeToCard: (cardId, data) => ptys.write(cardId, data),
     getReply: (cardId) => spine.lastReply(cardId),
+    // A role skill's invocation in the target CLI's native syntax — resolved by
+    // the spine's adapter registry, so the bus never branches on CliKind.
+    skillRef: (cli, name) => spine.skillRef(cli, name),
     decideAsk: (askId, decision) => {
       spine.decide(askId, decision)
       send('ask-decided', askId) // clear the renderer's toast (as the phone path does)
@@ -350,10 +366,6 @@ app.whenReady().then(() => {
     token: spine.token,
     ensureReady: (cardId) => browserController.ensureReady(cardId),
   })
-  agentBrowserMcp.start(spine.browserMcpPort, (port) => {
-    spine.attachBrowserMcp(port)
-    console.log(`[browser-mcp] ready on 127.0.0.1:${port}`)
-  })
   // Agent-facing issue tools: a second loopback MCP server attached per card via
   // --mcp-config, talking directly to the IssueStore (main is the single arbiter),
   // scoped to the caller card's canvas.
@@ -366,10 +378,32 @@ app.whenReady().then(() => {
     requestWorkers: (leadCardId, count, brief) =>
       orch.requestWorkers(leadCardId, count, brief),
   })
-  agentIssueMcp.start(spine.issueMcpPort, (port) => {
-    spine.attachIssueMcp(port)
-    console.log(`[issue-mcp] ready on 127.0.0.1:${port}`)
+  // Agent-facing canvas-core tools: the CLI-agnostic update_plan / ask_user,
+  // attached to every card. update_plan pushes the checklist to the renderer over
+  // the same `card-event` channel the spine uses for hook-derived status.
+  const canvasMcp = new AgentCanvasMcp({
+    token: spine.token,
+    emitCardEvent: (cardId, event) => send('card-event', cardId, event),
+    onQuestion: (ask) => send('question-ask', ask),
   })
+  agentCanvasMcp = canvasMcp
+  // Every agent-facing MCP server rides the same lifecycle: bind its stable
+  // (persisted) port, then attachMcp persists it and stages the per-card config
+  // across every CLI adapter. The id doubles as the card's tool namespace
+  // (`mcp__<id>__*`). Adding a server = construct it above, list it here.
+  const agentMcps: [id: string, server: AgentMcpServer, opts?: McpStageOpts][] = [
+    ['browser', agentBrowserMcp],
+    ['issues', agentIssueMcp],
+    // ask_user blocks on a human decision — declare the long per-tool timeout
+    // here, where the server's behavior is known.
+    ['canvas', canvasMcp, { toolTimeoutSec: 3600 }],
+  ]
+  for (const [id, server, opts] of agentMcps) {
+    server.start(spine.mcpPort(id), (port) => {
+      spine.attachMcp(id, port, opts)
+      console.log(`[${id}-mcp] ready on 127.0.0.1:${port}`)
+    })
+  }
   // Stall detection: an assigned worker can go silent (hung, not just slow). A card's
   // statusSince only moves on a status change, so a long `running` task is indistinguishable
   // from a hang — the true signal is the per-card last hook event (spine.lastEventAt). Sweep
@@ -377,6 +411,9 @@ app.whenReady().then(() => {
   // threshold, latch the issue stalled (fires the `stalled` milestone). Edge-triggered via
   // issue.setStall, so the log only grows on an actual transition.
   const STALL_THRESHOLD_MS = 8 * 60 * 1000
+  // Cards we've flipped to `stalled` from the heartbeat — edge-trigger so we emit only on
+  // the running→silent transition and can re-trigger once a card shows life again.
+  const stalledCards = new Set<string>()
   stallSweep = setInterval(() => {
     const state = spine.remote.getLatestState()
     if (!state) return
@@ -395,6 +432,34 @@ app.whenReady().then(() => {
       const silent = cardStatus.get(issue.owner) === 'running' && now - last > STALL_THRESHOLD_MS
       if (silent === (issue.stalledAt != null)) continue // no edge → nothing to do
       issues.apply({ kind: 'issue.setStall', id: issue.id, stalled: silent })
+    }
+    // Card-level stall — the CLI-agnostic guard against a card glowing `running` forever.
+    // Claude gets `StopFailure` on an API-error turn death; codex has no such event, so a
+    // dead codex turn is only detectable as silence. Any agent card that thinks it's
+    // `running` yet has gone silent past the threshold is flipped to `stalled` (the honest
+    // "hung or just quiet — can't tell" label; a real event revives it). Self-healing: the
+    // card's next hook overrides this, and clearing the mark lets a later silence re-fire.
+    for (const c of state.cards) {
+      if (c.kind !== 'agent') continue
+      if (c.status !== 'running') {
+        // Moved off `running` by a real event (done/blocked/idle) — allow re-trigger later.
+        // `stalled` itself is our own emit; leave it marked so we don't re-emit each tick.
+        if (c.status !== 'stalled') stalledCards.delete(c.id)
+        continue
+      }
+      const last = spine.lastEventAt(c.id)
+      if (last === undefined) continue // no heartbeat yet — can't judge (see above)
+      if (now - last <= STALL_THRESHOLD_MS) {
+        stalledCards.delete(c.id) // fresh activity — clear the mark so a future silence re-fires
+        continue
+      }
+      if (stalledCards.has(c.id)) continue // already flipped — no re-emit
+      stalledCards.add(c.id)
+      send('card-event', c.id, {
+        status: 'stalled',
+        detail: `Silent for ${STALL_THRESHOLD_MS / 60000}m — possibly hung`,
+        noteworthy: true,
+      })
     }
   }, 60 * 1000)
   // ponytail: skill-library aging (mastermind/curator.ts ageSkills) is unwired — the
@@ -491,13 +556,21 @@ ipcMain.handle('open-in-editor', async (_e, folder: string) => {
 
 ipcMain.handle(
   'ensure-card',
-  (_e, cardId: string, folder: string, cols: number, rows: number, kind: 'agent' | 'shell') => {
+  (
+    _e,
+    cardId: string,
+    folder: string,
+    cols: number,
+    rows: number,
+    kind: 'agent' | 'shell',
+    cli?: CliKind,
+  ) => {
     if (ptys.has(cardId)) return
     const initialPrompt = pendingPrompts.get(cardId)
     pendingPrompts.delete(cardId)
     ptys.spawn(
       cardId,
-      spine.launch(cardId, folder, kind === 'shell', initialPrompt),
+      spine.launch(cardId, folder, { bareShell: kind === 'shell', initialPrompt, cli }),
       {
         onData: (d) => send('pty-data', cardId, d),
         onExit: () => send('pty-exit', cardId),
@@ -508,11 +581,23 @@ ipcMain.handle(
   },
 )
 
-ipcMain.handle('read-todos', (_e, sessionId: string) => spine.todos(sessionId))
+ipcMain.handle('available-clis', () => spine.availableClis())
 ipcMain.handle('pane-command', (_e, cardId: string) => spine.paneCommand(cardId))
 ipcMain.handle('pane-cwd', (_e, cardId: string) => spine.paneCwd(cardId))
-ipcMain.handle('load-workspace', () => workspace.load())
-ipcMain.on('save-workspace', (_e, snapshot: MultiProjectSnapshot) => workspace.save(snapshot))
+ipcMain.handle('load-workspace', async () => {
+  const ws = await workspace.load()
+  latestWorkspace = ws // seed the dir lookup before the renderer's first save-back
+  // Seed each agent card's CLI into the spine, so hooks from tmux sessions that
+  // survived the restart resolve the right adapter before their cards remount.
+  for (const c of ws?.cards ?? []) {
+    if (c.kind === 'agent' && c.cli) spine.setCardCli(c.id, c.cli)
+  }
+  return ws
+})
+ipcMain.on('save-workspace', (_e, snapshot: MultiProjectSnapshot) => {
+  latestWorkspace = snapshot
+  workspace.save(snapshot)
+})
 ipcMain.handle('load-issue-store', () => issues.snapshot())
 ipcMain.handle('issue-action', (_e, action: IssueActionRequest) => issues.apply(action))
 ipcMain.handle('load-mastermind-skills', () => skillsSnapshot())
@@ -527,13 +612,20 @@ ipcMain.handle('leave-scrollback', (_e, cardId: string) => spine.leaveScrollback
 ipcMain.on('pty-resize', (_e, cardId: string, cols: number, rows: number) =>
   ptys.resize(cardId, cols, rows),
 )
-ipcMain.on('decide-ask', (_e, askId: string, decision: AskDecision) =>
-  spine.decide(askId, decision),
-)
-ipcMain.on('answer-question', (_e, askId: string, answers: QuestionAnswers) =>
-  spine.answerQuestion(askId, answers),
-)
-ipcMain.on('release-asks', (_e, cardId: string) => spine.releaseFor(cardId))
+// Question/ask decisions route to whichever holder owns the id: a `q-<n>` ask_user
+// call lives in the canvas MCP (answer/decline settle the held tool call); an
+// `ask-<n>` hook ask lives in the spine. The canvas MCP's methods return false when
+// they don't own the id, so we fall through to the spine.
+ipcMain.on('decide-ask', (_e, askId: string, decision: AskDecision) => {
+  if (!agentCanvasMcp?.decline(askId)) spine.decide(askId, decision)
+})
+ipcMain.on('answer-question', (_e, askId: string, answers: QuestionAnswers) => {
+  if (!agentCanvasMcp?.answer(askId, answers)) spine.answerQuestion(askId, answers)
+})
+ipcMain.on('release-asks', (_e, cardId: string) => {
+  spine.releaseFor(cardId)
+  agentCanvasMcp?.releaseFor(cardId)
+})
 
 // MARK: Remote panel — the renderer mirrors its attention state out, and
 // decisions made on the phone flow back through the same spine.decide as the
@@ -552,11 +644,11 @@ spine.remote.onDecide = (askId, allow) => {
   send('ask-decided', askId)
 }
 spine.remote.onAnswer = (askId, answers) => {
-  spine.answerQuestion(askId, answers)
+  if (!agentCanvasMcp?.answer(askId, answers)) spine.answerQuestion(askId, answers)
   send('question-decided', askId)
 }
 spine.remote.onDecline = (askId) => {
-  spine.decide(askId, 'deny')
+  if (!agentCanvasMcp?.decline(askId)) spine.decide(askId, 'deny')
   send('question-decided', askId)
 }
 // Skip the phone push when you're already at the desktop.

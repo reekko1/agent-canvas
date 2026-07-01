@@ -1,22 +1,19 @@
 // The agent-facing browser MCP server: a loopback HTTP MCP endpoint attached to
-// every supervised `claude` card via `--mcp-config`, giving each agent the
-// ability to see and control ITS OWN browser. The transport is HTTP (the CLI is
-// a separate process, so it can't share the orchestrator's in-process MCP);
-// otherwise it's the same shape as the hook sink — a token-scoped loopback server
-// keyed per card by the `X-Canvas-Card` header (set from `$CANVAS_CARD_ID` in the
-// tmux session and substituted into the mcp.json headers by the CLI).
+// every supervised card, giving each agent the ability to see and control ITS
+// OWN browser. The transport is HTTP (the CLI is a separate process, so it can't
+// share the orchestrator's in-process MCP) — the shared AgentMcpServer shell
+// (agentMcp.ts).
 //
 // One verb obtains a browser (request_browser, idempotent via the ownership
 // link), the rest drive it. There is NO discovery tool — an agent only ever sees
 // its own browser, resolved from getState by ownerId. All browser effects flow
 // through the SAME CommandBus the orchestrator uses, so the Tier-A driver in the
 // renderer is reused verbatim. See BROWSER_AGENCY_PLAN.md §§3–6.
-import http from 'node:http'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 import type { CommandBus } from './contract'
 import { UNKNOWN_CARD, type RemoteState } from '../../shared/types'
+import { AgentMcpServer } from './agentMcp'
 import { dataUrlToImageContent, failResult, okResult } from './mcpResults'
 
 export interface AgentBrowserMcpDeps {
@@ -31,90 +28,15 @@ export interface AgentBrowserMcpDeps {
   ensureReady: (cardId: string) => Promise<void>
 }
 
-/** Read and JSON-parse a request body (best-effort; resolves undefined on
- *  empty/malformed — the transport accepts an absent body). */
-function readBody(req: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = []
-    req.on('data', (c: Buffer) => chunks.push(c))
-    req.on('end', () => {
-      if (!chunks.length) return resolve(undefined)
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-      } catch {
-        resolve(undefined)
-      }
-    })
-    req.on('error', () => resolve(undefined))
-  })
-}
+export class AgentBrowserMcp extends AgentMcpServer {
+  protected readonly tag = 'browser-mcp'
 
-export class AgentBrowserMcp {
-  port = 0
-
-  constructor(private readonly deps: AgentBrowserMcpDeps) {}
-
-  /** Bind the previous launch's port when possible — surviving tmux sessions read
-   *  their mcp.json (and its url) once at launch, so the port must stay stable
-   *  across app restarts, exactly like the hook sink. Ephemeral is last resort. */
-  start(preferredPort: number | undefined, onReady: (port: number) => void): void {
-    const server = http.createServer((req, res) => void this.handle(req, res))
-    let retriesLeft = 20
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && preferredPort && retriesLeft > 0) {
-        retriesLeft--
-        setTimeout(() => server.listen(preferredPort!, '127.0.0.1'), 500)
-      } else if (err.code === 'EADDRINUSE' && preferredPort) {
-        preferredPort = undefined
-        server.listen(0, '127.0.0.1')
-      } else {
-        console.error('[browser-mcp]', err)
-      }
-    })
-    server.on('listening', () => {
-      this.port = (server.address() as { port: number }).port
-      onReady(this.port)
-    })
-    server.listen(preferredPort ?? 0, '127.0.0.1')
-  }
-
-  private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const url = req.url ?? ''
-    if (!url.startsWith('/mcp') || req.headers['x-canvas-token'] !== this.deps.token) {
-      res.writeHead(404).end()
-      return
-    }
-    // Stateless: a fresh server + transport per request, keyed off the card
-    // header. GET/DELETE (session SSE) are unused in this stateless mode.
-    if (req.method !== 'POST') {
-      res.writeHead(405, { 'content-type': 'application/json', allow: 'POST' }).end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          error: { code: -32000, message: 'Method not allowed (stateless server).' },
-          id: null,
-        }),
-      )
-      return
-    }
-    const cardId = String(req.headers['x-canvas-card'] ?? '')
-    const body = await readBody(req)
-    const server = this.buildServer(cardId)
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
-    res.on('close', () => {
-      void transport.close()
-      void server.close()
-    })
-    try {
-      await server.connect(transport)
-      await transport.handleRequest(req, res, body)
-    } catch (e) {
-      console.error('[browser-mcp] request failed', e)
-      if (!res.headersSent) res.writeHead(500).end()
-    }
+  constructor(private readonly deps: AgentBrowserMcpDeps) {
+    super(deps.token)
   }
 
   /** Build a per-request MCP server whose tools are bound to the calling card. */
-  private buildServer(cardId: string): McpServer {
+  protected buildServer(cardId: string): McpServer {
     const server = new McpServer({ name: 'browser', version: '0.1.0' })
     const { bus, getState, ensureReady } = this.deps
 

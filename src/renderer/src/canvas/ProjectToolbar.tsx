@@ -8,6 +8,7 @@ import {
 import { createPortal } from 'react-dom'
 import { ChevronDown, Code, Copy, FolderOpen, Pencil, Plus, X } from 'lucide-react'
 import type { Project, RepoIdentity } from '@shared/types'
+import { useDismiss } from '@/hooks/use-dismiss'
 import { attentionElsewhere, type AttentionLevel } from './useProjectAttention'
 
 /// A canvas's attention glyph: amber pulse when a card is stalled on you,
@@ -54,20 +55,7 @@ function FolderMenu({
   onDismiss: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const onDoc = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onDismiss()
-    }
-    const onEsc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onDismiss()
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onEsc)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onEsc)
-    }
-  }, [onDismiss])
+  useDismiss(ref, onDismiss)
 
   const Item = ({
     icon: Icon,

@@ -52,7 +52,7 @@ const MODE_BADGE: Record<OrchestratorMode, { label: string; cls: string; title: 
   },
   partner: {
     label: '◉ partner',
-    cls: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25',
+    cls: 'bg-accent-ai/15 text-accent-ai hover:bg-accent-ai/25',
     title:
       'Partner — you originate work by talking to a planner (it interviews you; you confirm the plan), then the orchestrator drives the cascade — spawns the lead, hires workers — without a click. Click for autonomous.',
   },
@@ -358,7 +358,7 @@ export function OrchestratorChatBar({
             className="mb-2 w-full rounded-xl border border-border/40 bg-background/75 px-3.5 py-2.5 shadow-lg backdrop-blur-xl"
           >
             <div className={`whitespace-pre-wrap font-mono text-xs leading-relaxed ${TONE[whisper.kind]}`}>
-              <span className="text-cyan-400/70">{`${GLYPH[whisper.kind]} `}</span>
+              <span className="text-accent-ai/70">{`${GLYPH[whisper.kind]} `}</span>
               {whisper.text}
             </div>
           </motion.div>
@@ -371,7 +371,7 @@ export function OrchestratorChatBar({
         // compositor and no React re-render can restart or flash it. `is-working`
         // eases the glow in/out; the loop itself never fully fades (it breathes).
         className={`orchestrator-pill flex items-center gap-2 rounded-full border bg-background/70 px-4 py-2 shadow-lg backdrop-blur-xl transition-colors ${
-          thinking ? 'is-working border-cyan-400/40' : 'border-border/40'
+          thinking ? 'is-working border-accent-ai/40' : 'border-border/40'
         }`}
       >
         {/* The leading glyph doubles as the history toggle (the pill's glow and

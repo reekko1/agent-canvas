@@ -151,17 +151,28 @@ export type GitActionRequest =
 /// tmux/pty session at all (neutral chrome, never speaks to the spine).
 export type CardKind = 'agent' | 'shell' | 'browser'
 
+/// Which coding-agent CLIs can back an `agent` card. THE single source of the
+/// list — `CliKind` and every exhaustive map (`Record<CliKind, …>`: the spine's
+/// adapter registry, the renderer's labels) derive from it, and the orchestrator's
+/// spawn tool feeds it to `z.enum`, so adding a CLI here compile-breaks every
+/// site that must handle it. Each kind maps to a `CliAdapter` in the spine
+/// (launch string, hook config, event mapping). Absent = `claude` (the default
+/// and only orchestrator-backing CLI). Only meaningful for `agent` cards.
+export const CLI_KINDS = ['claude', 'codex'] as const
+export type CliKind = (typeof CLI_KINDS)[number]
+
 /// An agent card's role in the Mastermind org (MASTERMIND.md). `worker` is the
 /// default; `planner` writes the plan, `lead` decomposes the plan into issues and
-/// coordinates, `strategist` is the autonomous head — it runs the idea tournament
-/// and hands the winning idea to a planner (it writes only its own Conception).
-/// Drives both the card's issue-MCP tool grant (capability) and its skill (behavior).
-export type AgentRole = 'planner' | 'lead' | 'worker' | 'strategist'
+/// coordinates. (The autonomous head is NOT a card role — the idea tournament runs
+/// off-card on the mastermind and writes its Conception directly; see
+/// orchestrator/tournament.ts.) Drives both the card's issue-MCP tool grant
+/// (capability) and its skill (behavior).
+export type AgentRole = 'planner' | 'lead' | 'worker'
 
 /** The card-id sentinel a card sends when it has none — the `${CANVAS_CARD_ID:-…}`
- *  default the spine bakes into each card's browser MCP headers (claudeAdapter
- *  `stageBrowserMcp`) and the value the agent browser MCP guard treats as "no
- *  card". Shared so the two ends can't drift apart. */
+ *  default the spine bakes into each card's agent-MCP headers (claudeAdapter
+ *  `stageMcp`) and the value the agent browser MCP guard treats as "no card".
+ *  Shared so the two ends can't drift apart. */
 export const UNKNOWN_CARD = 'unknown'
 
 // MARK: Multi-project persistence
@@ -183,9 +194,12 @@ export interface CardRecord {
   session?: string
   /** Display name (default "Agent N"), set by the user or the orchestrator. */
   name?: string
-  /** The agent's Mastermind role (planner/lead/worker/strategist). Absent = a plain
-   *  agent, treated as a worker by the issue MCP. Persisted so the org survives restart. */
+  /** The agent's Mastermind role (planner/lead/worker). Absent = a plain agent,
+   *  treated as a worker by the issue MCP. Persisted so the org survives restart. */
   role?: AgentRole
+  /** Which CLI backs this agent card (claude/codex). Absent = claude. Persisted so
+   *  a reattached card keeps the right adapter's launch/hook/event mapping. */
+  cli?: CliKind
   /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
    *  (the live snapshot is transient and never persisted). */
   url?: string
@@ -283,6 +297,9 @@ export interface RemoteState {
     /** Which canvas (project) this card belongs to. */
     projectId?: string
     projectName?: string
+    /** Which CLI backs this agent card (claude/codex) — so the cascade can spawn a
+     *  lead's workers on the same CLI (absent = claude). */
+    cli?: CliKind
   }[]
   approvals: {
     id: string // askId
@@ -471,7 +488,15 @@ export type OrchestratorCommand =
   | {
       id: number
       cmd: 'spawnAgent'
-      payload: { canvasId?: string; folder?: string; prompt?: string; name?: string; role?: AgentRole }
+      payload: {
+        canvasId?: string
+        folder?: string
+        prompt?: string
+        name?: string
+        role?: AgentRole
+        /** Which CLI backs the spawned agent (claude/codex). Absent = claude. */
+        cli?: CliKind
+      }
     }
   | { id: number; cmd: 'renameAgent'; payload: { cardId: string; name: string } }
   | { id: number; cmd: 'killCard'; payload: { cardId: string } }
@@ -1008,15 +1033,17 @@ export interface CanvasApi {
     cols: number,
     rows: number,
     kind: CardKind,
+    /** Which CLI backs an agent card (default claude). Ignored for shell/browser. */
+    cli?: CliKind,
   ): Promise<void>
+  /** Which coding-agent CLIs are installed on PATH — the spawn picker's options. */
+  availableClis(): Promise<CliKind[]>
   killCard(cardId: string): Promise<void>
   /** Queue an initial prompt for a card so the agent launches already working
    *  on it (delivered as claude's initial prompt when the pty spawns). */
   setInitialPrompt(cardId: string, prompt: string): void
   loadWorkspace(): Promise<MultiProjectSnapshot | null>
   saveWorkspace(snapshot: MultiProjectSnapshot): void
-  /** The CLI's stored plan for a session (null = no store / none yet). */
-  readTodos(sessionId: string): Promise<AgentTodo[] | null>
   /** The foreground process in a shell card's pane (`zsh` idle, `node`/`vim`/…
    *  while running) — polled for the shell card's title. Null when the
    *  session is gone or tmux is unavailable. */

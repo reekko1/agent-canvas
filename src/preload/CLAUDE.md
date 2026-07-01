@@ -12,9 +12,11 @@ wrapped by the local `subscribe` helper that returns an unsubscribe function.
 The API exposed on `window.canvas` groups by concern:
 
 - **Spine / sessions** — card and shell lifecycle (`newCard`, `newShell`,
-  `ensureCard`, `killCard`, `setInitialPrompt`), pty I/O (`write`, `resize`,
+  `ensureCard` (takes an optional `cli` — which CLI backs an agent card),
+  `availableClis` (which CLIs are installed on PATH, for the spawn picker),
+  `killCard`, `setInitialPrompt`), pty I/O (`write`, `resize`,
   `leaveScrollback`, `onPtyData`, `onPtyExit`), card events and plan
-  (`onCardEvent`, `readTodos`, `paneCommand`, `paneCwd`), workspace persistence
+  (`onCardEvent`, `paneCommand`, `paneCwd`), workspace persistence
   (`loadWorkspace`, `saveWorkspace`), and asks/questions (`onAsk`, `onQuestion`,
   `decide`, `answerQuestion`, `releaseAsks`).
 - **Issue store (Mastermind substrate)** — the visible `Vision → Sprint → Plan →

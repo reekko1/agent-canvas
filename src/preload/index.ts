@@ -12,11 +12,11 @@ const api: CanvasApi = {
   newShell: (folder) => ipcRenderer.invoke('new-shell', folder),
   newBrowser: (folder, url) => ipcRenderer.invoke('new-browser', folder, url),
   pickFolder: (message) => ipcRenderer.invoke('pick-folder', message),
-  ensureCard: (cardId, folder, cols, rows, kind) =>
-    ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows, kind),
+  ensureCard: (cardId, folder, cols, rows, kind, cli) =>
+    ipcRenderer.invoke('ensure-card', cardId, folder, cols, rows, kind, cli),
+  availableClis: () => ipcRenderer.invoke('available-clis'),
   killCard: (cardId) => ipcRenderer.invoke('kill-card', cardId),
   setInitialPrompt: (cardId, prompt) => ipcRenderer.send('set-initial-prompt', cardId, prompt),
-  readTodos: (sessionId) => ipcRenderer.invoke('read-todos', sessionId),
   paneCommand: (cardId) => ipcRenderer.invoke('pane-command', cardId),
   paneCwd: (cardId) => ipcRenderer.invoke('pane-cwd', cardId),
   watchDiff: (diffId, folder) => ipcRenderer.invoke('watch-diff', diffId, folder),

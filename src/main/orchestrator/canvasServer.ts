@@ -2,6 +2,7 @@
 // Tools surface to the model as `mcp__canvas__<tool_name>`.
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
+import { CLI_KINDS } from '../../shared/types'
 import type { CommandBus } from './contract'
 import { dataUrlToImageContent, errText, failResult, okResult } from './mcpResults'
 
@@ -48,7 +49,7 @@ export function buildCanvasServer(bus: CommandBus) {
 
   const spawnAgent = tool(
     'spawn_agent',
-    'Spawn (hire) a new Claude agent card on a canvas, optionally as a Mastermind role and with an initial instruction (its brief).',
+    'Spawn (hire) a new coding-agent card on a canvas (claude by default, or codex), optionally as a Mastermind role and with an initial instruction (its brief).',
     {
       canvasId: z.string().optional().describe('Target canvas id; defaults to the active canvas'),
       folder: z.string().optional().describe('Working directory; defaults to the canvas folder'),
@@ -58,6 +59,10 @@ export function buildCanvasServer(bus: CommandBus) {
         .enum(['planner', 'lead', 'worker'])
         .optional()
         .describe('Mastermind role to hire as — planner (writes the plan), lead (decomposes + coordinates), worker (executes). Omit for a plain worker.'),
+      cli: z
+        .enum(CLI_KINDS)
+        .optional()
+        .describe(`Which CLI backs the agent (default claude): ${CLI_KINDS.join(' | ')}. Mastermind roles are Claude-only, so pass another CLI only for a plain agent.`),
     },
     async (args) => {
       try {

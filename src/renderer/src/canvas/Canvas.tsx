@@ -13,6 +13,7 @@ import type { BrowserNavPatch } from '@/cards/meta'
 import type {
   AgentRole,
   CardKind,
+  CliKind,
   CardRecord,
   PermissionAskInfo,
   QuestionAskInfo,
@@ -125,7 +126,7 @@ export function Canvas() {
   // The mastermind's learned skill library (global, not per-canvas) for the Skills sheet.
   const skillsPanel = useSkillsPanel()
 
-  const { hydrateTodos } = useCardMeta(setNodes)
+  const { trackSession } = useCardMeta(setNodes)
   const { asks, decide, releaseCard } = usePendingAsks()
   const {
     questions,
@@ -212,6 +213,7 @@ export function Canvas() {
       name?: string,
       url?: string,
       role?: AgentRole,
+      cli?: CliKind,
     ): CanvasNode => ({
       id: cardId,
       type: 'card',
@@ -220,6 +222,7 @@ export function Canvas() {
         kind,
         name,
         role,
+        cli,
         url,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
@@ -234,7 +237,7 @@ export function Canvas() {
   const restoreItem = useCallback(
     (c: CardRecord): CanvasNode | null => {
       if (!c.folder) return null
-      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url, c.role)
+      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url, c.role, c.cli)
       // Restore a browser's ownership link + reason so request_browser resolves
       // the same browser after a restart (agents reattach to live tmux sessions).
       node.data.ownerCardId = c.ownerCardId
@@ -248,7 +251,7 @@ export function Canvas() {
     nodes,
     setNodes,
     restoreItem,
-    hydrateTodos,
+    trackSession,
     projects: proj.projects,
     activeProjectId: proj.activeProjectId,
     onRestore: proj.restore,
@@ -339,7 +342,7 @@ export function Canvas() {
     [releaseQuestionCard, promoteCard],
   )
 
-  async function addCard(kind: CardKind): Promise<void> {
+  async function addCard(kind: CardKind, cli?: CliKind): Promise<void> {
     // Cards spawn in the active canvas's dir — no canvas, nothing to add.
     const dir = proj.active?.dir
     if (!dir) return
@@ -352,7 +355,7 @@ export function Canvas() {
     // Agents get an "Agent N" name; a browser opens a blank start page (the
     // address bar takes it from there); shells follow their pane folder.
     const name = kind === 'agent' ? nextAgentName() : undefined
-    setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind, name)])
+    setNodes((ns) => [...ns, makeCard(r.cardId, r.folder, kind, name, undefined, undefined, cli)])
     proj.attachCard(r.cardId) // joins the active canvas as its master
   }
 
@@ -533,7 +536,7 @@ export function Canvas() {
 
       <ActionRail
         active={!!active}
-        onAddCard={(kind) => void addCard(kind)}
+        onAddCard={(kind, cli) => void addCard(kind, cli)}
         onRemote={() => setRemoteOpen(true)}
       />
 

@@ -77,6 +77,7 @@ export function useRemotePublish({
           name,
           kind: n.data.kind,
           role: n.data.role,
+          cli: n.data.cli,
           status: n.data.meta.status,
           loud: isLoud(n.data.meta.status),
           since: (n.data.meta.statusSince ?? 0) / 1000,

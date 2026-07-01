@@ -13,6 +13,13 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
   - `CardKind` — discriminant for what a card holds: `agent` (watched CLI),
     `shell` (bare `$SHELL`), or `browser` (an in-app `<webview>` with no
     tmux/pty/spine session — neutral chrome, never speaks to the spine).
+  - `CLI_KINDS`/`CliKind` — THE single source of which coding-agent CLIs can
+    back an `agent` card (`claude`/`codex`); every exhaustive map (the spine's
+    adapter registry, renderer labels) and the orchestrator's spawn tool derive
+    from it, so adding a CLI compile-breaks every site that must handle it.
+    Threaded through `CardRecord.cli`, `RemoteState.canvases[].cli`, the
+    `spawnAgent` command payload, and `CanvasApi.spawnCard`/`availableClis()`.
+    Absent = `claude`.
   - `CardStatus` — the agent/shell lifecycle states (`idle` → `running` →
     `waiting`/`done`/`stalled`/`blocked`/`error`).
   - `CardEvent` + `TodoChange`/`AgentTodo` — one semantic update extracted from a
@@ -48,10 +55,10 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     `Plan` / `Issue` records, the `IssueActionRequest` mutation union +
     `IssueActionResult`, and the `IssueSnapshot` read-projection. Everything is
     per-project (per canvas): each canvas has its own vision, versions, sprints,
-    plans, and issues — one north star per product/repo. The **strategist** layer
-    adds `Idea` + `Conception` (the recorded idea tournament; `conception.*` actions)
-    on the same store, the `idea-ready` / `idea-abstained` milestones, and the
-    `strategist` member of `AgentRole`.
+    plans, and issues — one north star per product/repo. The **idea-tournament**
+    layer adds `Idea` + `Conception` (the recorded tournament; `conception.*` actions)
+    on the same store and the `idea-ready` / `idea-abstained` milestones. The tournament
+    runs off-card on the mastermind (`orchestrator/tournament.ts`), not as a card role.
   - `CanvasApi` — the full interface the preload bridge implements and the
     renderer consumes (the IPC contract in one place). Browser readiness rides
     here too: `browserReady` (renderer→main: a `<webview>` is dom-ready, with

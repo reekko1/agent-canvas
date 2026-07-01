@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { CardKind } from '@shared/types'
+import type { CardKind, CliKind } from '@shared/types'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -45,6 +45,7 @@ export function TerminalView({
   cardId,
   folder,
   kind,
+  cli,
   hidden,
   interactive,
   onEngage,
@@ -54,6 +55,9 @@ export function TerminalView({
   // Only ever 'agent' | 'shell' at runtime (browser cards render BrowserView,
   // never this); typed as the full union so CardNode can pass `kind` un-narrowed.
   kind: CardKind
+  /** Which CLI backs an agent card (default claude) — passed to ensureCard so the
+   *  spine launches the right adapter. Undefined for shells. */
+  cli?: CliKind
   /** True while the poster covers the card (stacked). visibility, not
    *  display: layout holds the card's size and xterm keeps consuming the
    *  stream; only compositing stops. */
@@ -163,7 +167,7 @@ export function TerminalView({
 
     // Spawn (or reattach to) the agent only now that the terminal is
     // subscribed — no byte of output can outrun the listener.
-    void window.canvas.ensureCard(cardId, folder, term.cols, term.rows, kind)
+    void window.canvas.ensureCard(cardId, folder, term.cols, term.rows, kind, cli)
     return () => {
       if (settle) clearTimeout(settle)
       refit.disconnect()

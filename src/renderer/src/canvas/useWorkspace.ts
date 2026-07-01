@@ -10,7 +10,7 @@ export function useWorkspace({
   nodes,
   setNodes,
   restoreItem,
-  hydrateTodos,
+  trackSession,
   projects,
   activeProjectId,
   onRestore,
@@ -19,7 +19,7 @@ export function useWorkspace({
   setNodes: (ns: CanvasNode[]) => void
   /** Build the node for one saved card (null = unusable record — drop it). */
   restoreItem: (card: CardRecord) => CanvasNode | null
-  hydrateTodos: (cardId: string, sessionId: string) => void
+  trackSession: (cardId: string, sessionId: string) => void
   projects: Project[]
   activeProjectId: string | null
   /** Hand the restored projects + active id back to the canvas on load. */
@@ -45,15 +45,15 @@ export function useWorkspace({
         // (else one render sees an empty active project).
         setNodes(cards.map(restoreItem).filter((n): n is CanvasNode => n !== null))
         onRestore(ws.projects, ws.activeProjectId)
-        // Reattached sessions sit silent until their next hook event — pull
-        // their plan from the CLI's task store now, not on first activity.
+        // Reattached sessions sit silent until their next hook event — stamp
+        // their session id into meta now, so the card knows it before first activity.
         for (const c of cards) {
-          if (c.kind === 'agent' && c.session) hydrateTodos(c.id, c.session)
+          if (c.kind === 'agent' && c.session) trackSession(c.id, c.session)
         }
       }
       setHydrated(true)
     })()
-  }, [restoredOnce, restoreItem, setNodes, hydrateTodos, onRestore])
+  }, [restoredOnce, restoreItem, setNodes, trackSession, onRestore])
 
   const persist = useCallback(() => {
     if (!hydrated) return // never let a blank pre-restore canvas clobber the file
@@ -70,6 +70,7 @@ export function useWorkspace({
               session: n.data.meta.sessionId,
               name: n.data.name,
               role: n.data.role,
+              cli: n.data.cli,
               url: n.data.url,
               ownerCardId: n.data.ownerCardId,
               reason: n.data.reason,

@@ -15,7 +15,12 @@ import { makeMainBus, type BrowserDriver, type DispatchCommand, type ResultFor }
 import type { CommandBus } from './contract'
 import { COMET_TRAVEL_MS } from '../../shared/types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { SPINE_DIR } from '../spine/spine'
+import { runTournament } from './tournament'
 import type {
+  CliKind,
+  IssueActionRequest,
+  IssueActionResult,
   IssueMilestone,
   IssueSnapshot,
   OrchestratorCommand,
@@ -41,10 +46,18 @@ export interface OrchestratorDeps {
   /** The issue-store projection — the strategist cascade reads the winning idea
    *  (on idea-ready) and a canvas's active sprints (the idle check) from it. */
   issueSnapshot: () => IssueSnapshot
+  /** Mutate the issue store — the off-card tournament writes its Conception through it. */
+  applyIssue: (a: IssueActionRequest) => IssueActionResult
+  /** A canvas's repo dir — the off-card tournament runs the headless workflow there. */
+  canvasDir: (projectId: string) => string | undefined
   /** Write input to a card's terminal (keystroke injection). */
   writeToCard: (cardId: string, data: string) => void
   /** A card's last full assistant reply, or null if none captured yet. */
   getReply: (cardId: string) => string | null
+  /** A role skill's invocation string in a CLI's native syntax — resolved by the
+   *  spine's adapter registry (the CLI seam); the orchestrator never branches on
+   *  CliKind. */
+  skillRef: (cli: CliKind | undefined, name: string) => string
   /** Decide a held permission ask (main-owned — no renderer round-trip). */
   decideAsk: (askId: string, decision: 'allow' | 'deny') => void
   /** Tier-B CDP browser driver (BrowserController) — the bus drives browsers
@@ -135,9 +148,9 @@ export class Orchestrator {
    *  on the next turn-closing event in `emit`. */
   private interrupted = false
 
-  /** Canvas ids with a strategist spawn in flight — a synchronous latch so a
-   *  getState()-lagged double-trigger (setMode + outcome-verified) can't spawn two. */
-  private readonly strategistSpawning = new Set<string>()
+  /** Canvas ids with an idea tournament in flight — a synchronous latch so a
+   *  double-trigger (setMode + outcome-verified) can't run two contests at once. */
+  private readonly contestInFlight = new Set<string>()
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -160,11 +173,11 @@ export class Orchestrator {
           ? 'partner — talk to a planner; I drive the cascade once you confirm the plan'
           : 'autonomous — I find the work and drive it end to end'
     this.emit({ kind: 'mode', text: note })
-    // Entering autonomous on an idle canvas births a strategist at once — the head
-    // that finds the first sprint. (Each later sprint's DONE is the next trigger.)
+    // Entering autonomous on an idle canvas runs an idea tournament at once — the
+    // head that finds the first sprint. (Each later sprint's DONE is the next trigger.)
     if (mode === 'autonomous') {
       const active = this.deps.getState()?.canvases.find((c) => c.active)
-      if (active) this.spawnStrategist(active.id)
+      if (active) void this.runContest(active.id)
     }
   }
 
@@ -303,10 +316,8 @@ export class Orchestrator {
       return
     }
     if (m.kind === 'idea-ready') {
-      // The strategist's job is done — retire it (frees the next cycle's spawn guard),
-      // then, in autonomous mode, hand the winning idea to a planner. Direct spawn (not
-      // a model fleet event) so the idea passes verbatim, not paraphrased.
-      this.retireStrategist(m.projectId)
+      // The tournament produced a winner — in autonomous mode, hand it to a planner.
+      // Direct spawn (not a model fleet event) so the idea passes verbatim, not paraphrased.
       if (this.mode !== 'autonomous') return // a mode switch mid-tournament — don't drive
       const conception = this.deps.issueSnapshot().conceptions.find((c) => c.id === m.conceptionId)
       const winner = conception?.candidates.find((c) => c.id === conception.winnerIdeaRef)
@@ -327,10 +338,9 @@ export class Orchestrator {
       return
     }
     if (m.kind === 'idea-abstained') {
-      // The strategist's job is done — retire it (frees the next cycle's spawn guard).
-      // Then, in autonomous mode, escalate to the human (never manufacture a sprint),
-      // routed through the orchestrator's voice so they hear the canvas needs steering.
-      this.retireStrategist(m.projectId)
+      // The tournament abstained — in autonomous mode, escalate to the human (never
+      // manufacture a sprint), routed through the orchestrator's voice so they hear the
+      // canvas needs steering.
       if (this.mode !== 'autonomous') return
       const canvasName = this.deps.getState()?.canvases.find((c) => c.id === m.projectId)?.name
       const where = canvasName ? ` on canvas "${canvasName}"` : ''
@@ -350,7 +360,7 @@ export class Orchestrator {
     }
     if (m.kind === 'outcome-verified') {
       // A sprint's outcome was verified — find the next one (the autonomous loop).
-      this.spawnStrategist(m.projectId)
+      void this.runContest(m.projectId)
       return
     }
     if (m.kind !== 'plan-ready') return
@@ -409,49 +419,72 @@ export class Orchestrator {
     }
   }
 
-  /** Birth a strategist on an idle autonomous canvas — the head that runs the idea
-   *  tournament to find the next sprint. Guarded against double-spawn (an existing
-   *  strategist) and against starting a contest while a sprint is in flight. Direct
-   *  spawn: its mastermind-strategist skill runs the tournament on turn 0. */
-  private spawnStrategist(projectId: string): void {
+  /** Run the idea tournament OFF-CARD on an idle autonomous canvas — the head that
+   *  finds the next sprint, IDENTICAL for every canvas regardless of its cards' CLI
+   *  (it is a mastermind deliberation, not a card task, so there is no strategist card
+   *  and no CLI dependence). Guarded against a concurrent run (the `contestInFlight`
+   *  latch) and against contesting while a sprint is in flight. It writes a Conception
+   *  (winner or abstain), firing the idea-ready / idea-abstained milestone the cascade
+   *  below reacts to — exactly as the strategist card used to. */
+  private async runContest(projectId: string): Promise<void> {
     if (this.mode !== 'autonomous') return
-    if (this.strategistSpawning.has(projectId)) return // synchronous latch (getState lags the spawn)
+    if (this.contestInFlight.has(projectId)) return
     const state = this.deps.getState()
     if (!state) return
-    if (state.cards.some((c) => c.role === 'strategist' && c.projectId === projectId)) return
-    const active = this.deps
-      .issueSnapshot()
-      .sprints.some(
-        (s) => s.projectId === projectId && s.state !== 'DONE' && s.state !== 'REALIGNMENT_PENDING',
-      )
-    if (active) return // a sprint is in flight — don't run a parallel contest
     const canvasName = state.canvases.find((c) => c.id === projectId)?.name
-    this.strategistSpawning.add(projectId)
-    void this.bus
-      .spawnAgent({
-        canvasId: projectId,
-        role: 'strategist',
-        name: 'Strategist',
-        prompt:
-          `Find this canvas's next sprint. Perceive the gap between the vision (get_vision + ` +
-          `get_vision_history) and the current reality of the repo, run your idea tournament, and record the ` +
-          `conception. If a clear winner emerges that genuinely serves the vision, set it as the winner (a ` +
-          `planner picks it up); if nothing clearly wins, abstain so the human can steer.`,
+    const where = canvasName ? ` · ${canvasName}` : ''
+    const snap = this.deps.issueSnapshot()
+    const activeSprint = snap.sprints.find(
+      (s) => s.projectId === projectId && s.state !== 'DONE' && s.state !== 'REALIGNMENT_PENDING',
+    )
+    if (activeSprint) return
+    // Surface the blocking preconditions instead of silently doing nothing (a silent
+    // return reads as "broken") — emit a mastermind line telling the human what's missing.
+    const vision = snap.visions.find((v) => v.projectId === projectId)
+    const version = snap.versions.find((v) => v.id === vision?.currentVersion)
+    if (!version) {
+      this.emit({
+        kind: 'auto',
+        text: `autonomous${where} — set a vision on this canvas first; the tournament needs a north star to judge ideas against`,
       })
-      .finally(() => this.strategistSpawning.delete(projectId))
-    this.emit({
-      kind: 'auto',
-      text: `autonomous${canvasName ? ` · ${canvasName}` : ''} — a strategist is finding the next sprint`,
-    })
-  }
+      return
+    }
+    const repoDir = this.deps.canvasDir(projectId)
+    if (!repoDir) {
+      this.emit({ kind: 'auto', text: `autonomous${where} — couldn't resolve this canvas's folder; can't run the tournament` })
+      return
+    }
+    // The vision text the workflow judges against (body + principles + anti-vision).
+    const visionText = [
+      version.body,
+      version.principles?.length ? `Principles:\n- ${version.principles.join('\n- ')}` : '',
+      version.antiVision ? `Anti-vision: ${version.antiVision}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
 
-  /** The strategist's job ends when its conception resolves — retire the card so the
-   *  next cycle's spawn guard is clear and the finished session doesn't linger. */
-  private retireStrategist(projectId: string): void {
-    const strat = this.deps
-      .getState()
-      ?.cards.find((c) => c.role === 'strategist' && c.projectId === projectId)
-    if (strat) void this.bus.killCard(strat.id)
+    this.contestInFlight.add(projectId)
+    this.emit({ kind: 'auto', text: `autonomous${where} — running an idea tournament for the next sprint` })
+    try {
+      const r = await runTournament({
+        projectId,
+        repoDir,
+        vision: visionText,
+        spineDir: SPINE_DIR,
+        apply: this.deps.applyIssue,
+        snapshot: this.deps.issueSnapshot,
+        // No card to watch — narrate each workflow phase as a mastermind line.
+        onProgress: (line) => this.emit({ kind: 'auto', text: `tournament${where} · ${line}` }),
+      })
+      this.emit({ kind: 'auto', text: `tournament${where} — ${r.message}` })
+    } catch (e) {
+      this.emit({
+        kind: 'auto',
+        text: `tournament${where} failed — ${e instanceof Error ? e.message : String(e)}`,
+      })
+    } finally {
+      this.contestInFlight.delete(projectId)
+    }
   }
 
   /** A lead asked the mastermind to hire workers (via the issue MCP). Spawn `count`
@@ -464,15 +497,18 @@ export class Orchestrator {
   ): Promise<{ ok: boolean; workerIds: string[]; message?: string }> {
     if (this.mode === 'manual')
       return { ok: false, workerIds: [], message: 'manual mode — the mastermind is not hiring.' }
-    const canvasId = this.findCard(leadCardId)?.projectId
+    const lead = this.findCard(leadCardId)
+    const canvasId = lead?.projectId
     if (!canvasId) return { ok: false, workerIds: [], message: "could not resolve the lead's canvas" }
     const n = Math.max(1, Math.min(8, Math.floor(count) || 1)) // clamp — no runaway fleets
     const workerBrief =
       `${brief}\n\nYou are a WORKER on this sprint. Stand by — the lead will assign you an issue shortly; ` +
       `when you receive the assignment, work it to a self-audited finish (see your mastermind-worker skill).`
+    // Workers inherit the lead's CLI so a sprint stays one homogeneous fleet (a codex
+    // lead hires codex workers, not claude ones). Absent → claude (spawnAgent's default).
     const results = await Promise.all(
       Array.from({ length: n }, (_, i) =>
-        this.bus.spawnAgent({ canvasId, role: 'worker', name: `Worker ${i + 1}`, prompt: workerBrief }),
+        this.bus.spawnAgent({ canvasId, role: 'worker', name: `Worker ${i + 1}`, prompt: workerBrief, cli: lead?.cli }),
       ),
     )
     const workerIds = results.filter((r) => r.ok && r.cardId).map((r) => r.cardId as string)
@@ -669,6 +705,7 @@ export class Orchestrator {
     dispatch: (command) => this.dispatch(command),
     writeToCard: (cardId, data) => this.deps.writeToCard(cardId, data),
     getReply: (cardId) => this.deps.getReply(cardId),
+    skillRef: (cli, name) => this.deps.skillRef(cli, name),
     decideAsk: (askId, decision) => this.deps.decideAsk(askId, decision),
     signalTarget: (t) => this.signalTarget(t),
     // Lazy arrows like the rest: this.deps isn't assigned when this field inits,

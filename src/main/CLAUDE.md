@@ -30,11 +30,19 @@ Each has its own CLAUDE.md — read it before working in that area.
   registers all `ipcMain.handle`/`.on` handlers. Among the singletons is a `BrowserController`
   (Tier-B CDP driver, passed to the orchestrator as its `browser` dep; its `wake` asks the
   renderer to revive an evicted browser) whose readiness map is fed by the `browser-ready`
-  handler; it also starts the `AgentBrowserMcp` loopback server on the spine's stable
-  `browserMcpPort` (sharing the spine token + state + the controller's `ensureReady`) so cards
-  can drive browsers via `--mcp-config`. Holds two small bits of local state:
-  `nextItem` (card-id counter) and `pendingPrompts` (initial prompts queued for a card before
-  its pty spawns, delivered one-shot by `ensure-card`).
+  handler. Every agent-facing loopback MCP server — `AgentBrowserMcp` (`browser`),
+  `AgentIssueMcp` (`issues`), and `AgentCanvasMcp` (`canvas`: the CLI-agnostic
+  `update_plan`/`ask_user` tools, given a long per-tool timeout since `ask_user` blocks on a
+  human) — rides one uniform lifecycle in an `agentMcps` list: `server.start(spine.mcpPort(id),
+  …)` binds its stable persisted port, then `spine.attachMcp(id, port, opts)` persists it and
+  stages the per-card `--mcp-config` across every CLI adapter; `id` doubles as the card's tool
+  namespace (`mcp__<id>__*`). Adding a fourth server is one more entry in that list. Local
+  module state: `nextItem` (card-id counter), `pendingPrompts` (initial prompts queued for a
+  card before its pty spawns, delivered one-shot by `ensure-card`), `agentCanvasMcp` (kept
+  module-scoped so the ask IPC handlers can route an answer/decline to it), and
+  `latestWorkspace` (the latest renderer-pushed `MultiProjectSnapshot`, kept so main can resolve
+  a canvas's repo dir for the off-card idea tournament and so a restored session's cards can
+  have their CLI re-seeded into the spine on `load-workspace`).
 - **ptys.ts** — `PtyRegistry`, one `node-pty` per card keyed by `cardId`. Spawns from a
   `LaunchSpec` (file/args/cwd/env produced by `spine.launch`), forwards data/exit to the
   renderer, and resizes. Killing a pty here only **detaches the tmux client**; ending the
@@ -51,8 +59,8 @@ Each has its own CLAUDE.md — read it before working in that area.
   interleave and atomic claims need no transaction. `load` replays the log (ids +
   timestamps are persisted per entry for deterministic replay); a `vision.commit`
   runs the propagation pass (a redirection/expansion moves stale sprints to
-  REALIGNMENT_PENDING). It records strategist **conceptions** too (the idea
-  tournament; `conception.*`) and fires the milestones the mastermind wakes on —
+  REALIGNMENT_PENDING). It records the off-card idea tournament's **conceptions**
+  too (`conception.*` — there is no strategist card) and fires the milestones the mastermind wakes on —
   `plan-ready`, the `issue-*` nudges, `outcome-verified` (a sprint reached DONE),
   and `idea-ready` / `idea-abstained`. Channels: `load-issue-store`, `issue-action`
   (both invoke), `issue-update` (push). Clients: the renderer board (IPC) and the
@@ -69,7 +77,10 @@ Each has its own CLAUDE.md — read it before working in that area.
   (`win.webContents.send`). Channel/payload contracts live in `src/shared/types.ts`.
 - **pty vs tmux:** a card's pty (ptys.ts) is just the local terminal client; the actual agent
   session lives in a tmux session managed by the spine. The pty spawns lazily on `ensure-card`
-  when the renderer mounts the card, fed by `spine.launch`.
+  when the renderer mounts the card, fed by `spine.launch(cardId, folder, { bareShell,
+  initialPrompt, cli })` — `cli` (a `CliKind`, e.g. `claude`/`codex`) is optional and only
+  meaningful for `agent` cards; `available-clis` (`spine.availableClis()`) tells the renderer
+  which CLIs are actually installed so it can offer them at card-creation time.
 - **Card kinds:** `agent` (tmux/pty/spine session) and `shell`, plus `browser` — an in-DOM
   `<webview>` guest with no pty/tmux/spine session at all. `new-browser` only mints the id
   (`browser-` prefix, like `card-`/`shell-`); the renderer owns the url, and browsers are now
@@ -77,8 +88,26 @@ Each has its own CLAUDE.md — read it before working in that area.
   cards (the `AgentBrowserMcp` server) drive them over the command seam, gated on a readiness
   map fed by the `browser-ready` IPC. Browser-card guests run in their own process/session,
   carry no preload, and so can't reach the `CanvasApi` bridge.
+- **Ask/question ownership:** a `q-<n>` id (`ask_user`, the canvas MCP) is held by
+  `agentCanvasMcp`; an `ask-<n>` id (a permission hook ask) is held by the spine. `decide-ask` /
+  `answer-question` / `release-asks` (and the remote panel's `onDecide`/`onAnswer`/`onDecline`)
+  all try `agentCanvasMcp` first — its `decline`/`answer`/`releaseFor` return `false` when they
+  don't own the id — and fall through to `spine.decide`/`answerQuestion`/`releaseFor` so the
+  same IPC/remote paths serve both holders without branching on ask kind.
+- **Stall detection:** the 60s sweep in `index.ts` does two independent things — the pre-existing
+  per-`Issue` silence check (`issue.setStall`, edge-triggered off `spine.lastEventAt` vs each
+  issue's own threshold) is unchanged, and a second, card-level pass flips any `agent` card stuck
+  in `status: 'running'` past `STALL_THRESHOLD_MS` (8 min) with no fresh hook event to a
+  `stalled` card-event. This second pass is CLI-agnostic by necessity: Claude cards get a
+  `StopFailure` hook on a dead turn, but codex has none, so silence is the only signal for
+  either. `stalledCards` edge-triggers the emit (fires once per silent stretch, clears on the
+  next real status change or on fresh activity) so the log/UI doesn't get an event every tick.
 - **Persistence:** main-process state lives under `SPINE_DIR` (`~/.agentcanvas-web`); the
-  workspace snapshot is the only file owned by this directory's code.
+  workspace snapshot is the only file owned by this directory's code. `load-workspace` also
+  seeds `latestWorkspace` and re-registers each restored `agent` card's CLI into the spine
+  (`spine.setCardCli`) — so a hook event from a tmux session that survived the restart still
+  resolves the right adapter before its card remounts; `save-workspace` keeps `latestWorkspace`
+  current on every renderer push.
 
 ## Conventions & gotchas
 - `node-pty` is a native module — `postinstall` runs `patch-package && electron-rebuild -f -w

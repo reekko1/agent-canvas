@@ -16,20 +16,16 @@
 //               set_sprint_state, plus the post-audit repair verbs amend_issue
 //               (refine an issue in place) and retire_issue (void a flawed one +
 //               supersede it — never an in-place rewrite of the wrong shape).
-//   - strategist → the autonomous head; reads the vision + its version history + the
-//               sprint list, and writes ONLY its own Conception (the recorded idea
-//               tournament). No sprint/plan/issue tools — it delivers an idea.
+// (The autonomous head is NOT a card/role — the idea tournament runs off-card on the
+// mastermind and writes its Conception directly to the store; see orchestrator/tournament.ts.)
 // Auditing is NOT a tool here — each role spawns its OWN adversarial subagents to
 // audit its output before delivering (MASTERMIND.md). `request_workers` (lead →
 // mastermind) and the mastermind loop are the next milestone.
-import http from 'node:http'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 import {
   UNKNOWN_CARD,
   type AgentRole,
-  type Conception,
   type Issue,
   type IssueActionRequest,
   type IssueActionResult,
@@ -41,6 +37,7 @@ import {
   type Sprint,
   type SprintState,
 } from '../../shared/types'
+import { AgentMcpServer } from './agentMcp'
 import { failResult, okResult } from './mcpResults'
 
 export interface AgentIssueMcpDeps {
@@ -67,87 +64,16 @@ const SPRINT_STATES = [
 ] as const satisfies readonly SprintState[]
 const KINDS = ['task', 'audit-gate', 'decision'] as const satisfies readonly IssueKind[]
 
-function readBody(req: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = []
-    req.on('data', (c: Buffer) => chunks.push(c))
-    req.on('end', () => {
-      if (!chunks.length) return resolve(undefined)
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-      } catch {
-        resolve(undefined)
-      }
-    })
-    req.on('error', () => resolve(undefined))
-  })
-}
+export class AgentIssueMcp extends AgentMcpServer {
+  protected readonly tag = 'issue-mcp'
 
-export class AgentIssueMcp {
-  port = 0
-
-  constructor(private readonly deps: AgentIssueMcpDeps) {}
-
-  /** Bind the previous launch's port when possible — surviving tmux sessions read
-   *  their mcp.json url once at launch, so the port must stay stable across app
-   *  restarts (exactly like the hook sink and browser MCP). */
-  start(preferredPort: number | undefined, onReady: (port: number) => void): void {
-    const server = http.createServer((req, res) => void this.handle(req, res))
-    let retriesLeft = 20
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && preferredPort && retriesLeft > 0) {
-        retriesLeft--
-        setTimeout(() => server.listen(preferredPort!, '127.0.0.1'), 500)
-      } else if (err.code === 'EADDRINUSE' && preferredPort) {
-        preferredPort = undefined
-        server.listen(0, '127.0.0.1')
-      } else {
-        console.error('[issue-mcp]', err)
-      }
-    })
-    server.on('listening', () => {
-      this.port = (server.address() as { port: number }).port
-      onReady(this.port)
-    })
-    server.listen(preferredPort ?? 0, '127.0.0.1')
-  }
-
-  private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const url = req.url ?? ''
-    if (!url.startsWith('/mcp') || req.headers['x-canvas-token'] !== this.deps.token) {
-      res.writeHead(404).end()
-      return
-    }
-    if (req.method !== 'POST') {
-      res.writeHead(405, { 'content-type': 'application/json', allow: 'POST' }).end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          error: { code: -32000, message: 'Method not allowed (stateless server).' },
-          id: null,
-        }),
-      )
-      return
-    }
-    const cardId = String(req.headers['x-canvas-card'] ?? '')
-    const body = await readBody(req)
-    const server = this.buildServer(cardId)
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
-    res.on('close', () => {
-      void transport.close()
-      void server.close()
-    })
-    try {
-      await server.connect(transport)
-      await transport.handleRequest(req, res, body)
-    } catch (e) {
-      console.error('[issue-mcp] request failed', e)
-      if (!res.headersSent) res.writeHead(500).end()
-    }
+  constructor(private readonly deps: AgentIssueMcpDeps) {
+    super(deps.token)
   }
 
   /** Build a per-request MCP server bound to the calling card, scoped to its
    *  canvas, with only the tools — and the visibility — its **role** grants. */
-  private buildServer(cardId: string): McpServer {
+  protected buildServer(cardId: string): McpServer {
     const server = new McpServer({ name: 'issues', version: '0.1.0' })
     const { apply, snapshot, getState, requestWorkers } = this.deps
     const noCard = !cardId || cardId === UNKNOWN_CARD
@@ -219,14 +145,6 @@ export class AgentIssueMcp {
       return { plan }
     }
 
-    const locateConception = (id: string): { conception: Conception } | { error: string } => {
-      const p = pid()
-      if ('error' in p) return p
-      const conception = snapshot().conceptions.find((c) => c.id === id && c.projectId === p.id)
-      if (!conception) return { error: `No conception ${id} on this canvas.` }
-      return { conception }
-    }
-
     // ── Read tools (every role; visibility differs by role) ───────────────────
     server.registerTool(
       'get_vision',
@@ -252,9 +170,8 @@ export class AgentIssueMcp {
       },
     )
 
-    // Issue-altitude reads + the note write — every role EXCEPT the strategist, which
-    // works at idea altitude and writes ONLY its Conception (comment_issue is a board write).
-    if (role !== 'strategist') {
+    // Issue-altitude reads + the note write (comment_issue is a board write). A worker
+    // sees only its own assigned issues; planner/lead see the whole canvas.
     server.registerTool(
       'list_issues',
       {
@@ -311,9 +228,8 @@ export class AgentIssueMcp {
         return r.ok ? okResult({ id, commented: true }) : failResult(r.message ?? 'failed')
       },
     )
-    }
 
-    // list_sprints is canvas structure — planner/lead/strategist, not workers.
+    // list_sprints is canvas structure — planner/lead, not workers.
     if (!isWorker) {
       server.registerTool(
         'list_sprints',
@@ -342,8 +258,7 @@ export class AgentIssueMcp {
       )
     }
 
-    // get_plan is plan-altitude — planner/lead only (NOT the strategist, which
-    // works at idea altitude and never reads plan bodies).
+    // get_plan is plan-altitude — planner/lead only (the planner→lead handoff).
     if (role === 'planner' || role === 'lead') {
       server.registerTool(
         'get_plan',
@@ -622,103 +537,6 @@ export class AgentIssueMcp {
           if (noCard) return failResult('No calling card id.')
           const r = await requestWorkers(cardId, count, brief)
           return r.ok ? okResult({ workers: r.workerIds }) : failResult(r.message ?? 'hire failed')
-        },
-      )
-    }
-
-    // ── Strategist tools (the autonomous head — reads the chain + the trajectory of
-    // intent, and writes ONLY its own Conception. It conducts the tournament; it does
-    // not author or judge ideas, and it creates no sprint/plan — the planner does). ──
-    if (role === 'strategist') {
-      server.registerTool(
-        'get_vision_history',
-        {
-          description:
-            "Read this canvas's vision VERSION HISTORY — the trajectory of intent (every committed version's number, edit class, and rationale, oldest first). Plan from where the vision is HEADING, not just where it is now. Pair it with get_vision (the current body).",
-          inputSchema: {},
-        },
-        async () => {
-          const p = pid()
-          if ('error' in p) return failResult(p.error)
-          const versions = snapshot()
-            .versions.filter((v) => v.projectId === p.id)
-            .sort((a, b) => a.n - b.n)
-            .map((v) => ({ n: v.n, class: v.class, rationale: v.rationale, committedAt: v.committedAt }))
-          return okResult(versions)
-        },
-      )
-
-      server.registerTool(
-        'record_conception',
-        {
-          description:
-            "Record the idea tournament you ran (the bracket): the full candidate field, each with its final Bradley-Terry rating and the round it was culled in (omit eliminatedRound for a survivor). This is your visible deliberation — it does NOT pick the winner (use set_conception_winner) and creates no sprint. Returns the conception id.",
-          inputSchema: {
-            gapRead: z
-              .string()
-              .optional()
-              .describe('Your perception baseline — the vision-vs-reality gap you read'),
-            candidates: z
-              .array(
-                z.object({
-                  idea: z.string().describe('The move, one line (intent, not implementation)'),
-                  why: z.string().describe('The gap it closes + why it is high-leverage'),
-                  outcome: z.string().describe('What is observably different once done'),
-                  visionLink: z.string().describe('The principle / anti-vision / capability it serves'),
-                  lens: z.string().describe('The generator lens (unique per candidate)'),
-                  rating: z.number().optional().describe('Final Bradley-Terry rating'),
-                  eliminatedRound: z
-                    .number()
-                    .optional()
-                    .describe('Round it was culled in (omit for a survivor / the winner)'),
-                }),
-              )
-              .describe('The full candidate field from the tournament'),
-          },
-        },
-        async ({ gapRead, candidates }) => {
-          const p = pid()
-          if ('error' in p) return failResult(p.error)
-          const r = apply({ kind: 'conception.create', projectId: p.id, gapRead, candidates })
-          return r.ok ? okResult({ conceptionId: r.id }) : failResult(r.message ?? 'failed')
-        },
-      )
-
-      server.registerTool(
-        'set_conception_winner',
-        {
-          description:
-            "Declare the winning idea of a conception you recorded — by its lens. Flips the deliberation to DECIDED and hands the winning idea to a planner (the mastermind spawns it). Call this ONLY after the tournament converged on a clear winner that clears the absolute bar (does it genuinely serve the vision?).",
-          inputSchema: {
-            id: z.string().describe('The conception id (from record_conception)'),
-            winnerLens: z.string().describe('The lens of the winning candidate'),
-          },
-        },
-        async ({ id, winnerLens }) => {
-          const loc = locateConception(id)
-          if ('error' in loc) return failResult(loc.error)
-          const winner = loc.conception.candidates.find((c) => c.lens === winnerLens)
-          if (!winner) return failResult(`No candidate with lens "${winnerLens}" in this conception.`)
-          const r = apply({ kind: 'conception.setWinner', id, winnerIdeaRef: winner.id })
-          return r.ok ? okResult({ id, winner: winner.idea }) : failResult(r.message ?? 'failed')
-        },
-      )
-
-      server.registerTool(
-        'abstain_conception',
-        {
-          description:
-            'Abstain — record that no idea clearly won or cleared the bar, so NO sprint is born and the human is asked to steer. Use this on non-convergence (the leader kept changing, nothing separated) rather than manufacturing a mediocre sprint.',
-          inputSchema: {
-            id: z.string().describe('The conception id (from record_conception)'),
-            reason: z.string().optional().describe('Why you abstained (what the human should steer)'),
-          },
-        },
-        async ({ id, reason }) => {
-          const loc = locateConception(id)
-          if ('error' in loc) return failResult(loc.error)
-          const r = apply({ kind: 'conception.abstain', id, reason })
-          return r.ok ? okResult({ id, abstained: true }) : failResult(r.message ?? 'failed')
         },
       )
     }

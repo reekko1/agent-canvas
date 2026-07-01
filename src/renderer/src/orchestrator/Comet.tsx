@@ -7,9 +7,9 @@ import { COMET_TRAVEL_MS, type OrchestratorTarget } from '@shared/types'
 // and a ring blooms on the card as the pulse lands — then it all fades. Color is
 // keyed to the action so the gesture also says what happened.
 export const COMET_COLOR: Record<OrchestratorTarget['kind'], string> = {
-  spawn: 'rgb(34 211 238)', // cyan — the orchestrator identity
-  send: 'rgb(34 211 238)',
-  rename: 'rgb(34 211 238)',
+  spawn: 'rgb(var(--accent-ai))', // the orchestrator identity
+  send: 'rgb(var(--accent-ai))',
+  rename: 'rgb(var(--accent-ai))',
   approve: 'rgb(251 191 36)', // amber — clearing a block
   kill: 'rgb(248 113 113)', // red — destructive
 }

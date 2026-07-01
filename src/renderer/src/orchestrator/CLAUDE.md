@@ -5,8 +5,8 @@ The renderer face of the natural-language orchestrator: a bottom-center chat bar
 ## Files
 
 - **ChatBar.tsx** — `OrchestratorChatBar`, the bottom pill. Owns the input, the mode badge (manual / partner / autonomous, cycled on click), the transient "whisper" caption + collapsed run history, the working pulse, and all push-to-talk wiring. Renders `OrchestratorConfirmToast` directly above itself.
-- **OrchestratorConfirmToast.tsx** — `OrchestratorConfirmToast` + the `OrchestratorConfirm` type. A single Allow/Deny permission gate (cyan-accented to read as the orchestrator, not an agent). Pure presentation; Canvas supplies the value and the decision callback.
-- **Comet.tsx** — `OrchestratorComets` and the per-comet `Comet`. SVG comet that arcs from the chat bar to a target agent card, with a trailing tail and a ring bloom on landing; color is keyed to the action kind (cyan=identity, amber=approve, red=kill). Each comet self-removes via `onDone`.
+- **OrchestratorConfirmToast.tsx** — `OrchestratorConfirmToast` + the `OrchestratorConfirm` type. A single Allow/Deny permission gate (`accent-ai`-tinted to read as the orchestrator, not an agent). Pure presentation; Canvas supplies the value and the decision callback.
+- **Comet.tsx** — `OrchestratorComets` and the per-comet `Comet`. SVG comet that arcs from the chat bar to a target agent card, with a trailing tail and a ring bloom on landing; color is keyed to the action kind (`accent-ai`=identity, amber=approve, red=kill). Each comet self-removes via `onDone`.
 - **voice.ts** — `MicCapture` (getUserMedia → AudioWorklet → 16 kHz pcm_s16le chunks) and `TtsPlayer` (gapless scheduling of 24 kHz pcm_s16le chunks on a Web Audio timeline, plus the loudness analyser that drives the edge glow). No React.
 
 ## Architecture / data flow

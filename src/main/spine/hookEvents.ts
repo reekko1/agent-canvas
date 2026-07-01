@@ -1,30 +1,48 @@
 import { basename } from 'node:path'
 import type { AgentTodo, CardEvent, Question, QuestionAnswers, TodoChange } from '../../shared/types'
+import type { HookAsk } from './cliAdapter'
 
-/// Pure Claude Code event mapping — no fs, no process, no class state. Siphons
-/// AskUserQuestion off the PermissionRequest channel, parses questions, builds
-/// decision bodies, and maps CLI lifecycle events to rich CardEvents. Split out
-/// of ClaudeAdapter (which keeps the transport/config/launch seam) so this stays
-/// testable in isolation. (Faithful port of the Swift ClaudeCodeAdapter — the
-/// event mapping there is empirically verified against real hook payloads;
-/// trust it.)
+/// Pure mapping for the CANONICAL hook schema — the wire format Claude Code
+/// defined and codex adopted (same PascalCase event names, same snake_case
+/// payload fields: `hook_event_name`, `tool_name`, `last_assistant_message`, …).
+/// No fs, no process, no class state; split out of the adapters (which keep the
+/// transport/config/launch seam) so this stays testable in isolation. Both
+/// ClaudeAdapter and CodexAdapter delegate here through their own methods — if a
+/// CLI's schema ever drifts, the divergence belongs in that adapter, not in this
+/// file. Siphons AskUserQuestion off the PermissionRequest channel, parses
+/// questions, builds decision bodies, and maps lifecycle events to rich
+/// CardEvents. (Faithful port of the Swift ClaudeCodeAdapter — the event mapping
+/// there is empirically verified against real hook payloads; trust it.)
 
-export function isPermissionAsk(name: string): boolean {
-  return name === 'PermissionRequest'
+/** Classify a hook event for routing: a held permission gate, a held structured
+ *  question, or null (telemetry). AskUserQuestion is siphoned off first — the
+ *  CLI models it as a permission (its checkPermissions returns "ask"), so it
+ *  arrives on the PermissionRequest channel, but it's a question to answer, not
+ *  an action to gate. The question's original `tool_input` rides along so
+ *  `questionAnswerBody` can spread it back into the answer. */
+export function classifyAsk(name: string, payload: Record<string, any>): HookAsk | null {
+  if (name !== 'PermissionRequest') return null
+  if (payload?.tool_name !== 'AskUserQuestion') return { kind: 'permission' }
+  const raw = payload?.tool_input
+  const input =
+    typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : undefined
+  return { kind: 'question', questions: parseQuestions(payload), input }
 }
 
-/** Is this held PermissionRequest actually an AskUserQuestion? The CLI models
- *  AskUserQuestion as a permission (its checkPermissions returns "ask"), so it
- *  arrives on the same channel — but it's a question to answer, not an action
- *  to gate, and must be siphoned off before the generic permission path. */
-export function isQuestionAsk(name: string, payload: Record<string, any>): boolean {
-  return name === 'PermissionRequest' && payload?.tool_name === 'AskUserQuestion'
+/** The full final assistant reply carried by a turn-ending event, or null for
+ *  every other event. `Stop` carries the complete text in
+ *  `last_assistant_message` (the mapped CardEvent keeps only a clipped summary) —
+ *  the spine captures it for the orchestrator's get_agent_reply. */
+export function finalReply(name: string, p: Record<string, any>): string | null {
+  return name === 'Stop' && typeof p.last_assistant_message === 'string'
+    ? p.last_assistant_message
+    : null
 }
 
 /** The structured questions from an AskUserQuestion payload, defensively
  *  parsed (the payload is external input). Empty array → fall through to the
  *  terminal rather than show an empty chooser. */
-export function parseQuestions(payload: Record<string, any>): Question[] {
+function parseQuestions(payload: Record<string, any>): Question[] {
   const raw = payload?.tool_input?.questions
   if (!Array.isArray(raw)) return []
   const out: Question[] = []

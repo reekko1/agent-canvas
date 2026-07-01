@@ -5,8 +5,8 @@ import type { CanvasNode } from './nodes'
 type SetNodes = (updater: (ns: CanvasNode[]) => CanvasNode[]) => void
 
 /// The renderer's end of the spine: subscribes to card events, asks, and pty
-/// exits, folds them into each card's meta, and keys plan re-hydration off
-/// session sightings. Owns no state of its own — meta lives on the nodes.
+/// exits, folds them into each card's meta, and stamps the session id on first
+/// sighting. Owns no state of its own — meta lives on the nodes.
 export function useCardMeta(setNodes: SetNodes) {
   const patchMeta = useCallback(
     (cardId: string, patch: (meta: CardMeta) => CardMeta) => {
@@ -22,18 +22,15 @@ export function useCardMeta(setNodes: SetNodes) {
   )
 
   // First sighting of a session on a card (fresh spawn, restore, or events
-  // resuming after reattach): record it and replace the plan with the CLI's
-  // stored list. null = no task store (or none yet) → leave the accumulated
-  // todos alone — never wipe real data with an absence.
+  // resuming after reattach): stamp it into the card's meta — persisted by
+  // useWorkspace so a reattached card knows its tmux session. Deduped so the
+  // per-event sessionId doesn't re-patch on every card event.
   const knownSessions = useRef(new Map<string, string>())
-  const hydrateTodos = useCallback(
+  const trackSession = useCallback(
     (cardId: string, sessionId: string) => {
       if (knownSessions.current.get(cardId) === sessionId) return
       knownSessions.current.set(cardId, sessionId)
       patchMeta(cardId, (m) => ({ ...m, sessionId }))
-      void window.canvas.readTodos(sessionId).then((todos) => {
-        if (todos) patchMeta(cardId, (m) => ({ ...m, todos }))
-      })
     },
     [patchMeta],
   )
@@ -41,7 +38,7 @@ export function useCardMeta(setNodes: SetNodes) {
   useEffect(() => {
     const offEvent = window.canvas.onCardEvent((cardId, ev) => {
       patchMeta(cardId, (m) => applyCardEvent(m, ev))
-      if (ev.sessionId) hydrateTodos(cardId, ev.sessionId)
+      if (ev.sessionId) trackSession(cardId, ev.sessionId)
     })
     const offExit = window.canvas.onPtyExit((cardId) => {
       patchMeta(cardId, (m) => ({ ...m, status: 'idle', detail: 'terminal exited' }))
@@ -50,7 +47,7 @@ export function useCardMeta(setNodes: SetNodes) {
       offEvent()
       offExit()
     }
-  }, [patchMeta, hydrateTodos])
+  }, [patchMeta, trackSession])
 
-  return { patchMeta, hydrateTodos }
+  return { patchMeta, trackSession }
 }

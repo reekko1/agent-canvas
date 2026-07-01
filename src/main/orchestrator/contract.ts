@@ -11,6 +11,7 @@ import type {
   AgentRole,
   CardKind,
   CardStatus,
+  CliKind,
   AttentionLevel,
   BrowserAction,
   BrowserSnapshot,
@@ -125,6 +126,9 @@ export interface SpawnAgentInput {
   name?: string
   /** The Mastermind role to hire this card as (planner/lead/worker). */
   role?: AgentRole
+  /** Which CLI backs the spawned agent (claude/codex). Absent = claude. Note the
+   *  Mastermind role skills are Claude-only, so a codex card spawns plain. */
+  cli?: CliKind
 }
 
 export interface SpawnBrowserInput {

@@ -1,11 +1,11 @@
-// The PINNED strategist idea tournament — bundled into the canvas-skills plugin
-// and invoked by the mastermind-strategist skill via the Workflow tool by absolute
-// scriptPath (never authored by the model, so it is byte-identical every run; only
-// `args` varies). It runs in the strategist CARD's session, whose cwd is the product
-// repo — so the generators/judges perceive the REAL codebase. The canvas vision is
-// passed in `args.vision` (the card assembles it from get_vision + get_vision_history).
+// The PINNED idea tournament — run OFF-CARD by the mastermind's own headless `claude`
+// via the Workflow tool by absolute scriptPath (see orchestrator/tournament.ts). Never
+// authored by the model, so it is byte-identical every run; only `args` varies. It runs
+// with cwd = the product repo — so the generators/judges perceive the REAL codebase. The
+// canvas vision is passed in `args.vision`. Running it off any card is what makes it
+// CLI-agnostic: identical for every canvas regardless of its cards' CLI.
 //
-// Shape of the result (consumed directly by the issue MCP):
+// Shape of the result (consumed by orchestrator/tournament.ts → the issue store):
 //   { gapRead, candidates: [{idea, why, outcome, visionLink, lens, rating, eliminatedRound?}],
 //     winnerLens: string|null, abstainReason: string|null }
 // The card then calls record_conception(gapRead, candidates) and either

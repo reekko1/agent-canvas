@@ -119,6 +119,13 @@ charge halo), `frontier-ring`, `edge-flow` (inward dash), `orb-twinkle`,
 - **Design language.** This view deliberately **breaks** the app's "quiet" rule —
   it IS the live system, so it moves, and it leans on **dynamic range** (a huge
   luminous outcome headline ↔ whispered mono meta; the bright sun ↔ deep space).
-  Discipline remains: motion is compositor-only + reduced-motion safe; cyan =
-  activity; never render a fake number for "distance to vision" (it is assessed,
-  not computed) — it stays a qualitative reading.
+  Discipline remains: motion is compositor-only + reduced-motion safe; `accent-ai`
+  (the shared cyan theme token, `rgb(var(--accent-ai))`) = activity; never render
+  a fake number for "distance to vision" (it is assessed, not computed) — it
+  stays a qualitative reading.
+- **Color rides `--accent-ai`, never a hardcoded cyan.** Every sun/edge/frontier
+  glow across `Constellation.tsx`, `IssueConstellation.tsx`, `ConceptionField.tsx`,
+  `ConceptionDossier.tsx`, and `VisionPanel.tsx` reads the shared token (Tailwind
+  `text-accent-ai`/`bg-accent-ai` or inline `rgb(var(--accent-ai))`), not a
+  literal `rgb(34 211 238)`/`cyan-300`. SVG `stroke` must go through `style`, not
+  the bare attribute — `var()` only resolves in a CSS context.

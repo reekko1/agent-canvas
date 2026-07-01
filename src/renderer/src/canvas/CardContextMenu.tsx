@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
+import { useDismiss } from '@/hooks/use-dismiss'
 
 /// Right-click menu on a card: close it. (Cards belong to the canvas they're
 /// born on and don't move — project = dir.) Dismisses on click-away or Esc.
@@ -18,20 +19,7 @@ export function CardContextMenu({
   onDismiss: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const onDoc = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onDismiss()
-    }
-    const onEsc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onDismiss()
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onEsc)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onEsc)
-    }
-  }, [onDismiss])
+  useDismiss(ref, onDismiss)
 
   return (
     <div

@@ -5,7 +5,7 @@ import { layerize, frontierIndexOf, toneOf, type WaveTone } from './dag'
 import type { IssuePulse } from './useIssuePulses'
 import type { Issue } from '@shared/types'
 
-const CYAN = 'rgb(34 211 238)'
+const CYAN = 'rgb(var(--accent-ai))'
 
 interface Placed {
   issue: Issue
@@ -127,10 +127,11 @@ export function Constellation({
                 cy={layout.cy}
                 r={layout.frontierRadius}
                 fill="none"
-                stroke={CYAN}
                 strokeWidth={1}
                 strokeOpacity={0.5}
-                style={{ filter: `drop-shadow(0 0 6px ${CYAN})` }}
+                // stroke rides `style`, not the SVG attribute — CSS var() only
+                // resolves in CSS contexts, and CYAN is now var(--accent-ai).
+                style={{ stroke: CYAN, filter: `drop-shadow(0 0 6px ${CYAN})` }}
               />
             </svg>
           )}
@@ -146,7 +147,7 @@ export function Constellation({
                   y1={e.y1}
                   x2={e.x2}
                   y2={e.y2}
-                  stroke={CYAN}
+                  style={{ stroke: CYAN }}
                   strokeWidth={e.live ? 1.4 : 0.7}
                   strokeOpacity={e.live ? 0.5 : 0.16}
                 />
@@ -174,8 +175,8 @@ export function Constellation({
               width: 132,
               height: 132,
               background:
-                'radial-gradient(circle, rgba(200,244,255,0.95), rgba(34,211,238,0.5) 40%, rgba(34,211,238,0) 70%)',
-              boxShadow: `0 0 ${60 + charge * 120}px ${18 + charge * 56}px rgba(34,211,238,${0.14 + charge * 0.4})`,
+                'radial-gradient(circle, rgba(200,244,255,0.95), rgb(var(--accent-ai) / 0.5) 40%, rgb(var(--accent-ai) / 0) 70%)',
+              boxShadow: `0 0 ${60 + charge * 120}px ${18 + charge * 56}px rgb(var(--accent-ai) / ${0.14 + charge * 0.4})`,
             }}
           />
           {visionEssence && (
@@ -183,7 +184,7 @@ export function Constellation({
               className="pointer-events-none absolute -translate-x-1/2 text-center"
               style={{ left: layout.cx, top: layout.cy + 86, width: 320 }}
             >
-              <div className="text-[10px] font-medium uppercase tracking-[0.22em] text-cyan-300/70">
+              <div className="text-[10px] font-medium uppercase tracking-[0.22em] text-accent-ai/70">
                 the vision
               </div>
               <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-white/55">

@@ -27,7 +27,10 @@ hooks it composes, and IPC goes through `window.canvas.*`.
   state for inactive canvases (incl. the receding board's `leavingLayout` slots).
   Pure presentation — all geometry/state arrives as props.
 - **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
-  (disabled with no active canvas) + remote-access entry.
+  (disabled with no active canvas) + remote-access entry. New-agent opens a menu
+  of installed CLIs (`window.canvas.availableClis()`, probed once, empty falls
+  back to `['claude']` so the menu is never blank) — picking one threads a
+  `CliKind` into `onAddCard`/`makeCard`.
 - **SheetRail.tsx** — the floating **right** rail, mirror of `ActionRail`: the
   toggles for the diff drawer, the vision sheet, the skills gallery, and the issues
   constellation (diff + vision + skills are right-edge sheets; issues is a
@@ -89,11 +92,13 @@ active-canvas change funnels through one private `setActive`, which snaps the
 layout (`animate` gate) and arms `switching` — the `{ leaving, entering }`
 deck-restack window (auto-cleared after `DECK_MS`, null from/to the empty state).
 `useWorkspace` is restore-once + 300ms-debounced persist; drops ghost cards no
-project references and re-hydrates plans for reattached agent sessions.
+project references and stamps the session id back onto reattached agent cards.
 
 **Card meta** — `useCardMeta` is the renderer end of the spine: folds card
-events / pty exits into each card's `meta` on the nodes, and re-hydrates todos
-from the CLI task store on first sighting of a session. Owns no state itself.
+events / pty exits into each card's `meta` on the nodes, and stamps the session
+id into meta on first sighting (persisted by `useWorkspace`). The checklist rides
+in live via `update_plan`'s `todoChange` events — it is not re-read from disk.
+Owns no state itself.
 
 **Git** — `useCanvasGit` polls each canvas's repo (~3s, deduped by dir) for
 branch + dirty count, keyed by project id, for the toolbar — decoupled from the
@@ -114,6 +119,8 @@ only shells are polled (agents speak via status/task).
 **Remote** — `useRemotePublish` projects the whole renderer state (canvases,
 cards, approvals, questions, feed, needs-you) to the phone panel, grouped by
 project id, behind a JSON content-compare so position-only churn doesn't hit IPC.
+Each published card row carries its `cli` (`CliKind`) alongside `kind`/`role` so
+the phone can label which CLI backs an agent card.
 Each published canvas carries an `active` flag (`p.id === activeProjectId`) so
 the phone knows which project is foregrounded on the desktop; `activeProjectId`
 is in the content-compare deps, so a switch alone republishes. A browser row
@@ -151,7 +158,9 @@ spawned card when its comet lands. Owns `CHAT_BAR_INSET`.
 **Orchestrator** — `useOrchestratorCommands` is the renderer end of the command
 bus: subscribes once to `onOrchestratorCommand` (live ref), runs each mutation
 (focus/spawn-agent/spawn-browser/navigate/read/screenshot/act/set-reason/rename/
-kill) against live project state and replies by id via `orchestratorResult`, and
+kill) against live project state and replies by id via `orchestratorResult`
+(spawn-agent's payload carries an optional `cli`, threaded into `makeCard`
+alongside `role`), and
 owns the pending gate (`orchConfirm` + `resolveConfirm`) surfaced in the chat
 bar. The gate copy arrives **pre-described from main** (`manager.describeGate`,
 which owns the tool vocabulary) — the renderer just displays `{ title, detail }`.
@@ -231,6 +240,11 @@ set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates
   read live state through a `*Ref` (`nodesRef`, `orchCommandRef`, `titleForRef`,
   `rectForRef`, `itemsRef`) rather than re-subscribing per render. Keep bridge
   fns passed to `useHeldAsks` stable.
+- **Dismiss-on-outside-click/Esc** is factored into the shared
+  `useDismiss` hook (`src/renderer/src/hooks/use-dismiss.ts`) — `ActionRail`'s
+  CLI menu, `CardContextMenu`, and `ProjectToolbar`'s `FolderMenu` all bound a
+  ref to it instead of each hand-rolling the listener pair; it takes an
+  `active` gate for menus that stay mounted while closed.
 - **Layout is never persisted** — only `{ cards, projects, activeProjectId }`.
   Status is never persisted either, so a glyph can't lie after relaunch
   (reattach-not-resume). A browser card persists its last `url` (re-loaded on

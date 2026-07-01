@@ -19,6 +19,7 @@ import type {
   BrowserAction,
   BrowserActionResult,
   BrowserSnapshot,
+  CliKind,
   IssueSnapshot,
   OrchestratorActionResult,
   OrchestratorCommand,
@@ -75,6 +76,10 @@ export interface MainBusDeps {
   writeToCard: (cardId: string, data: string) => void
   /** A card's last full assistant reply, or null if none captured yet. */
   getReply: (cardId: string) => string | null
+  /** A role skill's invocation string in the target CLI's native syntax —
+   *  resolved by the spine's adapter registry (the CLI seam), never branched on
+   *  here. */
+  skillRef: (cli: CliKind | undefined, name: string) => string
   /** Decide a held permission ask (main-owned — no renderer round-trip). */
   decideAsk: (askId: string, decision: 'allow' | 'deny') => void
   /** Fire the action's comet at the target card. */
@@ -261,14 +266,14 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
 
     spawnAgent: async (input) => {
       // A ROLE card boots straight into its role: lead the initial prompt with the
-      // role skill, invoked in the current mode. A slash command at the START of the
-      // initial prompt runs on turn 0, so the card knows its purpose before anything
-      // else — no reliance on the model auto-discovering the skill. (Namespace must
-      // match spine/skills.ts PLUGIN_NAME = 'canvas-skills'.)
+      // role skill, invoked in the current mode. A skill invocation at the START of
+      // the initial prompt runs on turn 0, so the card knows its purpose before
+      // anything else — no reliance on the model auto-discovering the skill. The
+      // per-CLI invocation syntax is the adapter's (deps.skillRef), not ours.
       const payload = input.role
         ? {
             ...input,
-            prompt: `/canvas-skills:mastermind-${input.role} ${
+            prompt: `${deps.skillRef(input.cli, `mastermind-${input.role}`)} ${
               deps.getMode() === 'autonomous' ? 'autonomous' : 'partner'
             }\n\n${input.prompt ?? ''}`.trim(),
           }

@@ -31,11 +31,11 @@ export function OrchestratorConfirmToast({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 24, scale: 0.97 }}
           transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="pointer-events-auto mb-2 w-full rounded-2xl border border-cyan-500/50 bg-background/75 p-3.5 shadow-lg shadow-black/15 backdrop-blur-xl"
+          className="pointer-events-auto mb-2 w-full rounded-2xl border border-accent-ai/50 bg-background/75 p-3.5 shadow-lg shadow-black/15 backdrop-blur-xl"
         >
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-cyan-400" />
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400/80">
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent-ai" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-accent-ai/80">
               Orchestrator
             </span>
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">

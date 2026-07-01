@@ -18,7 +18,7 @@ import { useIssuePulses } from './useIssuePulses'
 import type { IssueBoardApi } from './useIssueBoard'
 import type { Conception, Sprint } from '@shared/types'
 
-const CYAN = 'rgb(34 211 238)'
+const CYAN = 'rgb(var(--accent-ai))'
 
 /// The issues takeover — the view breaks out of the side sheet into a full-
 /// viewport gravity well. The master-stack dims and recedes behind a dark space;
@@ -157,7 +157,7 @@ export function IssueConstellation({
                   v{board.versions.find((v) => v.id === selected.visionVersionRef)?.n ?? '?'}
                 </span>
               </div>
-              <h1 className="text-[28px] font-semibold leading-[1.1] tracking-tight text-white drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]">
+              <h1 className="text-[28px] font-semibold leading-[1.1] tracking-tight text-white drop-shadow-[0_0_24px_rgb(var(--accent-ai)/0.25)]">
                 {selected.title || selected.outcome || 'Untitled sprint'}
               </h1>
               {selected.outcome && (
@@ -284,7 +284,7 @@ function ConceptionHero({ conception }: { conception: Conception }) {
         <span
           className={cn(
             'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
-            abstained ? 'bg-status-blocked/15 text-status-blocked' : 'bg-cyan-400/15 text-cyan-300',
+            abstained ? 'bg-status-blocked/15 text-status-blocked' : 'bg-accent-ai/15 text-accent-ai',
           )}
         >
           <span
@@ -294,7 +294,7 @@ function ConceptionHero({ conception }: { conception: Conception }) {
           {abstained ? 'Needs you' : 'Deliberating'}
         </span>
       </div>
-      <h1 className="text-[28px] font-semibold leading-[1.1] tracking-tight text-white drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]">
+      <h1 className="text-[28px] font-semibold leading-[1.1] tracking-tight text-white drop-shadow-[0_0_24px_rgb(var(--accent-ai)/0.25)]">
         {abstained ? 'No clear next sprint' : 'Choosing the next sprint'}
       </h1>
       {conception.gapRead && (

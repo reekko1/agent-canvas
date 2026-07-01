@@ -3,7 +3,7 @@ import { Bot, Globe, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDismiss } from '@/hooks/use-dismiss'
-import type { CardKind, CliKind } from '@shared/types'
+import type { AvailableCli, CardKind, CliKind } from '@shared/types'
 
 /** Display label per CLI for the new-agent menu. */
 const CLI_LABEL: Record<CliKind, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -19,14 +19,16 @@ export function ActionRail(props: {
   onRemote: () => void
 }) {
   const { active, onAddCard, onRemote } = props
-  const [clis, setClis] = useState<CliKind[]>(['claude'])
+  const [clis, setClis] = useState<AvailableCli[]>([{ kind: 'claude', unattended: false }])
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Probe installed CLIs once; empty (nothing on PATH) falls back to claude so
   // the menu is never blank.
   useEffect(() => {
-    void window.canvas.availableClis().then((found) => setClis(found.length ? found : ['claude']))
+    void window.canvas
+      .availableClis()
+      .then((found) => setClis(found.length ? found : [{ kind: 'claude', unattended: false }]))
   }, [])
 
   useDismiss(menuRef, () => setMenuOpen(false), menuOpen)
@@ -57,14 +59,19 @@ export function ActionRail(props: {
           <div className="absolute left-full top-0 z-50 ml-2 min-w-[150px] overflow-hidden rounded-xl border border-border/40 bg-popover/95 p-1 text-sm shadow-xl backdrop-blur-xl">
             {clis.map((cli) => (
               <button
-                key={cli}
+                key={cli.kind}
                 className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-accent"
                 onClick={() => {
-                  onAddCard('agent', cli)
+                  onAddCard('agent', cli.kind)
                   setMenuOpen(false)
                 }}
               >
-                {CLI_LABEL[cli]}
+                {CLI_LABEL[cli.kind]}
+                {cli.unattended && (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Runs unattended — approves its own actions
+                  </span>
+                )}
               </button>
             ))}
           </div>

@@ -28,9 +28,10 @@ hooks it composes, and IPC goes through `window.canvas.*`.
   Pure presentation — all geometry/state arrives as props.
 - **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
   (disabled with no active canvas) + remote-access entry. New-agent opens a menu
-  of installed CLIs (`window.canvas.availableClis()`, probed once, empty falls
-  back to `['claude']` so the menu is never blank) — picking one threads a
-  `CliKind` into `onAddCard`/`makeCard`.
+  of installed CLIs (`window.canvas.availableClis()` → `AvailableCli[]`, probed
+  once, empty falls back to claude so the menu is never blank) — picking one
+  threads a `CliKind` into `onAddCard`/`makeCard`; an `unattended` CLI (codex —
+  auto-approves, no permission gates) says so in a subtitle before you spawn it.
 - **SheetRail.tsx** — the floating **right** rail, mirror of `ActionRail`: the
   toggles for the diff drawer, the vision sheet, the skills gallery, and the issues
   constellation (diff + vision + skills are right-edge sheets; issues is a

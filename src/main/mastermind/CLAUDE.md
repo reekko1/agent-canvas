@@ -91,6 +91,13 @@ what to merge). The deterministic halves are unit-tested model-free in `edges.ts
   `applyMemoryOps` validates the whole batch against final state (per store) within
   budget, then commits atomically. `remove` is just an event → history preserved.
   Budgets: operator 2000, product 4000 chars.
+- **roleSkills.ts** — `CANVAS_SKILLS`, the Mastermind ROLE library (planner/lead/worker):
+  the on-demand skills equipped into every supervised CARD, authored once and CLI-neutral
+  (they name only the CLI-agnostic canvas tools `update_plan`/`ask_user`). Domain content
+  only — the delivery mechanism (SKILL.md format, `materializeSkill`, per-CLI plugin
+  packaging) is the spine's (`../spine/instructions.ts`, each adapter's
+  `stageInstructions`). Distinct from skills.ts below: that is the ORCHESTRATOR's
+  self-authored library; this is what the cards are told.
 - **skills.ts** — the skill library as real `SKILL.md` files in a plugin dir (the SDK
   `plugins` loader needs files). `applySkill` is a single-arbiter **UPSERT** keyed by name
   (existence decides create-vs-update — there's no create-vs-patch verb to mis-pick, the old

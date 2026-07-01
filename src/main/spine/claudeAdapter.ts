@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { UNKNOWN_CARD } from '../../shared/types'
 import { shellQuote, type CliAdapter, type Interpretation, type McpStageOpts } from './cliAdapter'
 import * as events from './hookEvents'
-import { BASELINE_SUPERVISION, CANVAS_SKILLS, PLUGIN_NAME, PLUGIN_VERSION, materializeSkill } from './instructions'
+import { CANVAS_SKILLS } from '../mastermind/roleSkills'
+import { BASELINE_SUPERVISION, PLUGIN_NAME, PLUGIN_VERSION, materializeSkill } from './instructions'
 
 /// Claude Code adapter — the transport/config seam and the REFERENCE CliAdapter.
 /// Installs scoped HTTP hooks (via --settings, leaving user config untouched) and
@@ -13,6 +14,8 @@ import { BASELINE_SUPERVISION, CANVAS_SKILLS, PLUGIN_NAME, PLUGIN_VERSION, mater
 export class ClaudeAdapter implements CliAdapter {
   readonly name = 'claude-code'
   readonly binary = 'claude'
+  // Claude cards are gated: PermissionRequest is held open as the decision channel.
+  readonly capabilities = { permissionHolds: true }
 
   /** `dir` is the staging home (SPINE_DIR); `token` authenticates every staged
    *  channel (hooks + MCP) to the loopback servers. Both are constants of the

@@ -11,7 +11,13 @@ import { Tmux } from './tmux'
 import * as pty from 'node-pty'
 import { RemoteServer, type TermSession } from '../remote/remoteServer'
 import { PushService } from '../remote/push'
-import type { AskDecision, CardEvent, CliKind, PermissionAskInfo } from '../../shared/types'
+import type {
+  AskDecision,
+  AvailableCli,
+  CardEvent,
+  CliKind,
+  PermissionAskInfo,
+} from '../../shared/types'
 
 // DELIBERATELY ISOLATED from the shipping Swift app: own config dir, own tmux
 // socket. The two canvases can run side by side until cutover, when this
@@ -194,17 +200,21 @@ export class Spine {
 
   /** Which registered CLIs are installed on PATH — probed over the login shell
    *  (`command -v`) for the same PATH a launched card resolves against. Feeds the
-   *  spawn picker so it only offers CLIs that will actually run. `claude` first. */
-  async availableClis(): Promise<CliKind[]> {
+   *  spawn picker so it only offers CLIs that will actually run, each carrying
+   *  its adapter-declared `unattended` fact (no permission holds — the picker
+   *  says so before the human spawns one). `claude` first. */
+  async availableClis(): Promise<AvailableCli[]> {
     const shell = process.env.SHELL ?? '/bin/zsh'
     const onPath = (bin: string): Promise<boolean> =>
       new Promise((res) => execFile(shell, ['-lc', `command -v ${bin}`], (err) => res(!err)))
     const found = await Promise.all(
-      (Object.entries(this.adapters) as [CliKind, CliAdapter][]).map(
-        async ([kind, a]) => ((await onPath(a.binary)) ? kind : null),
+      (Object.entries(this.adapters) as [CliKind, CliAdapter][]).map(async ([kind, a]) =>
+        (await onPath(a.binary))
+          ? { kind, unattended: !a.capabilities.permissionHolds }
+          : null,
       ),
     )
-    return found.filter((k): k is CliKind => !!k)
+    return found.filter((c): c is AvailableCli => !!c)
   }
 
   /** The single source of truth for a card's tmux session name. The one mapping

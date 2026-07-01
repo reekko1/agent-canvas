@@ -157,6 +157,15 @@ export type CardKind = 'agent' | 'shell' | 'browser'
 export const CLI_KINDS = ['claude', 'codex'] as const
 export type CliKind = (typeof CLI_KINDS)[number]
 
+/// One installed CLI as offered by the spawn picker (`availableClis`).
+/// `unattended` mirrors the adapter's declared capabilities: true when the CLI
+/// never emits held permission asks (its cards auto-approve every action), so
+/// the picker can say so before the human spawns one.
+export interface AvailableCli {
+  kind: CliKind
+  unattended: boolean
+}
+
 /// An agent card's role in the Mastermind org (MASTERMIND.md). `worker` is the
 /// default; `planner` writes the plan, `lead` decomposes the plan into issues and
 /// coordinates. (The autonomous head is NOT a card role — the idea tournament runs
@@ -1033,7 +1042,7 @@ export interface CanvasApi {
     cli?: CliKind,
   ): Promise<void>
   /** Which coding-agent CLIs are installed on PATH — the spawn picker's options. */
-  availableClis(): Promise<CliKind[]>
+  availableClis(): Promise<AvailableCli[]>
   killCard(cardId: string): Promise<void>
   /** Queue an initial prompt for a card so the agent launches already working
    *  on it (delivered as claude's initial prompt when the pty spawns). */

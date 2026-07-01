@@ -4,7 +4,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { shellQuote, type CliAdapter, type Interpretation, type McpStageOpts } from './cliAdapter'
 import * as events from './hookEvents'
-import { BASELINE_SUPERVISION, CANVAS_SKILLS, materializeSkill } from './instructions'
+import { CANVAS_SKILLS } from '../mastermind/roleSkills'
+import { BASELINE_SUPERVISION, materializeSkill } from './instructions'
 
 /// The codex plugin + local-marketplace identifiers (see stageInstructions). One plugin
 /// bundles the shipped role skills; the marketplace is a thin local wrapper codex
@@ -70,6 +71,9 @@ function stripMcpTables(toml: string): string {
 export class CodexAdapter implements CliAdapter {
   readonly name = 'codex'
   readonly binary = 'codex'
+  // Codex cards run unattended: launchCommand passes `--ask-for-approval never`,
+  // so a held PermissionRequest never fires — supervision is telemetry + the ✕.
+  readonly capabilities = { permissionHolds: false }
   private readonly home: string
   private hooksReady = false
   // Agent-facing MCP servers accumulate here (each binds independently) so the

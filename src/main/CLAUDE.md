@@ -79,7 +79,7 @@ Each has its own CLAUDE.md — read it before working in that area.
   session lives in a tmux session managed by the spine. The pty spawns lazily on `ensure-card`
   when the renderer mounts the card, fed by `spine.launch(cardId, folder, { bareShell,
   initialPrompt, cli })` — `cli` (a `CliKind`, e.g. `claude`/`codex`) is optional and only
-  meaningful for `agent` cards; `available-clis` (`spine.availableClis()`, `AvailableCli[]` — kind + the adapter-declared `unattended` flag) tells the renderer
+  meaningful for `agent` cards; `available-clis` (`spine.availableClis()`) tells the renderer
   which CLIs are actually installed so it can offer them at card-creation time.
 - **Card kinds:** `agent` (tmux/pty/spine session) and `shell`, plus `browser` — an in-DOM
   `<webview>` guest with no pty/tmux/spine session at all. `new-browser` only mints the id

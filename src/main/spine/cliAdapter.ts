@@ -52,13 +52,6 @@ export interface CliAdapter {
   readonly name: string
   /** The CLI's executable name on PATH — probed by detection (`command -v`). */
   readonly binary: string
-  /** The supervision differences a consumer may branch on — declared, not hidden
-   *  behind no-ops. `permissionHolds`: whether this CLI ever emits a held
-   *  permission ask; false means its cards run unattended (auto-approve), which
-   *  the spawn picker surfaces so the human knows before spawning. Mechanical
-   *  gaps (skills, MCP) stay graceful no-ops; only SEMANTIC differences —
-   *  supervised differently in kind — earn a flag here. */
-  readonly capabilities: { permissionHolds: boolean }
 
   /** Write this CLI's hook config, pointed at the loopback sink on `port`.
    *  Held asks ride the same sink. */

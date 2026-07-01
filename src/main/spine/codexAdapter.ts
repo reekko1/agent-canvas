@@ -71,9 +71,6 @@ function stripMcpTables(toml: string): string {
 export class CodexAdapter implements CliAdapter {
   readonly name = 'codex'
   readonly binary = 'codex'
-  // Codex cards run unattended: launchCommand passes `--ask-for-approval never`,
-  // so a held PermissionRequest never fires — supervision is telemetry + the ✕.
-  readonly capabilities = { permissionHolds: false }
   private readonly home: string
   private hooksReady = false
   // Agent-facing MCP servers accumulate here (each binds independently) so the

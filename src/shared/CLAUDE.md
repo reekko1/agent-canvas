@@ -18,9 +18,8 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     adapter registry, renderer labels) and the orchestrator's spawn tool derive
     from it, so adding a CLI compile-breaks every site that must handle it.
     Threaded through `CardRecord.cli`, `RemoteState.canvases[].cli`, the
-    `spawnAgent` command payload, and `CanvasApi.spawnCard`/`availableClis()`
-    (which returns `AvailableCli[]` — kind + the adapter-declared `unattended`
-    flag the spawn picker surfaces). Absent = `claude`.
+    `spawnAgent` command payload, and `CanvasApi.spawnCard`/`availableClis()`.
+    Absent = `claude`.
   - `CardStatus` — the agent/shell lifecycle states (`idle` → `running` →
     `waiting`/`done`/`stalled`/`blocked`/`error`).
   - `CardEvent` + `TodoChange`/`AgentTodo` — one semantic update extracted from a

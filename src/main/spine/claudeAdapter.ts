@@ -14,8 +14,6 @@ import { BASELINE_SUPERVISION, PLUGIN_NAME, PLUGIN_VERSION, materializeSkill } f
 export class ClaudeAdapter implements CliAdapter {
   readonly name = 'claude-code'
   readonly binary = 'claude'
-  // Claude cards are gated: PermissionRequest is held open as the decision channel.
-  readonly capabilities = { permissionHolds: true }
 
   /** `dir` is the staging home (SPINE_DIR); `token` authenticates every staged
    *  channel (hooks + MCP) to the loopback servers. Both are constants of the
@@ -151,6 +149,12 @@ export class ClaudeAdapter implements CliAdapter {
     // with codex, where those built-ins are absent in normal mode. The variadic list
     // stops at the next `--flag` (the `--mcp-config` below), so ordering is load-bearing.
     flags.push('--disallowed-tools TodoWrite TaskCreate TaskUpdate AskUserQuestion')
+    // Unattended by default — the fleet's daily mode, parity with codex's
+    // `--ask-for-approval never`. Supervision is status/reply/plan + the ✕, not a
+    // permission gate. The held-ask machinery stays live regardless: a human can
+    // flip a card's mode in the TUI (shift+tab), and a gated session's
+    // PermissionRequest still holds/toasts exactly as before.
+    flags.push('--permission-mode bypassPermissions')
     // …and with the per-card MCP servers (browser control, the issue board, the
     // canvas-core tools). `--mcp-config` is variadic (`<configs...>`), so every
     // staged file rides one flag — and the trailing `--` (below) still ends options.

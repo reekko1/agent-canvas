@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Bot, Globe, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useAvailableClis } from '@/hooks/use-available-clis'
 import { useDismiss } from '@/hooks/use-dismiss'
 import { CLI_LABEL, type CardKind, type CliKind } from '@shared/types'
 
@@ -16,17 +17,11 @@ export function ActionRail(props: {
   onRemote: () => void
 }) {
   const { active, onAddCard, onRemote } = props
-  const [clis, setClis] = useState<CliKind[]>(['claude'])
   const [menuOpen, setMenuOpen] = useState(false)
+  // Re-probed on every menu toggle, so a CLI installed mid-session (or via a
+  // future install-missing-CLI button) shows up without a relaunch.
+  const clis = useAvailableClis(menuOpen)
   const menuRef = useRef<HTMLDivElement>(null)
-
-  // Probe installed CLIs at mount and re-probe on every menu toggle
-  // (stale-while-revalidate) — a CLI installed mid-session, or via a future
-  // install-missing-CLI button, shows up without a relaunch. Empty (nothing
-  // on PATH) falls back to claude so the menu is never blank.
-  useEffect(() => {
-    void window.canvas.availableClis().then((found) => setClis(found.length ? found : ['claude']))
-  }, [menuOpen])
 
   useDismiss(menuRef, () => setMenuOpen(false), menuOpen)
 

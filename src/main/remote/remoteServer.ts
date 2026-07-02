@@ -9,21 +9,10 @@ import type {
   OrchServerFrame,
   QuestionAnswers,
   RemoteState,
+  TranscriptItem,
 } from '../../shared/types'
 import { composeAskNotification, type FreshAsk } from './notify'
 import type { PushService } from './push'
-
-/// One mobile terminal: a tmux client attached to a card's session, wrapped so
-/// the transport stays agnostic about node-pty.
-export interface TermSession {
-  onData(cb: (data: string) => void): void
-  onExit(cb: () => void): void
-  write(data: string): void
-  resize(cols: number, rows: number): void
-  /** Scroll history by `lines` (+back / −forward) via tmux copy-mode. */
-  scroll(lines: number): void
-  kill(): void
-}
 
 /** The mutating routes — gated behind the session token (see handle()). */
 const MUTATIONS = new Set(['/subscribe', '/decide', '/answer', '/decline'])
@@ -52,8 +41,10 @@ const TYPES: Record<string, string> = {
 /// **Never expose it publicly** (Funnel, port-forward): the buttons approve
 /// arbitrary tool calls on this machine. (Port of the Swift RemoteServer.)
 export class RemoteServer {
-  /** A decision arriving from the panel — same authority as the in-app
-   *  toasts, routed to the same spine.decide. */
+  /** A permission-ask decision arriving from the panel. Dormant now that
+   *  cards run headless and unattended (there's no held permission ask to
+   *  decide) — unwired in index.ts, kept so `/decide` doesn't need touching
+   *  if a future gated mode reintroduces one. */
   onDecide?: (askId: string, allow: boolean) => void
   /** A held AskUserQuestion answered from the panel. */
   onAnswer?: (askId: string, answers: QuestionAnswers) => void
@@ -66,9 +57,10 @@ export class RemoteServer {
   /** True when the desktop window is focused — we skip the phone push then,
    *  since you're already looking at the canvas. */
   isDesktopFocused?: () => boolean
-  /** Open a mobile terminal for a card (set by the spine) — a tmux client
-   *  attached to the card's live session. */
-  openTerminal?: (cardId: string, cols: number, rows: number) => TermSession | null
+  /** An agent card's persisted transcript, for the phone's read-only overlay
+   *  (`GET /transcript?card=`). Ungated like `/state` — no live decision to
+   *  gate, just a read. */
+  getTranscript?: (cardId: string) => TranscriptItem[]
 
   // --- Orchestrator (the phone is a second client into the shared session) ----
   // Set by the host (index.ts) so the `/orch` WebSocket drives the same session
@@ -114,20 +106,15 @@ export class RemoteServer {
 
   start(preferredPort: number | undefined, onReady: (port: number) => void): void {
     const server = http.createServer((req, res) => this.handle(req, res))
-    // Two WebSocket protocols, kept on separate servers: /term (tmux bridge) and
-    // /orch (the orchestrator session). Both now require the session token as a
-    // query param — browsers can't set headers on a WS upgrade, so the header
-    // trick used for POSTs can't apply. This closes the prior /term tailnet-only
-    // gap and gates /orch, which can spawn/kill agents and approve tool calls.
-    const wss = new WebSocketServer({ noServer: true })
+    // The orchestrator WebSocket protocol requires the session token as a query
+    // param — a browser can't set headers on a WS upgrade, so the header trick
+    // used for POSTs can't apply. It can spawn/kill agents and approve tool calls.
     const wssOrch = new WebSocketServer({ noServer: true })
     server.on('upgrade', (req, socket, head) => {
       const [path, qs] = (req.url ?? '').split('?')
       const q = new URLSearchParams(qs ?? '')
       if (q.get('token') !== this.token) return socket.destroy() // opaque drop, like a 404
-      if (path === '/term') {
-        wss.handleUpgrade(req, socket, head, (ws) => this.handleTerm(req, ws))
-      } else if (path === '/orch') {
+      if (path === '/orch') {
         wssOrch.handleUpgrade(req, socket, head, (ws) => this.handleOrch(ws))
       } else {
         socket.destroy()
@@ -154,68 +141,6 @@ export class RemoteServer {
       onReady(this.port)
     })
     server.listen(preferredPort ?? 0, '127.0.0.1')
-  }
-
-  /** Bridge a terminal WebSocket to a tmux client. Server→client frames are raw
-   *  pty output; client→server frames are JSON: `{i}` input, `{r:[cols,rows]}`
-   *  resize. Closing the socket detaches the client (the session survives). */
-  private handleTerm(req: http.IncomingMessage, ws: WebSocket): void {
-    const q = new URLSearchParams((req.url ?? '').split('?')[1] ?? '')
-    // The card id reaches tmux as a `-t` target (and inside an `if-shell`
-    // command string), so validate it here at the trust boundary — a tailnet
-    // device must not smuggle tmux/shell metacharacters through. Legit ids are
-    // `card-<base36>-<n>`; everything else is refused.
-    const cardId = q.get('card') ?? ''
-    const sess = /^[\w-]+$/.test(cardId)
-      ? this.openTerminal?.(cardId, Number(q.get('cols')), Number(q.get('rows')))
-      : null
-    if (!sess) {
-      ws.close()
-      return
-    }
-    sess.onData((d) => ws.readyState === ws.OPEN && ws.send(d))
-    sess.onExit(() => ws.close())
-    ws.on('message', (raw) => {
-      try {
-        const m = JSON.parse(raw.toString())
-        if (typeof m.i === 'string') sess.write(m.i)
-        else if (Array.isArray(m.r)) sess.resize(Number(m.r[0]), Number(m.r[1]))
-        else if (typeof m.s === 'number') sess.scroll(m.s)
-      } catch {
-        // ignore malformed frames
-      }
-    })
-    // A 'ws' 'error' with no listener is rethrown as an uncaught exception —
-    // handle it (and reclaim the pty) so a dropped phone never crashes main.
-    ws.on('error', () => {
-      try {
-        ws.terminate()
-      } finally {
-        sess.kill()
-      }
-    })
-    // Heartbeat: reap a half-open socket (phone out of range / asleep) so its
-    // tmux client + pty don't leak waiting on a close that never comes.
-    let alive = true
-    ws.on('pong', () => {
-      alive = true
-    })
-    const heartbeat = setInterval(() => {
-      if (!alive) {
-        ws.terminate()
-        return
-      }
-      alive = false
-      try {
-        ws.ping()
-      } catch {
-        // socket already tearing down
-      }
-    }, 30_000)
-    ws.on('close', () => {
-      clearInterval(heartbeat)
-      sess.kill()
-    })
   }
 
   /** Bridge an orchestrator WebSocket: the phone as a second client into the one
@@ -275,8 +200,8 @@ export class RemoteServer {
         this.onVoiceCancel?.(ws)
       }
     })
-    // Heartbeat, same as /term — reap a half-open socket so the broadcast set and
-    // any held voice lease don't leak.
+    // Heartbeat: reap a half-open socket so the broadcast set and any held
+    // voice lease don't leak.
     let alive = true
     ws.on('pong', () => {
       alive = true
@@ -402,7 +327,8 @@ export class RemoteServer {
   }
 
   private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const url = (req.url ?? '/').split('?')[0]
+    const full = req.url ?? '/'
+    const url = full.split('?')[0]
     if (req.method === 'GET' && url === '/state') {
       res.writeHead(200, { 'content-type': 'application/json' }).end(this.stateJSON)
       return
@@ -417,8 +343,16 @@ export class RemoteServer {
       res.writeHead(200, { 'content-type': 'text/plain' }).end(this.token)
       return
     }
-    // Gate the mutating routes behind the session token — mismatch → 404 (the
-    // same opaque refusal HookSink uses) so a probe can't even confirm the route.
+    if (req.method === 'GET' && url === '/transcript') {
+      // Ungated like /state — a read, no decision to protect. `[]` for an
+      // unknown/absent card id (a stale link, or a card that closed).
+      const q = new URLSearchParams(full.split('?')[1] ?? '')
+      const items = this.getTranscript?.(q.get('card') ?? '') ?? []
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(items))
+      return
+    }
+    // Gate the mutating routes behind the session token — mismatch → 404 (an
+    // opaque refusal) so a probe can't even confirm the route.
     if (
       req.method === 'POST' &&
       MUTATIONS.has(url) &&

@@ -12,7 +12,7 @@ export interface OrchestratorConfirm {
 /// bottom overlay, so an action the orchestrator wants to take reads like any
 /// other permission ask. Differs from AskToasts only in wiring: a cyan accent
 /// (it's the orchestrator, not an agent) and a reply over the correlation-id
-/// channel rather than spine.decide. Allow/Deny keep the shared go/stop status
+/// channel rather than a held ask. Allow/Deny keep the shared go/stop status
 /// colors a gate carries.
 export function OrchestratorConfirmToast({
   confirm,

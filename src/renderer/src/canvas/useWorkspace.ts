@@ -35,9 +35,9 @@ export function useWorkspace({
       const ws = await window.canvas.loadWorkspace()
       if (ws) {
         // Drop ghost cards — registry entries no project references. Mounting
-        // one would respawn its tmux session for a card on no canvas (and it
-        // can't be closed from the UI). Restoring only members keeps the
-        // registry honest; the next save drops the ghosts from disk too.
+        // one would spawn an agent/pty for a card on no canvas (and it can't
+        // be closed from the UI). Restoring only members keeps the registry
+        // honest; the next save drops the ghosts from disk too.
         const onACanvas = new Set(ws.projects.flatMap((p) => p.cardIds))
         const cards = ws.cards.filter((c) => onACanvas.has(c.id))
         // setNodes BEFORE onRestore: in React 18 these async-callback updates

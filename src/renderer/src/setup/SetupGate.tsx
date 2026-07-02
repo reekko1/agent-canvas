@@ -32,9 +32,9 @@ function CommandChip({ command }: { command: string }) {
   )
 }
 
-/// Setup gate, two tiers. `claude` and `tmux` are a HARD block — the canvas is
-/// unusable without them, no close button, no Esc, the only way through is
-/// reality. Being signed into Claude is a SOFT, skippable step (the orchestrator
+/// Setup gate, two tiers. `claude` is a HARD block — the canvas is unusable
+/// without it, no close button, no Esc, the only way through is reality.
+/// Being signed into Claude is a SOFT, skippable step (the orchestrator
 /// needs it; the canvas doesn't), shown over a working canvas. Steps complete
 /// themselves: the gate re-probes every few seconds and on window focus, so
 /// running an install — or signing into `claude` — in Terminal and switching
@@ -42,9 +42,9 @@ function CommandChip({ command }: { command: string }) {
 /// until the first probe answers, so a ready machine never sees a flash.
 export function SetupGate() {
   const [readiness, setReadiness] = useState<AppReadiness | null>(null)
-  // The auth step is optional, so it's dismissible — unlike the claude/tmux
-  // gate. Session-scoped: skipping hides it now but it returns next launch if
-  // still unsigned-in, which is the only way back (placement is onboarding-only).
+  // The auth step is optional, so it's dismissible — unlike the claude gate.
+  // Session-scoped: skipping hides it now but it returns next launch if still
+  // unsigned-in, which is the only way back (placement is onboarding-only).
   const [authDismissed, setAuthDismissed] = useState(false)
   // The Soniox voice key — also a soft, skippable step. `voiceSaved` closes it
   // immediately on a successful save (the probe confirms within a few seconds);
@@ -55,21 +55,16 @@ export function SetupGate() {
   const [voiceDismissed, setVoiceDismissed] = useState(false)
   const [voiceSaved, setVoiceSaved] = useState(false)
 
-  // claude/tmux are a HARD gate — the canvas can't function without them. Being
-  // signed into Claude is a SOFT prompt — only the orchestrator needs it, so it
-  // shows over a working canvas and can be skipped.
-  const hardBlocked = readiness !== null && (!readiness.claudeFound || !readiness.tmuxFound)
+  // claude is a HARD gate — the canvas can't function without it. Being signed
+  // into Claude is a SOFT prompt — only the orchestrator needs it, so it shows
+  // over a working canvas and can be skipped.
+  const hardBlocked = readiness !== null && !readiness.claudeFound
   const needsAuth =
-    readiness !== null &&
-    readiness.claudeFound &&
-    readiness.tmuxFound &&
-    !readiness.orchestratorAuthed &&
-    !authDismissed
+    readiness !== null && readiness.claudeFound && !readiness.orchestratorAuthed && !authDismissed
   // Voice is the last soft step — prompt for a key once the tools are in place.
   const needsVoiceKey =
     readiness !== null &&
     readiness.claudeFound &&
-    readiness.tmuxFound &&
     !readiness.voiceKeySet &&
     !voiceSaved &&
     !voiceDismissed
@@ -127,38 +122,6 @@ export function SetupGate() {
     },
     {
       step: 2,
-      title: 'Install tmux',
-      description: 'Agents survive app restarts',
-      content: (
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Without <span className="font-medium text-foreground">tmux</span>, agents stop when
-            you quit the app. With it, they keep working through restarts and crashes — the canvas
-            becomes a window onto them, not their life support.
-          </p>
-          {readiness?.brewFound ? (
-            <CommandChip command="brew install tmux" />
-          ) : (
-            <>
-              <p className="text-xs text-muted-foreground">
-                tmux installs through <span className="font-medium text-foreground">Homebrew</span>
-                , which isn&apos;t on this Mac yet. Install it first; this step picks up from
-                there.
-              </p>
-              <Button
-                variant="tertiary"
-                leadingIcon={ExternalLinkIcon}
-                onClick={() => window.canvas.openExternal('https://brew.sh')}
-              >
-                Get Homebrew
-              </Button>
-            </>
-          )}
-        </div>
-      ),
-    },
-    {
-      step: 3,
       title: 'Connect your Claude account',
       description: 'Powers the orchestrator — optional',
       content: (
@@ -180,7 +143,7 @@ export function SetupGate() {
       ),
     },
     {
-      step: 4,
+      step: 3,
       title: 'Enable voice (Soniox)',
       description: 'Talk to the orchestrator — optional',
       content: (
@@ -224,15 +187,9 @@ export function SetupGate() {
     },
   ]
 
-  // claude → tmux → auth → voice. Each soft step (auth, voice) advances once it's
+  // claude → auth → voice. Each soft step (auth, voice) advances once it's
   // satisfied or skipped; when both are, `show` is false so the modal is gone.
-  const currentStep = !readiness?.claudeFound
-    ? 0
-    : !readiness.tmuxFound
-      ? 1
-      : needsAuth
-        ? 2
-        : 3
+  const currentStep = !readiness?.claudeFound ? 0 : needsAuth ? 1 : 2
 
   return (
     <AnimatePresence>

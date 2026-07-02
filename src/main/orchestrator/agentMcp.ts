@@ -2,8 +2,9 @@
 // loopback HTTP endpoint attached to supervised cards via their staged per-card
 // MCP config. A subclass supplies only its tools (`buildServer`) and a log tag —
 // transport, auth, and the port-stability dance live here once. The calling card
-// comes from the `X-Canvas-Card` header ($CANVAS_CARD_ID, tmux session env); the
-// spine token in `X-Canvas-Token` authenticates, exactly as the hooks do.
+// comes from the `X-Canvas-Card` header (a claude card's driver bakes the real
+// cardId in directly; a codex card reads it from `CANVAS_CARD_ID` in its child
+// env via `env_http_headers`); the spine token in `X-Canvas-Token` authenticates.
 import http from 'node:http'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -36,9 +37,10 @@ export abstract class AgentMcpServer {
    *  leak and any card can call at any time. */
   protected abstract buildServer(cardId: string): McpServer
 
-  /** Bind the previous launch's port when possible — surviving tmux sessions
-   *  read their staged MCP config (and its url) once at launch, so the port must
-   *  stay stable across app restarts, exactly like the hook sink. Retries the
+  /** Bind the previous launch's port when possible — every server rebinds fresh
+   *  on each app start (headless sessions don't survive a restart to care about
+   *  port churn), but a stable port avoids needlessly rewriting a codex card's
+   *  config.toml url or any firewall rule a user set up around it. Retries the
    *  persisted port ~10s (a dev hot-restart overlaps the dying process), then
    *  concedes to ephemeral as a last resort. */
   start(preferredPort: number | undefined, onReady: (port: number) => void): void {

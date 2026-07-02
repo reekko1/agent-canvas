@@ -1,15 +1,15 @@
 import type { AttentionLevel, CardStatus, RemoteState } from '@shared/types'
 import { relativeFromSeconds } from '@shared/time'
-import { openTerminal } from './term'
+import { openTranscript } from './transcript'
 import { $, esc } from './util'
 import { post } from './net'
 
 /// The Fleet view: canvas-led triage (the panel's original home, now the
 /// secondary tab behind the orchestrator chat). Polls /state every 2s and groups
 /// each canvas's questions / approvals / cards under it, loudest first. Answer a
-/// question by tapping options; approve/deny a permission gate; tap an agent/shell
-/// to open its live terminal. The needs-you count is surfaced on the bottom-nav
-/// Fleet badge so it's visible while you're on the chat tab.
+/// question by tapping options; approve/deny a permission gate; tap an agent to
+/// view its (read-only) transcript. The needs-you count is surfaced on the
+/// bottom-nav Fleet badge so it's visible while you're on the chat tab.
 
 const EMPTY: RemoteState = {
   canvases: [],
@@ -53,15 +53,15 @@ const wordEl = (status: CardStatus): string =>
 
 // A card tile mirrors the desktop "window bar": status-tinted chrome (a
 // status-colored border), a mono title with the >_ / bot identity mark, the
-// folder, the task, model, and a right-aligned status HUD. Tapping it opens the
-// card's terminal (a live tmux mirror). Shells stay neutral — no agent to
-// speak for them.
+// folder, the task, model, and a right-aligned status HUD. Tapping an AGENT
+// tile opens its (read-only) transcript; shells and browsers stay neutral and
+// aren't tappable — a shell has no agent to speak for it, and a headless
+// agent has no terminal for a shell tile to mirror either.
 function cardTile(k: RemoteState['cards'][number]): string {
   const shell = k.kind === 'shell'
   const browser = k.kind === 'browser'
-  // Neither a shell nor a browser has an agent to speak for it — neutral chrome,
-  // no status HUD. A browser also has no tmux session, so tapping it is a no-op
-  // (no terminal to mirror).
+  // Neither a shell nor a browser has an agent to speak for it — neutral
+  // chrome, no status HUD.
   const neutral = shell || browser
   const color = neutral ? 'var(--border)' : COLORS[k.status] || '#807e90'
   const glow = k.status === 'error' ? ' err' : k.loud ? ' loud' : ''
@@ -84,8 +84,8 @@ function cardTile(k: RemoteState['cards'][number]): string {
         ? esc(k.running)
         : '<span class="idle">idle</span>'
       : esc(k.task ?? '')
-  // Browser tiles aren't tappable (no terminal); agents/shells open their pty.
-  const act = browser ? '' : ' data-act="term"'
+  // Only agent tiles are tappable — the read-only transcript view.
+  const act = k.kind === 'agent' ? ' data-act="transcript"' : ''
   return (
     `<div class="tile card${glow}" style="border-color:${color}"${act} data-i="${esc(k.id)}" data-n="${esc(k.name)}">` +
     `<span class="mark">${shell ? '&gt;_' : browser ? '🌐' : BOT_SVG}</span>` +
@@ -292,8 +292,8 @@ export function initSupervise(): void {
         delete sel[id]
         act('decline', { id })
         break
-      case 'term':
-        openTerminal(id, t.dataset.n ?? 'terminal')
+      case 'transcript':
+        openTranscript(id, t.dataset.n ?? 'agent')
         break
     }
   })

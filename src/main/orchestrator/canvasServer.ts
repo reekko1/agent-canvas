@@ -298,23 +298,6 @@ export function buildCanvasServer(bus: CommandBus) {
     },
   )
 
-  const approveAsk = tool(
-    'approve_ask',
-    "Allow or deny a permission request an agent is blocked on. Use an ask id from list_world's approvals. A blocked agent is normally the user's call — only act when the user has clearly authorized it, by a direct request or a standing instruction. When unsure, leave it for the user.",
-    {
-      askId: z.string().describe("Ask id from list_world's approvals"),
-      decision: z.enum(['allow', 'deny']).describe('allow or deny the request'),
-    },
-    async (args) => {
-      try {
-        const r = await bus.approveAsk(args.askId, args.decision)
-        return r.ok ? okResult(r) : failResult(r.message)
-      } catch (e) {
-        return failResult(`approve_ask failed: ${errText(e)}`)
-      }
-    },
-  )
-
   const notifyUser = tool(
     'notify_user',
     "Send Rakan a push notification on his phone — reach him when he may not be looking at the app (e.g. on a quiet heartbeat, when something across his canvases genuinely needs his attention). One short line, in your own voice. Use sparingly: only when it earns the interruption.",
@@ -390,7 +373,6 @@ export function buildCanvasServer(bus: CommandBus) {
       getAgentReply,
       renameAgent,
       killCard,
-      approveAsk,
       notifyUser,
       readSkill,
       manageSkill,

@@ -21,7 +21,8 @@ export interface AgentBrowserMcpDeps {
   bus: CommandBus
   /** The latest published app state, for resolving a caller's owned browser. */
   getState: () => RemoteState | null
-  /** Shared with the hook sink: cards authenticate with the spine token. */
+  /** Every agent-facing MCP server shares this: cards authenticate with the
+   *  same spine token. */
   token: string
   /** Resolve once a browser card's guest is mounted and dom-ready — replaces the
    *  old fixed settle after spawning, so the first read can't outrun the webview. */

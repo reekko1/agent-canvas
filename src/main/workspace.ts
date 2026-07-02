@@ -76,7 +76,7 @@ function normalize(snap: MultiProjectSnapshot): MultiProjectSnapshot {
       focusedCardId: p.focusedCardId && known.has(p.focusedCardId) ? p.focusedCardId : undefined,
     }))
   // Drop ghost cards — registry entries no surviving project references.
-  // Mounting one would respawn a tmux session for a card on no canvas.
+  // Mounting one would spawn an agent/pty for a card on no canvas.
   const onACanvas = new Set(projects.flatMap((p) => p.cardIds))
   const cards = registry.filter((c) => onACanvas.has(c.id))
   const activeProjectId = projects.some((p) => p.id === snap.activeProjectId)

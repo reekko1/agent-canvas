@@ -5,16 +5,19 @@ import { basenameOf, hostOf } from '@/lib/utils'
 import type { ShellTitle } from '@/canvas/useShellTitles'
 import { STATUS_COLORS, type CardData } from './meta'
 import { TerminalView } from './TerminalView'
+import { TranscriptView } from './TranscriptView'
 import { BrowserView } from './BrowserView'
 import { PosterFace } from './PosterFace'
 import { ShellFace } from './ShellFace'
 import { BrowserFace } from './BrowserFace'
 
-/// One agent on the canvas: status-tinted chrome around a live terminal. As
-/// the master it shows the terminal; in the stack a compact poster overlays
-/// the (still-mounted) terminal, and clicking it promotes the card. The xterm
-/// instance never unmounts across that switch — `stacked` only toggles which
-/// face composites.
+/// One card on the canvas: status-tinted chrome around its live surface — a
+/// transcript + composer for an agent (a headless session, no terminal), a
+/// live terminal for a shell, a webview for a browser. As the master it shows
+/// that surface large; in the stack a compact poster/face overlays it (for
+/// shells and browsers the surface stays mounted underneath; an agent's
+/// transcript simply isn't rendered while stacked — the poster is cheap to
+/// reconstruct from CardMeta, unlike a terminal's scrollback).
 export function CardNode({
   id,
   data,
@@ -50,6 +53,15 @@ export function CardNode({
   const { meta, folder, kind } = data
   const isShell = kind === 'shell'
   const isBrowser = kind === 'browser'
+  const isAgent = !isShell && !isBrowser
+
+  // Ensure the agent's headless session exists the moment this card mounts
+  // (project restore, a fresh spawn, or a project switch back onto it) — NOT
+  // gated on the transcript being visible, so a freshly spawned STACKED agent
+  // still starts working immediately. Idempotent: a no-op if already running.
+  useEffect(() => {
+    if (isAgent) void window.canvas.startAgent(id, folder, data.cli)
+  }, [id, folder, data.cli, isAgent])
   // Neither a shell nor a browser has an agent to speak for it — calm, neutral
   // chrome always (no status colour, no loud pulse).
   const neutral = isShell || isBrowser
@@ -126,9 +138,6 @@ export function CardNode({
           </button>
         )}
         {meta.model && <span className="text-muted-foreground">{meta.model}</span>}
-        {meta.permissionMode === 'bypassPermissions' && (
-          <span className="font-bold text-status-error">BYPASS</span>
-        )}
         {/* Status HUD on the right — a live dot reading out the agent's state. */}
         {!neutral && (
           <span className="flex items-center gap-1.5 font-bold" style={{ color }}>
@@ -141,7 +150,7 @@ export function CardNode({
           variant="ghost"
           size="icon-xs"
           onClick={() => data.onClose(id)}
-          title="Delete card (kills its tmux session)"
+          title="Delete card (ends its session)"
           aria-label="Delete card"
         >
           <X />
@@ -162,20 +171,23 @@ export function CardNode({
             dormant={!!dormant}
             onNavigate={data.onNavigate}
           />
-        ) : (
+        ) : isShell ? (
           <TerminalView
             cardId={id}
             folder={folder}
-            kind={kind}
-            cli={data.cli}
-            // A stacked shell shows its live terminal as the preview; only the
-            // agent poster covers its terminal.
-            hidden={stacked && !isShell}
             // Stacked terminals are inert — the promote button owns the cursor,
             // so a drag can't start an xterm selection instead of expanding.
             interactive={!stacked}
-            onEngage={() => data.onEngage(id)}
           />
+        ) : (
+          // A stacked agent mounts nothing live — the poster below is the
+          // whole card (cheap to reconstruct from CardMeta, unlike a
+          // terminal's scrollback, so there's no reason to keep it mounted).
+          !stacked && (
+            <div className="flex h-full min-h-0 flex-col">
+              <TranscriptView cardId={id} status={meta.status} folder={folder} cli={data.cli ?? 'claude'} />
+            </div>
+          )
         )}
         {stacked && (
           <button

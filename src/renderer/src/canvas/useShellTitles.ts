@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
+import type { ShellTitle } from '@shared/types'
 import type { CanvasNode } from './nodes'
 
-/** A shell card's live title bits: the foreground command and the pane's cwd
- *  (which follows the user's `cd`s) — mirrors the desktop's useShellTitle. */
-export interface ShellTitle {
-  running?: string
-  cwd?: string
-}
+export type { ShellTitle }
 
-/// Polls each shell card's pane for its command + cwd so the phone's rows match
+/// Polls each shell card's direct pty for its foreground command + cwd (a
+/// ps-walk in main — there's no tmux pane to query) so the phone's rows match
 /// the desktop: the title follows the directory the shell is actually in, and
 /// the activity slot shows what's running. Keyed by card id. Agents speak for
 /// themselves (status/task), so only shells are polled.
@@ -24,16 +21,7 @@ export function useShellTitles(nodes: CanvasNode[]): Record<string, ShellTitle> 
     let alive = true
     const tick = async (): Promise<void> => {
       const pairs = await Promise.all(
-        shellIds.map(
-          async (id) =>
-            [
-              id,
-              {
-                running: (await window.canvas.paneCommand(id)) ?? undefined,
-                cwd: (await window.canvas.paneCwd(id)) ?? undefined,
-              },
-            ] as const,
-        ),
+        shellIds.map(async (id) => [id, (await window.canvas.shellTitle(id)) ?? {}] as const),
       )
       if (alive) setTitles(Object.fromEntries(pairs))
     }

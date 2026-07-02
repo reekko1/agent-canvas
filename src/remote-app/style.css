@@ -321,10 +321,11 @@ h2 {
   flex: none;
 }
 
-/* Full-screen terminal overlay (xterm + an accessory key bar). */
-.term-overlay {
+/* Full-screen READ-ONLY transcript overlay — an agent card's conversation.
+   No accessory key bar: a headless session has no terminal to type into. */
+.tx-overlay {
   position: fixed;
-  inset: 0; /* always covers the panel; JS adds padding-bottom = keyboard height */
+  inset: 0; /* always covers the panel */
   z-index: 100;
   background: var(--bg);
   display: flex;
@@ -332,56 +333,90 @@ h2 {
   padding-top: env(safe-area-inset-top);
   overscroll-behavior: none;
 }
-.term-bar {
+.tx-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
-.term-bar .term-back {
+.tx-bar .tx-back {
   border: none;
   padding: 4px 6px;
   color: var(--blocked);
   font-size: 14px;
 }
-.term-bar .term-name {
+.tx-bar .tx-name {
   font-weight: 650;
   font-size: 14px;
 }
-.term-bar .term-state {
+.tx-bar .tx-state {
   margin-left: auto;
   color: var(--muted);
   font-family: ui-monospace, monospace;
   font-size: 11px;
 }
-.term-host {
+.tx-body {
   flex: 1;
   min-height: 0;
-  padding: 6px 8px;
-  overflow: hidden;
-}
-.term-keys {
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  overflow-y: auto;
   display: flex;
-  gap: 6px;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  overflow-x: auto;
+  flex-direction: column;
+  gap: 8px;
 }
-.term-keys button {
-  flex: none;
-  min-width: 44px;
-  padding: 9px 12px;
+.tx-empty {
+  margin: auto;
+  color: var(--muted);
   font-family: ui-monospace, monospace;
-  font-size: 14px;
-  background: var(--body);
+  font-size: 12px;
 }
-.term-keys button:active {
+.tx-row {
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tx-user {
+  align-self: flex-end;
+  max-width: 85%;
   background: var(--bar);
+  border-radius: 12px;
+  padding: 8px 10px;
 }
-.term-keys button.on {
-  border-color: var(--blocked);
-  color: var(--blocked);
+.tx-assistant {
+  color: var(--text);
+}
+.tx-cursor {
+  color: var(--done);
+}
+.tx-tool {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+.tx-tool-failed {
+  color: var(--error);
+}
+.tx-error {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--error);
+}
+.tx-system {
+  text-align: center;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
+}
+.tx-turn {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted);
 }
 
 /* ---- Chat (the orchestrator home view) ---- */

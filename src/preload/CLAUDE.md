@@ -11,14 +11,21 @@ wrapped by the local `subscribe` helper that returns an unsubscribe function.
 
 The API exposed on `window.canvas` groups by concern:
 
-- **Spine / sessions** — card and shell lifecycle (`newCard`, `newShell`,
-  `ensureCard` (takes an optional `cli` — which CLI backs an agent card),
-  `availableClis` (which CLIs are installed on PATH, for the spawn picker),
-  `killCard`, `setInitialPrompt`), pty I/O (`write`, `resize`,
-  `leaveScrollback`, `onPtyData`, `onPtyExit`), card events and plan
-  (`onCardEvent`, `paneCommand`, `paneCwd`), workspace persistence
-  (`loadWorkspace`, `saveWorkspace`), and asks/questions (`onAsk`, `onQuestion`,
-  `decide`, `answerQuestion`, `releaseAsks`).
+- **Spine / sessions** — card lifecycle (`newCard`, `newShell`, `killCard`,
+  `setInitialPrompt`), agent cards are HEADLESS sessions (no pty): `startAgent`
+  (takes an optional `cli` — which CLI backs the card; idempotent, called on
+  every CardNode mount) and `availableClis` (which CLIs are installed on PATH,
+  for the spawn picker) start/ensure the session, `sendToCard` (returns a
+  `SendOutcome` — `'sent'` or `'queued'`) and `interruptCard` drive it,
+  `loadTranscript` + `onTranscriptItem` are its transcript feed (initial paint
+  + live push), `onSessionEnded` is its lifecycle end (the agent-card analogue
+  of `onPtyExit`). Shell cards keep a direct pty (no tmux): `ensureShell`,
+  `write`, `resize`, `onPtyData`, `onPtyExit`, `shellTitle` (a ps-walk of the
+  pty's own pid — replaces the old paneCommand/paneCwd pair with one call).
+  Card events and plan (`onCardEvent`), workspace persistence (`loadWorkspace`,
+  `saveWorkspace`), and asks/questions (`onAsk`, `onQuestion`, `decide`,
+  `answerQuestion`, `releaseAsks` — `onAsk`/`decide` are dormant now that cards
+  run unattended; `ask_user` via `onQuestion`/`answerQuestion` is live).
 - **Issue store (Mastermind substrate)** — the visible `Vision → Sprint → Plan →
   Issue` board: `loadIssueStore`, `issueAction` (apply one mutation), `onIssueUpdate`
   (the whole projection re-pushed on every applied action).

@@ -1,19 +1,17 @@
 // Drives the orchestrator in the main process. Owns the persistent streaming-input
 // session and the renderer command channel (`dispatch` + the correlation-id pending
 // map), and wires up the live bus (mainBus.ts) and speech-pacing. Most mutations
-// dispatch to the renderer and await it; agent I/O (send/reply) and ask decisions
-// are main-owned and bypass that round-trip.
+// dispatch to the renderer and await it; agent I/O (send/reply) is main-owned and
+// bypasses that round-trip.
 //
 // The session is one long-lived Agent SDK `query()` fed by an async generator
-// (`input()`) that drains a shared queue. Three producers push into that queue:
+// (`input()`) that drains a shared queue. Two producers push into that queue:
 //   • `run(prompt)`        — you typed in the chat bar          (priority 'now')
-//   • `notifyAgentReply()` — an agent's Stop hook fired         (priority 'next')
-//   • `notifyAsk()`        — an agent's permission ask fired    (priority 'next')
-// The hooks are the heartbeat that wakes the session; nothing is polled.
+//   • `notifyAgentReply()` — an agent's session reported a reply (priority 'next')
+// Session events are the heartbeat that wakes the session; nothing is polled.
 import { runOrchestrator, type GateDecision } from './orchestrator'
 import { makeMainBus, type BrowserDriver, type DispatchCommand, type ResultFor } from './mainBus'
 import type { CommandBus } from './contract'
-import { COMET_TRAVEL_MS } from '../../shared/types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { SPINE_DIR } from '../spine/spine'
 import { runTournament } from './tournament'
@@ -29,8 +27,8 @@ import type {
   OrchestratorEvent,
   OrchestratorMode,
   OrchestratorTarget,
-  PermissionAskInfo,
   RemoteState,
+  SendOutcome,
 } from '../../shared/types'
 
 /** Long agent replies are clipped before they reach the chat / the session. */
@@ -50,16 +48,14 @@ export interface OrchestratorDeps {
   applyIssue: (a: IssueActionRequest) => IssueActionResult
   /** A canvas's repo dir — the off-card tournament runs the headless workflow there. */
   canvasDir: (projectId: string) => string | undefined
-  /** Write input to a card's terminal (keystroke injection). */
-  writeToCard: (cardId: string, data: string) => void
+  /** Send a message to an agent card's headless session. */
+  sendAgent: (cardId: string, text: string) => SendOutcome
   /** A card's last full assistant reply, or null if none captured yet. */
   getReply: (cardId: string) => string | null
   /** A role skill's invocation string in a CLI's native syntax — resolved by the
-   *  spine's adapter registry (the CLI seam); the orchestrator never branches on
+   *  spine's driver registry (the CLI seam); the orchestrator never branches on
    *  CliKind. */
   skillRef: (cli: CliKind | undefined, name: string) => string
-  /** Decide a held permission ask (main-owned — no renderer round-trip). */
-  decideAsk: (askId: string, decision: 'allow' | 'deny') => void
   /** Tier-B CDP browser driver (BrowserController) — the bus drives browsers
    *  through this, falling back to the renderer path when CDP is unavailable. */
   browser: BrowserDriver
@@ -237,40 +233,6 @@ export class Orchestrator {
           `[fleet event] Agent "${card.name}" (card ${card.id})${canvas} just finished a turn. Its reply:\n` +
           `"""\n${clipped}\n"""\n` +
           `Act only if the user asked you to coordinate this; otherwise acknowledge briefly and stop.`,
-      },
-      parent_tool_use_id: null,
-      priority: 'next',
-    })
-  }
-
-  /** An agent is blocked on a permission request — the second heartbeat source.
-   *  When autonomous, wake the orchestrator so it can clear the block via
-   *  approve_ask IF the user gave a standing instruction (the system prompt
-   *  forbids acting otherwise). The user still sees the normal permission
-   *  prompt; this is awareness, not a replacement for it. */
-  notifyAsk(ask: PermissionAskInfo): void {
-    if (this.mode === 'manual') return
-    const card = this.findCard(ask.cardId)
-    const who = card?.name ?? 'An agent'
-    // Cascade role cards (planner/lead/worker) run unattended — auto-approve their
-    // asks so the sprint doesn't stall waiting on a human. A PLAIN agent's asks
-    // still wake the orchestrator as a fleet event (and the human sees the prompt).
-    if (card?.role) {
-      this.signalTarget({ kind: 'approve', cardId: ask.cardId })
-      setTimeout(() => this.deps.decideAsk(ask.askId, 'allow'), COMET_TRAVEL_MS)
-      this.emit({ kind: 'auto', text: `auto-approved ${who}: ${ask.detail}` })
-      return
-    }
-    const canvas = onCanvas(card?.projectName)
-    this.enqueue({
-      type: 'user',
-      message: {
-        role: 'user',
-        content:
-          `[fleet event] ${who} (card ${ask.cardId})${canvas} is BLOCKED, asking permission to:\n` +
-          `"""\n${ask.detail}\n"""\n` +
-          `Ask id "${ask.askId}". Clear it with approve_ask only if the user gave you a standing ` +
-          `instruction covering this; otherwise do nothing — the user will decide from the prompt.`,
       },
       parent_tool_use_id: null,
       priority: 'next',
@@ -703,10 +665,9 @@ export class Orchestrator {
     issueSnapshot: () => this.deps.issueSnapshot(),
     pushToPhone: (title, body) => this.deps.pushToPhone?.(title, body),
     dispatch: (command) => this.dispatch(command),
-    writeToCard: (cardId, data) => this.deps.writeToCard(cardId, data),
+    sendAgent: (cardId, text) => this.deps.sendAgent(cardId, text),
     getReply: (cardId) => this.deps.getReply(cardId),
     skillRef: (cli, name) => this.deps.skillRef(cli, name),
-    decideAsk: (askId, decision) => this.deps.decideAsk(askId, decision),
     signalTarget: (t) => this.signalTarget(t),
     // Lazy arrows like the rest: this.deps isn't assigned when this field inits,
     // so defer each call to the live driver.
@@ -806,12 +767,6 @@ export class Orchestrator {
         return { title: `Rename ${cardName(input.cardId)}`, detail: `→ ${str(input.name)}` }
       case 'kill_card':
         return { title: `Close ${cardName(input.cardId)}`, detail: 'ends its session — cannot be undone' }
-      case 'approve_ask': {
-        const ask = state?.approvals.find((a) => a.id === String(input.askId))
-        const who = ask?.name ?? 'agent'
-        const action = str(input.decision) === 'deny' ? 'Deny' : 'Approve'
-        return { title: `${action} ${who}’s request`, detail: ask?.detail ?? String(input.askId) }
-      }
       case 'focus_canvas':
         return { title: 'Switch canvas', detail: `to ${canvasName(input.canvasId)}` }
       case 'notify_user':

@@ -137,7 +137,7 @@ function triggersSection(): void {
 const DESTRUCTIVE = [
   'focus_canvas', 'spawn_agent', 'open_browser', 'navigate_browser', 'browser_click',
   'browser_type', 'browser_scroll', 'browser_select', 'browser_history', 'rename_agent',
-  'kill_card', 'approve_ask', 'notify_user',
+  'kill_card', 'notify_user',
 ]
 const READS = READ_ONLY_TOOLS as readonly string[] // the single source of truth — drift here is caught at compile, not silently
 

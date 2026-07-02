@@ -180,9 +180,6 @@ export interface CommandBus {
   renameAgent(cardId: string, name: string): Promise<ActionResult>
   /** Close a card — ends its session and removes it from the canvas. */
   killCard(cardId: string): Promise<ActionResult>
-  /** Allow or deny a permission request an agent is blocked on (askId from
-   *  the world's approvals). */
-  approveAsk(askId: string, decision: 'allow' | 'deny'): Promise<ActionResult>
   /** Push a one-line notification to Rakan's phone — the mastermind reaching out when he
    *  may not be looking at the app. The agent's own arm for proactive reach-out. */
   notifyUser(message: string): Promise<ActionResult>

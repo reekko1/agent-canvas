@@ -1,19 +1,19 @@
 // The spine's instruction MECHANISM plus its one piece of spine-owned content.
 //   BASELINE_SUPERVISION — the always-on supervision briefing EVERY card gets
-//     (spine content: it describes the supervision surface itself). Each adapter
-//     renders it in its own always-on channel (Claude via
-//     `--append-system-prompt-file`, codex via `AGENTS.md`) — never a skill, so
-//     it can't be missed by auto-discovery.
+//     (spine content: it describes the supervision surface itself). Each driver
+//     renders it in its own always-on channel (claude via `systemPrompt.append`,
+//     codex via `AGENTS.md`) — never a skill, so it can't be missed by
+//     auto-discovery.
 //   CanvasSkill + materializeSkill — the SKILL.md format spec and serializer the
-//     adapters materialize any skill library with. The mastermind ROLE library
+//     drivers materialize any skill library with. The mastermind ROLE library
 //     itself (planner/lead/worker) is domain content and lives in
 //     `../mastermind/roleSkills.ts` — the spine ships whatever it's given, and
 //     the whole library goes to every agent card (per-card selection is a
 //     non-goal).
 //
-// Nothing here carries a CLI assumption; the adapter owns every CLI-specific
+// Nothing here carries a CLI assumption; the driver owns every CLI-specific
 // detail (packaging, invocation syntax, delivery channel) — each renders both
-// instruction channels in its `stageInstructions`. See CliAdapter / skillRef.
+// instruction channels in its `stageInstructions`. See CliDriver / skillRef.
 //
 // Instructions are authored in-process (not as on-disk SKILL.md files behind
 // extraResources) so there's no dev-vs-packaged path resolution: the
@@ -42,7 +42,7 @@ export const PLUGIN_NAME = 'canvas-skills'
 export const PLUGIN_VERSION = '0.1.0'
 
 /** Write one skill as `<skillsRoot>/<name>/SKILL.md` — the one SKILL.md
- *  serializer, shared by every adapter's plugin materializer. `name` is
+ *  serializer, shared by every driver's plugin materializer. `name` is
  *  constrained to `[a-z0-9-]` so it's YAML-safe bare; `description` is free text
  *  (may contain ':'), so it's emitted as a double-quoted scalar — JSON string
  *  escaping is valid YAML flow-scalar syntax. */
@@ -54,17 +54,18 @@ export function materializeSkill(skillsRoot: string, s: CanvasSkill): void {
 }
 
 /** The always-on supervision briefing every card boots with — CLI-neutral, delivered
- *  by each adapter in its own always-on channel (NOT a skill, so auto-discovery can't
+ *  by each driver in its own always-on channel (NOT a skill, so auto-discovery can't
  *  skip it). Both CLIs now route the checklist through the same in-memory `update_plan`
  *  MCP tool, so there is no per-CLI difference to fork on — one source. */
 export const BASELINE_SUPERVISION = [
   '# Working in Agent Canvas',
   '',
   'You are running as a **supervised agent card** inside Agent Canvas — a',
-  'master-stack viewer where a human watches a fleet of agents. Your session',
-  'lives in a tmux session that outlives the app, so your scrollback is never',
-  'lost. Work as you normally would; this briefing explains what the human sees',
-  'so you can keep them well-informed.',
+  'master-stack viewer where a human watches a fleet of agents. There is no',
+  'terminal: the human sees you through a live transcript of this conversation',
+  '(saved as you go, so it survives an app restart) and your published',
+  'checklist. Work as you normally would; this briefing explains what the',
+  'human sees so you can keep them well-informed.',
   '',
   '## Your Agent Canvas tools',
   '',
@@ -86,9 +87,9 @@ export const BASELINE_SUPERVISION = [
   '- **Your final reply** — your last message when you finish a turn — is echoed to',
   '  the supervisor and may be read aloud. End substantial turns with a concise',
   '  summary of what you did and what (if anything) you need.',
-  '- **Permission asks** — cards run unattended by default (no permission gates), but',
-  '  if your session is in a gated permission mode, asks are surfaced to the human to',
-  '  approve or deny; expect a brief hold and do not work around the permission system.',
+  '- **You run unattended** — no permission prompts gate your tool calls. That trust',
+  '  means using `ask_user` (not silence) when you hit a genuine fork you should not',
+  '  resolve yourself.',
   '',
   '## How to be a good fleet citizen',
   '',

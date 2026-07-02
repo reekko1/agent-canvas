@@ -5,9 +5,10 @@ import { initSupervise } from './supervise'
 import { initChat } from './chat'
 
 /// The shell: a two-view phone app — the orchestrator CHAT (home) and the FLEET
-/// supervision panel (secondary), switched by the bottom nav; the terminal
-/// overlay (term.ts) floats above either. This module owns the view router, the
-/// push-subscribe flow, and bootstrap; chat.ts and supervise.ts own their views.
+/// supervision panel (secondary), switched by the bottom nav; the read-only
+/// transcript overlay (transcript.ts) floats above either. This module owns
+/// the view router, the push-subscribe flow, and bootstrap; chat.ts and
+/// supervise.ts own their views.
 
 // ---- View router -----------------------------------------------------------
 type View = 'chat' | 'supervise'

@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/geist";
+@import "tw-shimmer";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -638,4 +639,25 @@
   .proto-star,
   .proto-winner,
   .needs-you { animation: none; }
+}
+/* ============================================================
+   assistant-ui Lexical composer input. The package ships these
+   class names UNSTYLED, so we own their look: kill the browser's
+   contenteditable focus ring (the composer shell already shows a
+   focus-within border), and overlay the placeholder instead of
+   letting it sit in normal flow. Padding lives on the input +
+   placeholder together so the two align exactly.
+   ============================================================ */
+.aui-lexical-editor { position: relative; }
+.aui-lexical-input {
+  outline: none;
+  padding: 0.5rem 0.625rem;
+  min-height: 2.5rem;
+}
+.aui-lexical-placeholder {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.625rem;
+  pointer-events: none;
+  color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
 }

@@ -17,7 +17,7 @@ prepends `--no-optional-locks` so opportunistic reads never grab `index.lock` fr
 mid-commit. The runner normalizes exit codes: numeric on git's non-zero exit, `-1` when git
 itself couldn't launch (e.g. `ENOENT`).
 
-Read side produces three shapes (all from `../../shared/types`):
+Read side produces four shapes (all from `../../shared/types`):
 - `gitSnapshot` — full working tree vs HEAD. Runs `status --porcelain=v1 -z --untracked-files=all`
   plus `diff HEAD --numstat -z`, merges per-file added/removed counts, and returns `changes` with
   totals. Untracked files have no numstat, so their added count is read by counting file lines.
@@ -25,6 +25,10 @@ Read side produces three shapes (all from `../../shared/types`):
 - `gitIdentity` — one `status --porcelain=v2 --branch` for the toolbar: branch, ahead/behind,
   dirty count. Deliberately no numstat — it's polled for every canvas.
 - `gitFileDiff` — unified diff for one file; untracked uses `diff --no-index -- /dev/null path`.
+- `listRepoFiles` — tracked + untracked-not-ignored paths (`ls-files --cached --others
+  --exclude-standard`), deduped/sorted, capped at 5000. Not a diff shape — feeds the composer's
+  `@` file picker (`cards/composerTriggers.tsx`), which filters the list client-side as the user
+  types. Empty for a non-repo folder.
 
 Write side (`gitAction`) handles explicit user kinds: stage/unstage/discard (and the `*All`
 variants) plus commit. `discard` on untracked files `rm`s them directly; `discardAll` is

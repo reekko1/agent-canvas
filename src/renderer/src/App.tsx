@@ -6,7 +6,7 @@ export function App() {
   return (
     <TooltipProvider>
       <Canvas />
-      {/* Above everything: the canvas is unusable until claude + tmux exist. */}
+      {/* Above everything: the canvas is unusable until claude exists. */}
       <SetupGate />
     </TooltipProvider>
   )

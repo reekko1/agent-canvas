@@ -10,32 +10,58 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
 
 - **types.ts** — the canonical cross-process type definitions. The most
   important shapes:
-  - `CardKind` — discriminant for what a card holds: `agent` (watched CLI),
-    `shell` (bare `$SHELL`), or `browser` (an in-app `<webview>` with no
-    tmux/pty/spine session — neutral chrome, never speaks to the spine).
+  - `CardKind` — discriminant for what a card holds: `agent` (a headless CLI
+    session — the Agent SDK for claude, a turn-batched `codex exec --json`
+    subprocess for codex; no tmux, no pty), `shell` (a direct pty, bare
+    `$SHELL`), or `browser` (an in-app `<webview>` with no session at all —
+    neutral chrome, never speaks to the spine).
   - `CLI_KINDS`/`CliKind` — THE single source of which coding-agent CLIs can
     back an `agent` card (`claude`/`codex`); every exhaustive map (the spine's
-    adapter registry, renderer labels) and the orchestrator's spawn tool derive
+    driver registry, renderer labels) and the orchestrator's spawn tool derive
     from it, so adding a CLI compile-breaks every site that must handle it.
-    Threaded through `CardRecord.cli`, `RemoteState.canvases[].cli`, the
-    `spawnAgent` command payload, and `CanvasApi.spawnCard`/`availableClis()`.
-    Absent = `claude`.
+    Each kind maps to a `CliDriver` in the spine (headless session lifecycle,
+    MCP/skill staging, event mapping — see `spine/CLAUDE.md`). Threaded
+    through `CardRecord.cli`, `RemoteState.canvases[].cli`, the `spawnAgent`
+    command payload, and `CanvasApi.startAgent`/`availableClis()`. Absent =
+    `claude`.
   - `CardStatus` — the agent/shell lifecycle states (`idle` → `running` →
     `waiting`/`done`/`stalled`/`blocked`/`error`).
   - `CardEvent` + `TodoChange`/`AgentTodo` — one semantic update extracted from a
-    CLI lifecycle event (status flip, metadata, feed line, plan delta).
+    CLI lifecycle event (status flip, metadata, feed line, plan delta) — a state
+    PATCH folded into a card's `CardMeta`. Distinct from `TranscriptItem` below,
+    which is a feed entry, not a patch.
+  - `TranscriptItem`/`TranscriptItemKind` — one entry in an agent card's
+    conversation feed (`user`/`assistant`/`tool`/`turn`/`system`/`error`),
+    pushed on `onTranscriptItem` and persisted to
+    `SPINE_DIR/transcripts/<cardId>.jsonl`. `id` is the upsert key: a streaming
+    assistant message re-pushes under the SAME id with growing text
+    (`streaming: true`), then once more finalized — the renderer/phone replace
+    by id rather than append, so a push arriving mid-`loadTranscript` can't
+    duplicate a row.
+  - `SendOutcome` (`'sent' | 'queued'`) — whether `sendToCard` delivered a
+    message into an agent's live turn (claude: always; codex: only when idle)
+    or queued it behind an in-flight one (codex, delivered as the next resume
+    turn). `ShellTitle` — a shell card's foreground command + cwd (ps-walk of
+    its direct pty, no tmux pane to query), polled by `useShellTitles` on both
+    desktop and phone.
   - `PermissionAskInfo` / `AskDecision` — a held permission gate (allow/deny/
-    release); `QuestionAskInfo` / `Question` / `QuestionOption` /
-    `QuestionAnswers` — a held `ask_user` question from the canvas MCP (choose
-    options, not allow/deny).
+    release); dormant now that agent cards run headless and unattended (there's
+    no held permission ask to decide — the wiring is kept, not ripped out, in
+    case a future gated mode reintroduces one). `QuestionAskInfo` / `Question` /
+    `QuestionOption` / `QuestionAnswers` — a held `ask_user` question from the
+    canvas MCP (choose options, not allow/deny) — this is the LIVE one.
   - `CardRecord` / `Project` / `MultiProjectSnapshot` — multi-project
-    persistence (global card registry + per-project layout). A browser card's
-    `url` is the only kind-specific field persisted (reload-on-restore; the live
-    snapshot is transient and never stored).
+    persistence (global card registry + per-project layout). `CardRecord.session`
+    is an agent card's CLI session/thread id — a headless session does NOT
+    survive an app restart, so this is what the card's first `sendToCard` after
+    a relaunch resumes (a stale id just falls back to a fresh session). A
+    browser card's `url` is the only other kind-specific field persisted
+    (reload-on-restore; the live snapshot is transient and never stored).
   - Git: `GitChange` / `GitSnapshot` / `RepoIdentity` / `GitActionRequest` /
     `GitActionResult`.
   - Remote panel: `RemoteState` / `AttentionLevel` + readiness shapes
-    (`AppReadiness`, `RemoteReadiness`), `UpdateStatus`. Each
+    (`AppReadiness` — now just `claudeFound` + `orchestratorAuthed` +
+    `voiceKeySet`, `RemoteReadiness`), `UpdateStatus`. Each
     `RemoteState.canvases` entry carries `active: boolean` — the one canvas
     open in the desktop viewport (exactly one true when any canvas exists), so
     the phone can mark the current repo and the orchestrator knows which canvas
@@ -60,6 +86,11 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     layer adds `Idea` + `Conception` (the recorded tournament; `conception.*` actions)
     on the same store and the `idea-ready` / `idea-abstained` milestones. The tournament
     runs off-card on the mastermind (`orchestrator/tournament.ts`), not as a card role.
+  - `UNKNOWN_CARD` — the card-id sentinel the agent-facing MCP guards treat as
+    "no card". A defensive fallback for a codex card's `X-Canvas-Card` header
+    (read from `CANVAS_CARD_ID` in its child env, which the driver always
+    sets, so this should never actually be hit). Claude cards bake their real
+    cardId into the header directly, never this sentinel.
   - `CanvasApi` — the full interface the preload bridge implements and the
     renderer consumes (the IPC contract in one place). Browser readiness rides
     here too: `browserReady` (renderer→main: a `<webview>` is dom-ready, with

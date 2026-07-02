@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 /// Shared lifecycle for held asks projected to the renderer — the bookkeeping
-/// behind both usePendingAsks (permission gates) and usePendingQuestions
-/// (AskUserQuestion choosers). The main process owns the actual held HTTP
-/// responses; this is the renderer's mirror plus the release wiring: append on
-/// arrival, release a card's holds on forward progress / pty death / engagement,
-/// and drop a toast when its ask is decided elsewhere (the phone).
+/// behind both usePendingAsks (permission gates, dormant now that agent cards
+/// run headless and unattended — kept wired for a legacy hook-era ask, never
+/// fires otherwise) and usePendingQuestions (AskUserQuestion choosers, the
+/// live one — canvas MCP `ask_user`). The main process owns the actual held
+/// tool call; this is the renderer's mirror plus the release wiring: append on
+/// arrival, release a card's holds on forward progress / session end, and drop
+/// a toast when its ask is decided elsewhere (the phone).
 ///
 /// The two flows stay deliberately separate (a question is NOT a permission
 /// gate, and they answer differently) — only their identical bookkeeping is
@@ -24,9 +26,9 @@ export function useHeldAsks<T extends { askId: string; cardId: string }>({
   const itemsRef = useRef(items)
   itemsRef.current = items
 
-  /** Release a card's holds with no decision — the dialog falls through to its
-   *  terminal. Called on terminal engagement, forward progress, and pty death;
-   *  releasing an already-answered ask is a harmless no-op. */
+  /** Release a card's holds with no decision. Called on forward progress and
+   *  session end (or, for a shell card, pty death); releasing an
+   *  already-answered ask is a harmless no-op. */
   const releaseCard = useCallback((cardId: string) => {
     if (!itemsRef.current.some((a) => a.cardId === cardId)) return
     window.canvas.releaseAsks(cardId)
@@ -42,7 +44,10 @@ export function useHeldAsks<T extends { askId: string; cardId: string }>({
       // terminal, hook timed out, or the turn moved on.
       if (ev.status && ev.status !== 'blocked') releaseCard(cardId)
     })
+    // Shell-only (agents never emit pty-exit) and agent-only (shells never
+    // emit session-ended) — together they cover every card kind's teardown.
     const offExit = window.canvas.onPtyExit(releaseCard)
+    const offEnded = window.canvas.onSessionEnded(releaseCard)
     // Decided from the remote panel — the spine already responded; only the
     // toast needs to go.
     const offDecided = subscribeDecided((askId) =>
@@ -52,6 +57,7 @@ export function useHeldAsks<T extends { askId: string; cardId: string }>({
       offArrival()
       offEvent()
       offExit()
+      offEnded()
       offDecided()
     }
   }, [subscribeArrival, subscribeDecided, releaseCard])

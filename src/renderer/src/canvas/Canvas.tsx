@@ -127,7 +127,7 @@ export function Canvas() {
   const skillsPanel = useSkillsPanel()
 
   const { trackSession } = useCardMeta(setNodes)
-  const { asks, decide, releaseCard } = usePendingAsks()
+  const { asks, decide } = usePendingAsks()
   const {
     questions,
     answer: answerQuestion,
@@ -135,16 +135,6 @@ export function Canvas() {
     releaseCard: releaseQuestionCard,
   } = usePendingQuestions()
   const { update, dismiss: dismissUpdate, restart: restartForUpdate } = useAutoUpdate()
-
-  /** Engaging a card's terminal releases everything it holds — both permission
-   *  asks and questions fall through to the CLI's own dialogs. */
-  const engageCard = useCallback(
-    (cardId: string) => {
-      releaseCard(cardId)
-      releaseQuestionCard(cardId)
-    },
-    [releaseCard, releaseQuestionCard],
-  )
 
   /** Bring a card to the master slot (switching to its project if needed). The
    *  diff sheet is an independent overlay, so it stays put. */
@@ -226,12 +216,11 @@ export function Canvas() {
         url,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
-        onEngage: engageCard,
         onPromote: promoteCard,
         onNavigate: navigateCard,
       },
     }),
-    [onCloseCard, engageCard, promoteCard, navigateCard],
+    [onCloseCard, promoteCard, navigateCard],
   )
 
   const restoreItem = useCallback(
@@ -239,7 +228,7 @@ export function Canvas() {
       if (!c.folder) return null
       const node = makeCard(c.id, c.folder, c.kind, c.name, c.url, c.role, c.cli)
       // Restore a browser's ownership link + reason so request_browser resolves
-      // the same browser after a restart (agents reattach to live tmux sessions).
+      // the same browser after a restart instead of spawning an orphaned second one.
       node.data.ownerCardId = c.ownerCardId
       node.data.reason = c.reason
       return node

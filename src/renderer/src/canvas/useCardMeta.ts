@@ -21,10 +21,10 @@ export function useCardMeta(setNodes: SetNodes) {
     [setNodes],
   )
 
-  // First sighting of a session on a card (fresh spawn, restore, or events
-  // resuming after reattach): stamp it into the card's meta — persisted by
-  // useWorkspace so a reattached card knows its tmux session. Deduped so the
-  // per-event sessionId doesn't re-patch on every card event.
+  // First sighting of a session on a card (fresh spawn, restore, or a new
+  // turn's system/init event): stamp it into the card's meta — persisted by
+  // useWorkspace so a relaunched card's first send resumes the same CLI
+  // session. Deduped so the per-event sessionId doesn't re-patch on every event.
   const knownSessions = useRef(new Map<string, string>())
   const trackSession = useCallback(
     (cardId: string, sessionId: string) => {
@@ -40,12 +40,19 @@ export function useCardMeta(setNodes: SetNodes) {
       patchMeta(cardId, (m) => applyCardEvent(m, ev))
       if (ev.sessionId) trackSession(cardId, ev.sessionId)
     })
+    // Shell-only (agents never emit this — see onSessionEnded below).
     const offExit = window.canvas.onPtyExit((cardId) => {
       patchMeta(cardId, (m) => ({ ...m, status: 'idle', detail: 'terminal exited' }))
+    })
+    // Agent-only: the card's headless session ended (turn loop exited, the
+    // process died, or was killed) — the agent-card analogue of onPtyExit.
+    const offEnded = window.canvas.onSessionEnded((cardId, reason) => {
+      patchMeta(cardId, (m) => ({ ...m, status: 'idle', detail: reason ?? 'session ended' }))
     })
     return () => {
       offEvent()
       offExit()
+      offEnded()
     }
   }, [patchMeta, trackSession])
 

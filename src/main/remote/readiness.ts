@@ -52,30 +52,6 @@ function probeServe(binary: string, port: number): Promise<string | undefined> {
   })
 }
 
-/** tmux's install homes — kept in sync with Tmux.prepare's probe list. */
-const TMUX_PATHS = [
-  '/opt/homebrew/bin/tmux',
-  '/usr/local/bin/tmux',
-  '/opt/local/bin/tmux',
-  '/usr/bin/tmux',
-  '/run/current-system/sw/bin/tmux',
-  `${homedir()}/.nix-profile/bin/tmux`,
-]
-
-/** Homebrew's two install homes (Apple silicon, Intel). */
-const BREW_PATHS = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew']
-
-function executableAt(paths: string[]): boolean {
-  return paths.some((p) => {
-    try {
-      accessSync(p, constants.X_OK)
-      return true
-    } catch {
-      return false
-    }
-  })
-}
-
 /** Spawns the user's login shell — the exact way a card spawns the agent —
  *  so the answer matches what launching would actually find. */
 function probeClaude(): Promise<boolean> {
@@ -117,8 +93,6 @@ export async function checkAppReadiness(): Promise<AppReadiness> {
   ])
   return {
     claudeFound,
-    tmuxFound: executableAt(TMUX_PATHS),
-    brewFound: executableAt(BREW_PATHS),
     orchestratorAuthed,
     voiceKeySet: sonioxKeySource() !== 'none',
   }

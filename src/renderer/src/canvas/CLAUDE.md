@@ -81,10 +81,14 @@ hooks it composes, and IPC goes through `window.canvas.*`.
 ## Hooks
 
 **Asks / questions** — `useHeldAsks` is the shared lifecycle (append on arrival,
-release a card's holds on forward progress / pty exit / engagement, drop a toast
+release a card's holds on forward progress / session end, drop a toast
 when decided remotely); `usePendingAsks` wraps it for permission gates
-(allow/deny/release), `usePendingQuestions` for AskUserQuestion choosers
-(answer-with-options / decline). The two stay deliberately separate flows.
+(allow/deny/release — dormant now that agent cards run headless and
+unattended, kept wired rather than ripped out), `usePendingQuestions` for
+AskUserQuestion choosers (answer-with-options / decline — the live flow, via
+the canvas MCP `ask_user`). The two stay deliberately separate flows.
+"Session end" release covers both kinds: `onSessionEnded` for agent cards,
+`onPtyExit` for shells.
 
 **Projects / workspace** — `useProjects` owns the project list + active id +
 master focus and all mutations (attach/detach/promote/switch/create/delete/
@@ -96,10 +100,15 @@ deck-restack window (auto-cleared after `DECK_MS`, null from/to the empty state)
 project references and stamps the session id back onto reattached agent cards.
 
 **Card meta** — `useCardMeta` is the renderer end of the spine: folds card
-events / pty exits into each card's `meta` on the nodes, and stamps the session
-id into meta on first sighting (persisted by `useWorkspace`). The checklist rides
-in live via `update_plan`'s `todoChange` events — it is not re-read from disk.
-Owns no state itself.
+events into each card's `meta` on the nodes, and stamps the session id into
+meta on first sighting (persisted by `useWorkspace` — now a CLI session/thread
+id rather than a tmux name, since a relaunched agent's first send resumes it).
+Also folds `onPtyExit` (shell cards) and `onSessionEnded` (agent cards — the
+headless-session analogue: the turn loop exited, the process died, or was
+killed) into an idle status. The checklist rides in live via `update_plan`'s
+`todoChange` events — it is not re-read from disk. Owns no state itself. An
+agent's live transcript (`TranscriptItem`s) is a SEPARATE feed `TranscriptView`
+owns directly — it does not flow through this hook or `CardMeta`.
 
 **Git** — `useCanvasGit` polls each canvas's repo (~3s, deduped by dir) for
 branch + dirty count, keyed by project id, for the toolbar — decoupled from the
@@ -113,9 +122,12 @@ feeding the bell popover; loud rows arrive unread.
 (`blocking` > `done` > `none`) from card meta + held asks/questions;
 `attentionElsewhere` rolls up the loudest non-active canvas for the toolbar pill.
 
-**Shell titles** — `useShellTitles` polls each shell pane (~1.5s) for its
-foreground command + cwd so the remote rows track the directory like the desktop;
-only shells are polled (agents speak via status/task).
+**Shell titles** — `useShellTitles` polls each shell card (~1.5s) via the single
+`window.canvas.shellTitle(id)` call (a ps-walk of the direct pty's own pid in
+main — there's no tmux pane to query anymore) for its foreground command + cwd
+so the remote rows track the directory like the desktop; only shells are
+polled (agents speak via status/task). `ShellTitle` now lives in
+`@shared/types`, re-exported here for the existing importers.
 
 **Remote** — `useRemotePublish` projects the whole renderer state (canvases,
 cards, approvals, questions, feed, needs-you) to the phone panel, grouped by
@@ -171,10 +183,13 @@ set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates
 
 ## Architecture / data flow
 
-- **One flat layer.** Every card across every project stays mounted. Switching
-  projects or promoting only flips visibility (`visibility:hidden`) and the
-  `transform`/size — so a card's xterm and scrollback survive switches. Inactive
-  cards park off-screen at `PARKED` but stay sized so FitAddon stays valid.
+- **One flat layer.** Every card across every project stays mounted (the
+  `CardNode` frame, that is — an agent's live transcript itself only mounts
+  while it's the unstacked master; see `cards/CLAUDE.md`). Switching projects
+  or promoting only flips visibility (`visibility:hidden`) and the
+  `transform`/size — so a shell's xterm/scrollback and a browser's webview
+  survive switches. Inactive cards park off-screen at `PARKED` but stay sized
+  so FitAddon stays valid.
 - **Deck-restack switch.** A canvas switch cross-fades like swapping cards in a
   deck: the rising board fades up/forward (`deck-enter`), the receding one sinks
   back/fades (`deck-leave`) — driven by classes in `index.css`, gated by
@@ -206,7 +221,7 @@ set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates
   promote); an act mutates the page so it promotes the card. `setBrowserReason`
   edits the stated provenance shown on the poster. All four no-op with an error
   reply if the card isn't a browser or its guest isn't mounted yet.
-- **Browser cards.** A third kind: an in-DOM webview, no tmux/pty/spine session.
+- **Browser cards.** A third kind: an in-DOM webview, no pty/spine session at all.
   The master runs a live web view (address bar + back/fwd/reload), stacked cards
   show a blur snapshot. The webview reports navigation/title/favicon/snapshot
   back through `onNavigate`, which folds the patch into the node so chrome, face,
@@ -263,8 +278,9 @@ set. All canvas-mutating verbs are passed in as callbacks; the hook orchestrates
 - **CHAT_BAR_INSET (44)** must track the chat-bar pill's overlay inset/half-height
   — it's the comet launch origin. **PARKED.x ≈ -100000**; `rectFor` treats
   `x <= -10000` as "not laid out".
-- Engaging a card's terminal releases both its held asks and questions (they fall
-  through to the CLI's own dialogs).
+- There's no terminal-engage release path anymore (agent cards have no terminal
+  to fall through to) — a held ask/question clears only on forward progress,
+  the card's session ending, or an explicit orbit decision.
 - **Deck transition timing:** `DECK_MS` (in `useProjects`) must outlast the
   300ms CSS animation so the `deck-enter`/`deck-leave` classes don't drop before
   the keyframes finish. The receding stack is frozen at the pre-switch scroll via

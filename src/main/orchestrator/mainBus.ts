@@ -27,6 +27,7 @@ import type {
   OrchestratorMode,
   OrchestratorTarget,
   RemoteState,
+  SendOutcome,
 } from '../../shared/types'
 
 /** The Tier-B (CDP, main-side) browser path. Implemented by BrowserController;
@@ -72,16 +73,16 @@ export interface MainBusDeps {
   issueSnapshot: () => IssueSnapshot
   /** Dispatch a renderer-owned mutation and await it. */
   dispatch: Dispatch
-  /** Write input to a card's terminal (keystroke injection). */
-  writeToCard: (cardId: string, data: string) => void
+  /** Send a message to an agent card's headless session — 'sent' if delivered
+   *  into the current turn, 'queued' if it'll run as the next turn (codex,
+   *  when a turn is already in flight; claude is always 'sent'). */
+  sendAgent: (cardId: string, text: string) => SendOutcome
   /** A card's last full assistant reply, or null if none captured yet. */
   getReply: (cardId: string) => string | null
   /** A role skill's invocation string in the target CLI's native syntax —
-   *  resolved by the spine's adapter registry (the CLI seam), never branched on
+   *  resolved by the spine's driver registry (the CLI seam), never branched on
    *  here. */
   skillRef: (cli: CliKind | undefined, name: string) => string
-  /** Decide a held permission ask (main-owned — no renderer round-trip). */
-  decideAsk: (askId: string, decision: 'allow' | 'deny') => void
   /** Fire the action's comet at the target card. */
   signalTarget: (target: OrchestratorTarget) => void
   /** The Tier-B CDP browser path (primary); the bus falls back to dispatching to
@@ -105,14 +106,6 @@ function landed(): Promise<void> {
   return delay(COMET_TRAVEL_MS)
 }
 
-/** Pause between an agent prompt's body and its submitting Enter. The claude TUI
- *  reads a body+`\r` glued into one write as a single paste/continuation burst and
- *  treats the trailing `\r` as a literal newline — the text lands in the composer
- *  but never sends (the "pasted but not submitted" bug). Writing the body, settling
- *  past the burst window, then writing a lone `\r` makes the Enter a discrete
- *  keystroke the TUI reads as submit. */
-const SUBMIT_SETTLE_MS = 120
-
 /** Set CANVAS_BROWSER_STRICT_CDP=1 to make the Tier-B path fail LOUD instead of
  *  silently falling back to Tier A — the verification mode for confirming CDP
  *  actually works. Off by default (the fallback is real production resilience). */
@@ -122,12 +115,6 @@ const STRICT_CDP = !!process.env.CANVAS_BROWSER_STRICT_CDP
 export function makeMainBus(deps: MainBusDeps): CommandBus {
   const findCard = (id: string): RemoteState['cards'][number] | undefined =>
     deps.getState()?.cards.find((c) => c.id === id)
-
-  // Per-card serialization for keystroke delivery: a send is body + (settle) + Enter,
-  // two separate pty writes. Concurrent callers to the SAME card (orchestrator + the
-  // mastermind reactor, or two reactors on one lead) would otherwise interleave into
-  // garbled input. Chain per card so each send's two writes stay contiguous.
-  const sendChains = new Map<string, Promise<void>>()
 
   /** Resolve a card that must be a browser, or the failure result to return. The
    *  single owner of the "no card / not a browser" guard the browser methods share
@@ -269,7 +256,7 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       // role skill, invoked in the current mode. A skill invocation at the START of
       // the initial prompt runs on turn 0, so the card knows its purpose before
       // anything else — no reliance on the model auto-discovering the skill. The
-      // per-CLI invocation syntax is the adapter's (deps.skillRef), not ours.
+      // per-CLI invocation syntax is the driver's (deps.skillRef), not ours.
       const payload = input.role
         ? {
             ...input,
@@ -358,29 +345,15 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       const card = findCard(cardId)
       if (!card) return { ok: false, message: `no agent with id ${cardId}` }
       if (card.kind !== 'agent') return { ok: false, message: `${card.name} is a shell, not an agent` }
-      // Serialize against any in-flight send to THIS card so the two writes below stay
-      // contiguous (a prior failure mustn't break the chain, hence the catch).
-      const prior = sendChains.get(cardId) ?? Promise.resolve()
-      const run = prior.catch(() => {}).then(async () => {
-        // The comet delivers the message: fly first, inject when it lands. Claude
-        // queues input when busy, so this is safe at any status.
-        deps.signalTarget({ kind: 'send', cardId })
-        await landed()
-        // Strip trailing whitespace and any dangling backslash before submitting:
-        // a body ending in `\` makes the TUI read the following Enter as an escaped
-        // newline (the manual `\`+Enter line-continuation), not a submit. Then write
-        // the body and the Enter as two separated writes — see SUBMIT_SETTLE_MS for
-        // why a glued-on `\r` gets swallowed as a paste newline instead of sending.
-        const body = message.replace(/[\s\\]+$/, '')
-        deps.writeToCard(cardId, body)
-        await delay(SUBMIT_SETTLE_MS)
-        deps.writeToCard(cardId, '\r')
-      })
-      sendChains.set(cardId, run)
-      await run
+      // The comet delivers the message: fly first, land, then hand it to the
+      // card's headless session — a real message send, not keystrokes, so
+      // there's no per-card write ordering to serialize.
+      deps.signalTarget({ kind: 'send', cardId })
+      await landed()
+      const outcome = deps.sendAgent(cardId, message)
       return {
         ok: true,
-        message: card.status === 'running' ? `queued for ${card.name} (busy)` : `sent to ${card.name}`,
+        message: outcome === 'queued' ? `queued for ${card.name} (busy)` : `sent to ${card.name}`,
       }
     },
 
@@ -407,18 +380,6 @@ export function makeMainBus(deps: MainBusDeps): CommandBus {
       await landed()
       const r = await deps.dispatch({ cmd: 'killCard', payload: { cardId } })
       return { ok: !!r.ok, message: r.message ?? (r.ok ? `closed ${card.name}` : 'failed') }
-    },
-
-    approveAsk: async (askId, decision) => {
-      const ask = deps.getState()?.approvals.find((a) => a.id === askId)
-      if (!ask) return { ok: false, message: `no pending ask with id ${askId}` }
-      // Signal before deciding — the renderer resolves the asking card from its
-      // still-present ask list, the comet flies, and the decision commits on landing.
-      deps.signalTarget({ kind: 'approve', askId })
-      await landed()
-      // Main-owned decision — straight to spine.decide, no renderer round-trip.
-      deps.decideAsk(askId, decision)
-      return { ok: true, message: `${decision === 'allow' ? 'approved' : 'denied'} ${ask.name}'s request` }
     },
 
     notifyUser: async (message) => {

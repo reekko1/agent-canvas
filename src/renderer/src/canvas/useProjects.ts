@@ -46,8 +46,9 @@ export interface ProjectsApi {
 
 /// Owns the projects (each a named canvas pinned to a dir) and which one is
 /// active. Cards are global and always mounted; a project only references them
-/// by id and remembers its master, so switching and deleting never touch a tmux
-/// session. There is no implicit default — zero projects is a valid state.
+/// by id and remembers its master, so switching and deleting never touch a
+/// card's live session. There is no implicit default — zero projects is a
+/// valid state.
 export function useProjects(makeProjectId: () => string): ProjectsApi {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)

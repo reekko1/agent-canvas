@@ -3,7 +3,7 @@
 // mastermind DOMAIN content: each role skill encodes that role's flow on the
 // issue board and its mandatory self-audit step, and names only the
 // CLI-agnostic canvas tools (`update_plan`/`ask_user`) — no CLI assumption
-// anywhere. The spine is pure mechanism: each adapter's `stageInstructions`
+// anywhere. The spine is pure mechanism: each driver's `stageInstructions`
 // materializes this library into its plugin form via the spine's
 // `materializeSkill` (the SKILL.md format spec lives there, with the
 // `CanvasSkill` shape).

@@ -1,9 +1,10 @@
 // The agent-facing ISSUE MCP server: a loopback HTTP MCP endpoint attached to
-// every supervised `claude` card via `--mcp-config`, giving each agent the tools
-// to act on the Mastermind issue board (MASTERMIND.md) — scoped to its canvas and
-// **role-gated**. Same shape as agentBrowserMcp: a token-scoped stateless loopback
-// server keyed per card by the `X-Canvas-Card` header (`$CANVAS_CARD_ID` from the
-// tmux session, substituted into mcp.json by the CLI).
+// every supervised card via its staged per-card MCP config, giving each agent
+// the tools to act on the Mastermind issue board (MASTERMIND.md) — scoped to
+// its canvas and **role-gated**. Same shape as agentBrowserMcp: a token-scoped
+// stateless loopback server keyed per card by the `X-Canvas-Card` header (a
+// claude card's driver bakes the real cardId in directly; a codex card reads
+// `CANVAS_CARD_ID` from its child env via `env_http_headers`).
 //
 // It talks DIRECTLY to the in-process IssueStore (no command bus) — main is the
 // single arbiter, so a write here is the same atomic check-then-append a human's

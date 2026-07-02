@@ -89,6 +89,52 @@ export interface NewCardResult {
 
 export type AskDecision = 'allow' | 'deny' | 'release'
 
+// MARK: Headless agent sessions (transcript feed)
+//
+// Agent cards run as headless CLI sessions (Agent SDK query() for claude,
+// turn-batched `codex exec --json` for codex) — no tmux, no pty, no terminal
+// display. The transcript is a separate append-only feed alongside CardEvent:
+// CardEvent is a state PATCH folded into CardMeta; TranscriptItem is a feed
+// entry rendered as a conversation. Pushed on 'transcript-item', persisted to
+// SPINE_DIR/transcripts/<cardId>.jsonl, replayed via loadTranscript on mount.
+
+/// One entry in an agent card's transcript. `id` is the upsert key: a
+/// streaming assistant message re-pushes under the SAME id with growing
+/// `text` (streaming: true), then once more finalized (streaming: false) —
+/// the renderer replaces-by-id rather than appending, so load/push overlap
+/// (a push arriving mid-`loadTranscript`) is safe via last-wins-by-id.
+export type TranscriptItemKind = 'user' | 'assistant' | 'tool' | 'turn' | 'system' | 'error'
+
+export interface TranscriptItem {
+  id: string
+  ts: number // epoch ms
+  kind: TranscriptItemKind
+  text: string
+  /** kind 'tool': the tool name and an optional expanded body (input/result). */
+  toolName?: string
+  detail?: string
+  failed?: boolean
+  /** kind 'assistant': true while deltas are still arriving. */
+  streaming?: boolean
+  /** kind 'turn': whether it ended successfully, plus duration if known. */
+  ok?: boolean
+  durationMs?: number
+}
+
+/// Whether a message to an agent was delivered into the live turn (claude:
+/// always; codex: only when idle) or queued behind an in-flight turn (codex,
+/// delivered as the next resume turn once the current one exits).
+export type SendOutcome = 'sent' | 'queued'
+
+/// A shell card's live title bits: the foreground command and the pane's cwd
+/// (which follows the user's `cd`s) — polled for the shell card's title on
+/// both the desktop and the phone. Sourced from the direct pty's pid (no
+/// tmux pane to query) via a ps-walk in main.
+export interface ShellTitle {
+  running?: string
+  cwd?: string
+}
+
 // MARK: Git (diff objects)
 
 export type GitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
@@ -149,11 +195,12 @@ export type CardKind = 'agent' | 'shell' | 'browser'
 
 /// Which coding-agent CLIs can back an `agent` card. THE single source of the
 /// list — `CliKind` and every exhaustive map (`Record<CliKind, …>`: the spine's
-/// adapter registry, the renderer's labels) derive from it, and the orchestrator's
+/// driver registry, the renderer's labels) derive from it, and the orchestrator's
 /// spawn tool feeds it to `z.enum`, so adding a CLI here compile-breaks every
-/// site that must handle it. Each kind maps to a `CliAdapter` in the spine
-/// (launch string, hook config, event mapping). Absent = `claude` (the default
-/// and only orchestrator-backing CLI). Only meaningful for `agent` cards.
+/// site that must handle it. Each kind maps to a `CliDriver` in the spine
+/// (headless session lifecycle, MCP/skill staging, event mapping). Absent =
+/// `claude` (the default and only orchestrator-backing CLI). Only meaningful
+/// for `agent` cards.
 export const CLI_KINDS = ['claude', 'codex'] as const
 export type CliKind = (typeof CLI_KINDS)[number]
 
@@ -165,15 +212,16 @@ export type CliKind = (typeof CLI_KINDS)[number]
 /// (capability) and its skill (behavior).
 export type AgentRole = 'planner' | 'lead' | 'worker'
 
-/** The card-id sentinel a card sends when it has none — the `${CANVAS_CARD_ID:-…}`
- *  default the spine bakes into each card's agent-MCP headers (claudeAdapter
- *  `stageMcp`) and the value the agent browser MCP guard treats as "no card".
- *  Shared so the two ends can't drift apart. */
+/** The card-id sentinel the agent-facing MCP guards treat as "no card" — a
+ *  defensive fallback for a codex card's `X-Canvas-Card` header (read from
+ *  `CANVAS_CARD_ID` in its child env, which the driver always sets, so this
+ *  should never actually be hit in practice). Claude cards bake their real
+ *  cardId into the header directly, never this sentinel. */
 export const UNKNOWN_CARD = 'unknown'
 
 // MARK: Multi-project persistence
 //
-// Card identity is GLOBAL — one tmux session, one CardRecord — while layout is
+// Card identity is GLOBAL — one CardRecord per card — while layout is
 // per-project. Splitting the two is what stops a project losing track of a
 // card's folder from orphaning a live session: restore rebuilds nodes from the
 // `cards` registry, and projects only reference cards by id.
@@ -185,8 +233,10 @@ export interface CardRecord {
   id: string
   folder: string
   kind: CardKind
-  /** Last-known CLI session — keys plan re-hydration across an app restart
-   *  (tmux). Stale ids are harmless. */
+  /** An agent card's CLI session/thread id — a headless session does NOT
+   *  survive an app restart, so this is what its first `sendToCard` after a
+   *  relaunch resumes. Stale ids are harmless (the driver falls back to a
+   *  fresh session). */
   session?: string
   /** Display name (default "Agent N"), set by the user or the orchestrator. */
   name?: string
@@ -194,15 +244,14 @@ export interface CardRecord {
    *  treated as a worker by the issue MCP. Persisted so the org survives restart. */
   role?: AgentRole
   /** Which CLI backs this agent card (claude/codex). Absent = claude. Persisted so
-   *  a reattached card keeps the right adapter's launch/hook/event mapping. */
+   *  a restored card resolves the right driver's launch/event mapping. */
   cli?: CliKind
   /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
    *  (the live snapshot is transient and never persisted). */
   url?: string
   /** A browser card's owning agent card id (request_browser link) — persisted so
-   *  the ownership survives a restart: agents reattach to their live tmux session
-   *  (reattach-not-resume), so a re-request must resolve the SAME browser instead
-   *  of spawning an orphaned second one. */
+   *  the ownership survives a restart: a re-request must resolve the SAME
+   *  browser instead of spawning an orphaned second one. */
   ownerCardId?: string
   /** A browser card's stated purpose (window-bar provenance) — persisted with the
    *  owner link so the restored card still reads "why". */
@@ -274,8 +323,8 @@ export interface RemoteState {
     loud: boolean
     since: number // epoch seconds the status began
     task?: string
-    /** A shell card's foreground command (tmux pane) — the desktop shows it on
-     *  the shell face; the phone shows it on the list row. */
+    /** A shell card's foreground command (its direct pty) — the desktop shows
+     *  it on the shell face; the phone shows it on the list row. */
     running?: string
     /** A browser card's current page url — so the orchestrator (and phone) can
      *  see where it's pointed. */
@@ -322,14 +371,10 @@ export interface RemoteState {
   needsYou: number
 }
 
-/// Are the canvas's substrate tools on this Mac? `claude` and `tmux` gate the
-/// app (nothing to supervise without the agent; sessions die with the app
-/// without tmux); `brew` only decides whether `brew install tmux` is a real
-/// offer. (Port of the Swift Readiness core.)
+/// Are the canvas's substrate tools on this Mac? `claude` gates the app —
+/// nothing to supervise without the agent. (Port of the Swift Readiness core.)
 export interface AppReadiness {
   claudeFound: boolean
-  tmuxFound: boolean
-  brewFound: boolean
   /** The host is signed into Claude (an OAuth token is exported, or a stored
    *  `claude login` session exists) — the orchestrator reuses it. Optional: the
    *  canvas and its cards work without it. */
@@ -1020,18 +1065,32 @@ export interface CanvasApi {
   newBrowser(folder?: string, url?: string): Promise<NewCardResult | null>
   /** Native folder picker — used when creating a project to set its dir. */
   pickFolder(message: string): Promise<string | null>
-  /** Spawn the card's pty if it isn't running — called on CardNode mount, so
-   *  the terminal is always subscribed before the first byte arrives. tmux
-   *  `new-session -A` makes this the restore path too (reattach or create). */
-  ensureCard(
-    cardId: string,
-    folder: string,
-    cols: number,
-    rows: number,
-    kind: CardKind,
-    /** Which CLI backs an agent card (default claude). Ignored for shell/browser. */
-    cli?: CliKind,
-  ): Promise<void>
+  /** Ensure an agent card's headless session exists (idempotent — a no-op if
+   *  it's already running). Called from a `CardNode` effect (not on terminal
+   *  mount — there is no terminal), so a freshly spawned STACKED agent still
+   *  starts working immediately. Lazy on restore: does not resume a session
+   *  by itself — the first `sendToCard` does that. */
+  startAgent(cardId: string, folder: string, cli?: CliKind): Promise<void>
+  /** Spawn a shell card's direct pty (no tmux) if it isn't running — called on
+   *  TerminalView mount, after subscribing to `onPtyData`. */
+  ensureShell(cardId: string, folder: string, cols: number, rows: number): Promise<void>
+  /** Send a message to an agent card's live session — 'sent' if it was
+   *  delivered into the current turn, 'queued' if it will run as the next
+   *  turn once the in-flight one finishes (codex only; claude always 'sent').
+   *  Echoed back as a 'user' TranscriptItem immediately either way. */
+  sendToCard(cardId: string, text: string): Promise<SendOutcome>
+  /** Stop an agent card's in-flight turn without ending the session — any
+   *  queued sends are preserved and the session stays resumable. */
+  interruptCard(cardId: string): void
+  /** An agent card's persisted transcript, oldest first — the initial paint
+   *  before the live `onTranscriptItem` feed takes over. */
+  loadTranscript(cardId: string): Promise<TranscriptItem[]>
+  /** The role skills a card can invoke — the composer's `/` picker. Names are
+   *  CLI-agnostic; the renderer prefixes each per the card's CLI. */
+  listSkills(): Promise<{ name: string; description: string }[]>
+  /** Repo files under `folder` (relative paths) — the composer's `@` picker,
+   *  filtered client-side as the user types. Empty if not a git repo. */
+  searchFiles(folder: string): Promise<string[]>
   /** Which coding-agent CLIs are installed on PATH — the spawn picker's options. */
   availableClis(): Promise<CliKind[]>
   killCard(cardId: string): Promise<void>
@@ -1040,14 +1099,6 @@ export interface CanvasApi {
   setInitialPrompt(cardId: string, prompt: string): void
   loadWorkspace(): Promise<MultiProjectSnapshot | null>
   saveWorkspace(snapshot: MultiProjectSnapshot): void
-  /** The foreground process in a shell card's pane (`zsh` idle, `node`/`vim`/…
-   *  while running) — polled for the shell card's title. Null when the
-   *  session is gone or tmux is unavailable. */
-  paneCommand(cardId: string): Promise<string | null>
-  /** A shell card's pane working directory, following the user's `cd`s — polled
-   *  for the shell card's title. Null when the session is gone or tmux is
-   *  unavailable. */
-  paneCwd(cardId: string): Promise<string | null>
   // Diff: built into every canvas with a dir, watching that folder.
   /** Start polling a folder's working tree; snapshots arrive on onDiffSnapshot. */
   watchDiff(diffId: string, folder: string): Promise<void>
@@ -1063,10 +1114,9 @@ export interface CanvasApi {
   revealFolder(folder: string): Promise<void>
   /** Open a canvas's folder in a GUI editor (code/cursor); false if none found. */
   openInEditor(folder: string): Promise<boolean>
+  /** Shell cards only. */
   write(cardId: string, data: string): void
-  /** Exit tmux scrollback (copy-mode) if the card's session is in it —
-   *  awaited before the first keystroke after a wheel-scroll. */
-  leaveScrollback(cardId: string): Promise<void>
+  /** Shell cards only. */
   resize(cardId: string, cols: number, rows: number): void
   decide(askId: string, decision: AskDecision): void
   /** Answer a held AskUserQuestion with the chosen option(s) — the CLI injects
@@ -1076,9 +1126,21 @@ export interface CanvasApi {
   /** Release every held ask for a card — the fly-in path: while held, the
    *  terminal shows no dialog, so focusing the terminal must release. */
   releaseAsks(cardId: string): void
+  /** Shell cards only (agents have no pty). */
   onPtyData(cb: (cardId: string, data: string) => void): () => void
+  /** Shell cards only. Agent cards never emit this — see `onSessionEnded`. */
   onPtyExit(cb: (cardId: string) => void): () => void
   onCardEvent(cb: (cardId: string, event: CardEvent) => void): () => void
+  /** One transcript entry for an agent card — upsert by `TranscriptItem.id`
+   *  (a streaming assistant message re-pushes under the same id). */
+  onTranscriptItem(cb: (cardId: string, item: TranscriptItem) => void): () => void
+  /** An agent card's headless session ended (turn loop exited, process died,
+   *  or was killed) — the agent-card analogue of `onPtyExit`. The next
+   *  `sendToCard` resumes a fresh session from the persisted session id. */
+  onSessionEnded(cb: (cardId: string, reason?: string) => void): () => void
+  /** A shell card's live title bits (foreground command + cwd) — polled by
+   *  `useShellTitles`. Null when the session is gone. */
+  shellTitle(cardId: string): Promise<ShellTitle | null>
   onAsk(cb: (ask: PermissionAskInfo) => void): () => void
   /** A held AskUserQuestion arrived — render the chooser. */
   onQuestion(cb: (ask: QuestionAskInfo) => void): () => void
@@ -1087,7 +1149,7 @@ export interface CanvasApi {
   publishRemoteState(state: RemoteState): void
   /** Probe tailscale + serve status for the panel's port. */
   checkRemoteReadiness(): Promise<RemoteReadiness>
-  /** Probe claude/tmux/brew — drives the blocking setup gate. */
+  /** Probe claude — drives the blocking setup gate. */
   checkAppReadiness(): Promise<AppReadiness>
   /** An ask was answered from the remote panel — clear its toast. */
   onAskDecided(cb: (askId: string) => void): () => void

@@ -3,15 +3,17 @@ import { autoUpdater } from 'electron-updater'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Spine, SPINE_DIR } from './spine/spine'
-import type { McpStageOpts } from './spine/cliAdapter'
+import type { McpStageOpts } from './spine/driver'
 import { PtyRegistry } from './ptys'
+import { foregroundCommand, paneCwd } from './spine/ptyTitles'
 import { WorkspaceStore } from './workspace'
 import { IssueStore } from './issueStore'
 import { setMastermindRoot } from './mastermind/paths'
 import { setSkillsChangedListener } from './mastermind/learning'
 import { skillsSnapshot } from './mastermind/skills'
 import { execFile } from 'node:child_process'
-import { gitAction, gitFileDiff, gitIdentity } from './git/git'
+import { gitAction, gitFileDiff, gitIdentity, listRepoFiles } from './git/git'
+import { CANVAS_SKILLS } from './mastermind/roleSkills'
 import { DiffWatchers } from './git/watchers'
 import { checkAppReadiness, checkRemoteReadiness } from './remote/readiness'
 import { Orchestrator } from './orchestrator/manager'
@@ -63,8 +65,8 @@ let voice: SonioxVoice | null = null
 let stallSweep: ReturnType<typeof setInterval> | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let nextItem = 1
-/** Initial prompts queued for a card before its pty spawns — delivered as
- *  claude's initial prompt by ensure-card (one-shot, so a spawned agent boots
+/** Initial prompts queued for an agent card before its session starts —
+ *  delivered as turn 0 by start-agent (one-shot, so a spawned agent boots
  *  already working on the task instead of racing a keystroke injection). */
 const pendingPrompts = new Map<string, string>()
 
@@ -264,10 +266,8 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(true))
   session.defaultSession.setPermissionCheckHandler(() => true)
   spine.onUpdate = (cardId, event) => send('card-event', cardId, event)
-  spine.onAsk = (ask) => {
-    send('permission-ask', ask)
-    orchestrator?.notifyAsk(ask) // second heartbeat: wake on blocks, not just turns
-  }
+  spine.onTranscriptItem = (cardId, item) => send('transcript-item', cardId, item)
+  spine.onSessionEnded = (cardId, reason) => send('session-ended', cardId, reason)
   spine.start()
   // The issue store: replay the log into memory before the window can ask for it,
   // and re-push the whole projection to the board on every applied action.
@@ -317,15 +317,11 @@ app.whenReady().then(() => {
     // The off-card idea tournament writes its Conception and runs in the canvas repo.
     applyIssue: (a) => issues.apply(a),
     canvasDir: (projectId) => latestWorkspace?.projects.find((p) => p.id === projectId)?.dir,
-    writeToCard: (cardId, data) => ptys.write(cardId, data),
+    sendAgent: (cardId, text) => spine.sendToAgent(cardId, text),
     getReply: (cardId) => spine.lastReply(cardId),
     // A role skill's invocation in the target CLI's native syntax — resolved by
-    // the spine's adapter registry, so the bus never branches on CliKind.
+    // the spine's driver registry, so the bus never branches on CliKind.
     skillRef: (cli, name) => spine.skillRef(cli, name),
-    decideAsk: (askId, decision) => {
-      spine.decide(askId, decision)
-      send('ask-decided', askId) // clear the renderer's toast (as the phone path does)
-    },
     // Tier-B CDP browser driving (falls back to the renderer path on failure).
     browser: browserController,
     // Play the scan-line flourish on a browser card when its page is captured.
@@ -341,8 +337,8 @@ app.whenReady().then(() => {
     pushToPhone: (title, body) => spine.remote.pushNote(title, body),
   })
   // Echo every agent's finished turn into the supervision chat the instant its
-  // Stop hook fires — the orchestrator becomes aware of the fleet, not just
-  // commanded by it.
+  // session reports one — the orchestrator becomes aware of the fleet, not
+  // just commanded by it.
   spine.onReply = (cardId, reply) => orchestrator?.notifyAgentReply(cardId, reply)
   // Board milestones (e.g. a plan was approved) wake the mastermind to drive the
   // next cascade step — partner/autonomous only; manual ignores them.
@@ -388,7 +384,7 @@ app.whenReady().then(() => {
   agentCanvasMcp = canvasMcp
   // Every agent-facing MCP server rides the same lifecycle: bind its stable
   // (persisted) port, then attachMcp persists it and stages the per-card config
-  // across every CLI adapter. The id doubles as the card's tool namespace
+  // across every CLI driver. The id doubles as the card's tool namespace
   // (`mcp__<id>__*`). Adding a server = construct it above, list it here.
   const agentMcps: [id: string, server: AgentMcpServer, opts?: McpStageOpts][] = [
     ['browser', agentBrowserMcp],
@@ -478,7 +474,9 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => app.quit())
-// Quitting only detaches tmux clients — the fleet keeps working by design.
+// Quitting ends every agent session (interrupt, not a hard kill — both
+// drivers persist their transcript incrementally, so at most one in-flight
+// tool call is lost) rather than leaving the fleet executing unsupervised.
 app.on('before-quit', () => {
   workspace.flush()
   issues.compact() // no-op today (each apply is durable); the future-compaction seam
@@ -487,6 +485,7 @@ app.on('before-quit', () => {
   diffWatchers.disposeAll()
   orchestrator?.dispose()
   voice?.dispose()
+  spine.shutdown()
 })
 
 async function pickFolder(message: string): Promise<string | null> {
@@ -553,41 +552,51 @@ ipcMain.handle('open-in-editor', async (_e, folder: string) => {
   return false
 })
 
-ipcMain.handle(
-  'ensure-card',
-  (
-    _e,
-    cardId: string,
-    folder: string,
-    cols: number,
-    rows: number,
-    kind: 'agent' | 'shell',
-    cli?: CliKind,
-  ) => {
-    if (ptys.has(cardId)) return
-    const initialPrompt = pendingPrompts.get(cardId)
-    pendingPrompts.delete(cardId)
-    ptys.spawn(
-      cardId,
-      spine.launch(cardId, folder, { bareShell: kind === 'shell', initialPrompt, cli }),
-      {
-        onData: (d) => send('pty-data', cardId, d),
-        onExit: () => send('pty-exit', cardId),
-      },
-      cols,
-      rows,
-    )
-  },
-)
+// Agent cards are headless (see spine.ts) — no pty, no cols/rows. Called from
+// the card's CardNode mount effect; idempotent (ensureAgent no-ops if the
+// session is already registered), so a re-mount (project switch) is free.
+ipcMain.handle('start-agent', (_e, cardId: string, folder: string, cli?: CliKind) => {
+  const initialPrompt = pendingPrompts.get(cardId)
+  pendingPrompts.delete(cardId)
+  const resume = latestWorkspace?.cards.find((c) => c.id === cardId)?.session
+  spine.ensureAgent(cardId, folder, { cli, initialPrompt, resume })
+})
+
+// Shell cards keep a direct pty (no tmux, no agent session) — a plain login
+// shell. Called from TerminalView's mount, after subscribing to pty-data.
+ipcMain.handle('ensure-shell', (_e, cardId: string, folder: string, cols: number, rows: number) => {
+  if (ptys.has(cardId)) return
+  const shellBin = process.env.SHELL ?? '/bin/zsh'
+  ptys.spawn(
+    cardId,
+    { file: shellBin, args: ['-l'], cwd: folder, env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string> },
+    { onData: (d) => send('pty-data', cardId, d), onExit: () => send('pty-exit', cardId) },
+    cols,
+    rows,
+  )
+})
+
+ipcMain.handle('send-to-card', (_e, cardId: string, text: string) => spine.sendToAgent(cardId, text))
+ipcMain.on('interrupt-card', (_e, cardId: string) => spine.interruptAgent(cardId))
+ipcMain.handle('load-transcript', (_e, cardId: string) => spine.loadTranscript(cardId))
+// Composer pickers: the card's invokable role skills (`/`) and the repo's files
+// (`@`). Both are CLI-agnostic — the renderer prefixes the skill per the card's
+// CLI and filters the file list client-side as the user types.
+ipcMain.handle('list-skills', () => CANVAS_SKILLS.map((s) => ({ name: s.name, description: s.description })))
+ipcMain.handle('search-files', (_e, folder: string) => listRepoFiles(folder))
+ipcMain.handle('shell-title', async (_e, cardId: string) => {
+  const pid = ptys.pid(cardId)
+  if (pid === undefined) return null
+  const [running, cwd] = await Promise.all([foregroundCommand(pid), paneCwd(pid)])
+  return { running: running ?? undefined, cwd: cwd ?? undefined }
+})
 
 ipcMain.handle('available-clis', () => spine.availableClis())
-ipcMain.handle('pane-command', (_e, cardId: string) => spine.paneCommand(cardId))
-ipcMain.handle('pane-cwd', (_e, cardId: string) => spine.paneCwd(cardId))
 ipcMain.handle('load-workspace', async () => {
   const ws = await workspace.load()
   latestWorkspace = ws // seed the dir lookup before the renderer's first save-back
-  // Seed each agent card's CLI into the spine, so hooks from tmux sessions that
-  // survived the restart resolve the right adapter before their cards remount.
+  // Seed each agent card's CLI into the spine now, so its first startAgent
+  // (on CardNode mount) resolves the right driver.
   for (const c of ws?.cards ?? []) {
     if (c.kind === 'agent' && c.cli) spine.setCardCli(c.id, c.cli)
   }
@@ -601,55 +610,47 @@ ipcMain.handle('load-issue-store', () => issues.snapshot())
 ipcMain.handle('issue-action', (_e, action: IssueActionRequest) => issues.apply(action))
 ipcMain.handle('load-mastermind-skills', () => skillsSnapshot())
 
+// kill-card is kind-agnostic at the call site: shells have a pty to kill,
+// agents have a session (ptys.kill/spine.killCard are each no-ops for a card
+// they don't recognize), browsers have neither (the renderer skips this call
+// for browser ids — see Canvas's onCloseCard).
 ipcMain.handle('kill-card', (_e, cardId: string) => {
   ptys.kill(cardId)
-  spine.killSession(cardId)
+  spine.killCard(cardId)
 })
 
+// Shell cards only now — agent cards have no terminal to write into.
 ipcMain.on('pty-write', (_e, cardId: string, data: string) => ptys.write(cardId, data))
-ipcMain.handle('leave-scrollback', (_e, cardId: string) => spine.leaveScrollback(cardId))
 ipcMain.on('pty-resize', (_e, cardId: string, cols: number, rows: number) =>
   ptys.resize(cardId, cols, rows),
 )
-// Ask decisions route to whichever holder owns the id: a `q-<n>` ask_user call
-// lives in the canvas MCP (answer/decline settle the held tool call); an
-// `ask-<n>` permission ask lives in the spine. The canvas MCP's methods return
-// false when they don't own the id, so decide falls through to the spine.
-// Questions have exactly one holder — the canvas MCP (AskUserQuestion is
-// disallowed on every card, so a question can never be a spine ask).
-ipcMain.on('decide-ask', (_e, askId: string, decision: AskDecision) => {
-  if (!agentCanvasMcp?.decline(askId)) spine.decide(askId, decision)
+// `ask_user` (q-<n>) is the ONLY question/decision channel left — the spine's
+// permission-ask hold (ask-<n>) died with the hook transport (headless cards
+// run unattended; there's no permission dialog to hold open).
+ipcMain.on('decide-ask', (_e, askId: string, _decision: AskDecision) => {
+  agentCanvasMcp?.decline(askId)
 })
 ipcMain.on('answer-question', (_e, askId: string, answers: QuestionAnswers) => {
   agentCanvasMcp?.answer(askId, answers)
 })
 ipcMain.on('release-asks', (_e, cardId: string) => {
-  spine.releaseFor(cardId)
   agentCanvasMcp?.releaseFor(cardId)
 })
 
 // MARK: Remote panel — the renderer mirrors its attention state out, and
-// decisions made on the phone flow back through the same spine.decide as the
-// in-app toasts (then notify the renderer so the toast clears).
+// questions answered/declined from the phone flow back through the same
+// agentCanvasMcp holder as the in-app toasts (then notify the renderer so
+// the toast clears).
 ipcMain.on('publish-remote-state', (_e, state: RemoteState) => spine.remote.publish(state))
 ipcMain.handle('check-remote-readiness', () => checkRemoteReadiness(spine.remote.port))
-ipcMain.handle('check-app-readiness', async () => {
-  const report = await checkAppReadiness()
-  // tmux landed after launch (the gate's install path) → arm the substrate
-  // now so the first card spawns into a session, not a bare pty.
-  if (report.tmuxFound) spine.ensureTmuxPrepared()
-  return report
-})
-spine.remote.onDecide = (askId, allow) => {
-  spine.decide(askId, allow ? 'allow' : 'deny')
-  send('ask-decided', askId)
-}
+ipcMain.handle('check-app-readiness', () => checkAppReadiness())
+spine.remote.getTranscript = (cardId) => spine.loadTranscript(cardId)
 spine.remote.onAnswer = (askId, answers) => {
   agentCanvasMcp?.answer(askId, answers)
   send('question-decided', askId)
 }
 spine.remote.onDecline = (askId) => {
-  if (!agentCanvasMcp?.decline(askId)) spine.decide(askId, 'deny')
+  agentCanvasMcp?.decline(askId)
   send('question-decided', askId)
 }
 // Skip the phone push when you're already at the desktop.

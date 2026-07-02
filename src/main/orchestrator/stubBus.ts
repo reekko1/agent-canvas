@@ -184,14 +184,6 @@ export function makeStubBus(): CommandBus {
       return { ok: true, message: `closed ${card.name} (${cardId})` }
     },
 
-    async approveAsk(askId: string, decision: 'allow' | 'deny'): Promise<ActionResult> {
-      const i = world.approvals.findIndex((a) => a.id === askId)
-      if (i < 0) return { ok: false, message: `no pending ask with id ${askId}` }
-      const [ask] = world.approvals.splice(i, 1)
-      world.needsYou = Math.max(0, world.needsYou - 1)
-      return { ok: true, message: `${decision === 'allow' ? 'approved' : 'denied'} ${ask.name}'s request` }
-    },
-
     async notifyUser(message: string): Promise<ActionResult> {
       return { ok: true, message: `(stub) pushed to Rakan's phone: ${message}` }
     },

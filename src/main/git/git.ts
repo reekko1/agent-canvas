@@ -34,6 +34,22 @@ function git(
   })
 }
 
+/** Repo files under `folder`, relative paths — tracked plus untracked-not-ignored
+ *  (`--exclude-standard`), deduped and sorted. Feeds the composer's `@` file
+ *  picker; the renderer filters this list client-side as the user types. Empty
+ *  if the folder isn't a git repo. Capped defensively for a huge monorepo. */
+export async function listRepoFiles(folder: string, cap = 5000): Promise<string[]> {
+  const r = await git(['ls-files', '--cached', '--others', '--exclude-standard'], folder)
+  if (r.code !== 0) return []
+  const seen = new Set<string>()
+  for (const line of r.out.split('\n')) {
+    const p = line.trim()
+    if (p) seen.add(p)
+    if (seen.size >= cap) break
+  }
+  return [...seen].sort()
+}
+
 const NOT_REPO: GitSnapshot = { isRepo: false, changes: [], totalAdded: 0, totalRemoved: 0, signature: '' }
 const CLEAN: GitSnapshot = { isRepo: true, changes: [], totalAdded: 0, totalRemoved: 0, signature: 'clean' }
 

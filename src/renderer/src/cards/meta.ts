@@ -22,8 +22,8 @@ export interface CardMeta {
   status: CardStatus
   /** When the status last changed — feeds the "· 14m" attention-debt suffix. */
   statusSince?: number
-  /** The CLI session running in this card — persisted (unlike status) because
-   *  a tmux session outlives the app: it keys plan re-hydration on restart. */
+  /** The CLI's own session/thread id — persisted (unlike status) so a
+   *  relaunched card's first send resumes the same conversation. */
   sessionId?: string
   detail?: string
   task?: string
@@ -47,9 +47,9 @@ export interface BrowserNavPatch {
 
 export interface CardData extends Record<string, unknown> {
   folder: string
-  /** 'agent' = watched claude session; 'shell' = bare $SHELL, no hooks — the
-   *  spine never speaks about it, so its meta stays idle forever; 'browser' =
-   *  an in-app <webview>, no tmux/pty session, neutral chrome. */
+  /** 'agent' = a headless CLI session (claude or codex); 'shell' = bare
+   *  $SHELL, no session for the spine to speak about, so its meta stays idle
+   *  forever; 'browser' = an in-app <webview>, no session at all, neutral chrome. */
   kind: CardKind
   /** Display name — defaults to "Agent N" for agents; user/orchestrator renameable. */
   name?: string
@@ -57,15 +57,15 @@ export interface CardData extends Record<string, unknown> {
    *  grant. Absent = a plain agent (worker). Persisted via CardRecord. */
   role?: AgentRole
   /** Which CLI backs this agent card (claude/codex) — chosen at spawn, passed to
-   *  ensureCard so the spine launches the right adapter. Absent = claude. Persisted. */
+   *  startAgent so the spine picks the right driver. Absent = claude. Persisted. */
   cli?: CliKind
   /** Current page — only for `kind === 'browser'`. Tracked live from the
    *  webview's navigation and persisted (the card reloads it on restore). */
   url?: string
   /** A browser card's owning agent card id — set when an agent requested it via
    *  request_browser. Lets the agent MCP server resolve "my browser". Persisted
-   *  (CardRecord) so the link survives a restart: agents reattach to live tmux
-   *  sessions, so a re-request must find the same browser, not spawn a new one. */
+   *  (CardRecord) so the link survives a restart: a re-request must find the
+   *  same browser, not spawn a new one. */
   ownerCardId?: string
   /** A browser card's stated purpose (why its owner opened it) — rendered on the
    *  window bar for provenance. Persisted alongside the owner link. */
@@ -83,9 +83,6 @@ export interface CardData extends Record<string, unknown> {
   goto?: { url: string; nonce: number }
   meta: CardMeta
   onClose: (cardId: string) => void
-  /** Terminal engaged (mousedown) — releases any held asks to the native
-   *  dialog and clears their toasts. */
-  onEngage: (cardId: string) => void
   /** Promote this card to the master slot — fired when its stacked poster is
    *  clicked. No-op when it's already the master. */
   onPromote: (cardId: string) => void
@@ -96,7 +93,7 @@ export interface CardData extends Record<string, unknown> {
 }
 
 /** Fold one spine event into a card's meta (pure — the canvas owns the state,
- *  the adapter stays stateless, and this stays testable). */
+ *  the driver stays stateless, and this stays testable). */
 export function applyCardEvent(m: CardMeta, ev: CardEvent): CardMeta {
   const meta = { ...m }
   if (ev.status) {

@@ -28,9 +28,11 @@ hooks it composes, and IPC goes through `window.canvas.*`.
   Pure presentation — all geometry/state arrives as props.
 - **ActionRail.tsx** — the floating left rail: new agent / terminal / browser
   (disabled with no active canvas) + remote-access entry. New-agent opens a menu
-  of installed CLIs (`window.canvas.availableClis()`, probed once, empty falls
-  back to `['claude']` so the menu is never blank) — picking one threads a
-  `CliKind` into `onAddCard`/`makeCard`. No per-CLI caveats: every card runs
+  of installed CLIs (`window.canvas.availableClis()`, probed at mount and
+  re-probed on each menu open — stale-while-revalidate, so a CLI installed
+  mid-session appears without a relaunch; empty falls back to `['claude']` so
+  the menu is never blank) — picking one threads a `CliKind` into
+  `onAddCard`/`makeCard`. No per-CLI caveats: every card runs
   unattended by default (the spine's launch flags), whichever CLI backs it.
 - **SheetRail.tsx** — the floating **right** rail, mirror of `ActionRail`: the
   toggles for the diff drawer, the vision sheet, the skills gallery, and the issues

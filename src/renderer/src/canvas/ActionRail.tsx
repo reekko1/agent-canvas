@@ -20,11 +20,13 @@ export function ActionRail(props: {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // Probe installed CLIs once; empty (nothing on PATH) falls back to claude so
-  // the menu is never blank.
+  // Probe installed CLIs at mount and re-probe on every menu toggle
+  // (stale-while-revalidate) — a CLI installed mid-session, or via a future
+  // install-missing-CLI button, shows up without a relaunch. Empty (nothing
+  // on PATH) falls back to claude so the menu is never blank.
   useEffect(() => {
     void window.canvas.availableClis().then((found) => setClis(found.length ? found : ['claude']))
-  }, [])
+  }, [menuOpen])
 
   useDismiss(menuRef, () => setMenuOpen(false), menuOpen)
 

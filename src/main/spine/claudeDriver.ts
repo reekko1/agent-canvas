@@ -120,6 +120,7 @@ export class ClaudeDriver implements CliDriver {
       options: {
         cwd: spec.folder,
         ...(spec.resume ? { resume: spec.resume } : {}),
+        ...(spec.model ? { model: spec.model } : {}),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         // The always-on supervision briefing, appended to Claude Code's own
@@ -184,6 +185,13 @@ export class ClaudeDriver implements CliDriver {
       async interrupt(): Promise<void> {
         interruptedFlag = true
         await q.interrupt()
+      },
+      setModel(model: string): void {
+        void q.setModel(model)
+      },
+      async supportedModels() {
+        const models = await q.supportedModels()
+        return models.map((m) => ({ id: m.value, name: m.displayName, description: m.description }))
       },
       kill(): void {
         if (disposed) return

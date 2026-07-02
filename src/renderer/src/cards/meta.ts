@@ -59,6 +59,9 @@ export interface CardData extends Record<string, unknown> {
   /** Which CLI backs this agent card (claude/codex) — chosen at spawn, passed to
    *  startAgent so the spine picks the right driver. Absent = claude. Persisted. */
   cli?: CliKind
+  /** Selected model id (as `listModels` reports it). Absent = the CLI's default.
+   *  Persisted (CardRecord) + re-applied when the session next starts. */
+  model?: string
   /** Current page — only for `kind === 'browser'`. Tracked live from the
    *  webview's navigation and persisted (the card reloads it on restore). */
   url?: string
@@ -90,6 +93,10 @@ export interface CardData extends Record<string, unknown> {
    *  folds the patch back into the node so persistence (url) and the chrome /
    *  face (title, favicon, snapshot) track the live webview. */
   onNavigate: (cardId: string, patch: BrowserNavPatch) => void
+  /** Change this agent card's model — persists the choice on the node and
+   *  live-switches the session. Wired by Canvas; consumed by the composer's
+   *  model picker (agent cards only). */
+  onModelChange?: (model: string) => void
 }
 
 /** Fold one spine event into a card's meta (pure — the canvas owns the state,

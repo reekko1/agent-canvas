@@ -558,8 +558,8 @@ ipcMain.handle('open-in-editor', async (_e, folder: string) => {
 ipcMain.handle('start-agent', (_e, cardId: string, folder: string, cli?: CliKind) => {
   const initialPrompt = pendingPrompts.get(cardId)
   pendingPrompts.delete(cardId)
-  const resume = latestWorkspace?.cards.find((c) => c.id === cardId)?.session
-  spine.ensureAgent(cardId, folder, { cli, initialPrompt, resume })
+  const record = latestWorkspace?.cards.find((c) => c.id === cardId)
+  spine.ensureAgent(cardId, folder, { cli, initialPrompt, resume: record?.session, model: record?.model })
 })
 
 // Shell cards keep a direct pty (no tmux, no agent session) — a plain login
@@ -584,6 +584,10 @@ ipcMain.handle('load-transcript', (_e, cardId: string) => spine.loadTranscript(c
 // CLI and filters the file list client-side as the user types.
 ipcMain.handle('list-skills', () => CANVAS_SKILLS.map((s) => ({ name: s.name, description: s.description })))
 ipcMain.handle('search-files', (_e, folder: string) => listRepoFiles(folder))
+// Model picker: the card's runnable models (claude live / codex static) and a
+// live switch. Persisting the choice on the CardRecord is the renderer's job.
+ipcMain.handle('list-models', (_e, cardId: string) => spine.listModels(cardId))
+ipcMain.on('set-card-model', (_e, cardId: string, model: string) => spine.setAgentModel(cardId, model))
 ipcMain.handle('shell-title', async (_e, cardId: string) => {
   const pid = ptys.pid(cardId)
   if (pid === undefined) return null

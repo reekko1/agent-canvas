@@ -2,14 +2,31 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { unstable_useMentionAdapter, type Unstable_Mention } from '@assistant-ui/react'
 import type { DirectiveChipProps } from '@assistant-ui/react-lexical'
 import { FileIcon, SparklesIcon } from 'lucide-react'
-import type { CliKind } from '@shared/types'
+import type { CliKind, ModelChoice } from '@shared/types'
 import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
+import {
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorRoot,
+  ModelSelectorTrigger,
+} from '@/components/assistant-ui/model-selector'
 
-/// Per-card context so the (generic, copied) Thread composer can build pickers
-/// scoped to THIS card: its CLI (for the skill-invocation prefix) and folder
-/// (for the repo file list). Provided by TranscriptView; consumed by the
-/// composer's `<CardComposerTriggers>`.
-export const CardChatContext = createContext<{ cli: CliKind; folder: string } | null>(null)
+/// Per-card context so the (generic, copied) Thread composer can build controls
+/// scoped to THIS card: its id (skills/models/file IPCs are per-card), CLI (the
+/// skill-invocation prefix), folder (the repo file list), the selected model,
+/// and a setter that persists + live-switches it. Provided by TranscriptView.
+export const CardChatContext = createContext<{
+  cardId: string
+  cli: CliKind
+  folder: string
+  model?: string
+  onModelChange?: (model: string) => void
+  /** The card's runnable models, loaded once by TranscriptView (it doubles as
+   *  the session-readiness probe). `null` = still loading; `[]` = none. */
+  models: ModelChoice[] | null
+} | null>(null)
 
 // Skill invocation prefix per CLI — mirrors each driver's skillRef():
 // claude `/canvas-skills:<name>`, codex `$canvas-skills:<name>`.
@@ -73,6 +90,33 @@ export function CardComposerTriggers() {
         emptyItemsLabel="No matching files"
       />
     </>
+  )
+}
+
+/// The composer's model picker — purely presentational off the loaded model
+/// list (TranscriptView owns the fetch, since it doubles as the session-
+/// readiness probe). `null` = still loading (rare here: for a fresh card the
+/// whole surface shows the init shimmer until this resolves, so by the time the
+/// composer renders the list is usually ready). Selecting one live-switches the
+/// session and persists the choice (`onModelChange`).
+export function CardModelSelector() {
+  const ctx = useContext(CardChatContext)
+  if (!ctx) return null
+  const models = ctx.models
+  if (models === null) return <div className="h-8 w-24 animate-pulse rounded-md bg-muted/60" aria-hidden />
+  if (models.length === 0) return null
+  return (
+    <ModelSelectorRoot models={models} value={ctx.model} onValueChange={ctx.onModelChange}>
+      <ModelSelectorTrigger variant="ghost" size="sm" />
+      <ModelSelectorContent>
+        <ModelSelectorList>
+          <ModelSelectorEmpty />
+          {models.map((m) => (
+            <ModelSelectorItem key={m.id} model={m} />
+          ))}
+        </ModelSelectorList>
+      </ModelSelectorContent>
+    </ModelSelectorRoot>
   )
 }
 

@@ -103,6 +103,16 @@ export type AskDecision = 'allow' | 'deny' | 'release'
 /// `text` (streaming: true), then once more finalized (streaming: false) —
 /// the renderer replaces-by-id rather than appending, so load/push overlap
 /// (a push arriving mid-`loadTranscript`) is safe via last-wins-by-id.
+/// One model a card can run, for the composer's model picker. `id` is what the
+/// driver receives (claude `options.model` / codex `-m`); `name`/`description`
+/// are display. claude fills these from the SDK's live model list; codex from a
+/// maintained static list.
+export interface ModelChoice {
+  id: string
+  name: string
+  description?: string
+}
+
 export type TranscriptItemKind = 'user' | 'assistant' | 'tool' | 'turn' | 'system' | 'error'
 
 export interface TranscriptItem {
@@ -204,6 +214,11 @@ export type CardKind = 'agent' | 'shell' | 'browser'
 export const CLI_KINDS = ['claude', 'codex'] as const
 export type CliKind = (typeof CLI_KINDS)[number]
 
+/// Human-readable name per CLI — the single source for any UI that shows a
+/// card's backing CLI (the new-agent menu, the init shimmer). A `Record<CliKind,
+/// …>`, so adding a CLI compile-breaks here until it's named.
+export const CLI_LABEL: Record<CliKind, string> = { claude: 'Claude Code', codex: 'Codex' }
+
 /// An agent card's role in the Mastermind org (MASTERMIND.md). `worker` is the
 /// default; `planner` writes the plan, `lead` decomposes the plan into issues and
 /// coordinates. (The autonomous head is NOT a card role — the idea tournament runs
@@ -246,6 +261,10 @@ export interface CardRecord {
   /** Which CLI backs this agent card (claude/codex). Absent = claude. Persisted so
    *  a restored card resolves the right driver's launch/event mapping. */
   cli?: CliKind
+  /** The selected model id (as `listModels` reports it). Absent = the CLI's own
+   *  default. Persisted so a chosen model survives relaunch — re-applied when
+   *  the card's session next starts. */
+  model?: string
   /** Last-navigated page — only set for `kind === 'browser'`; reload-on-restore
    *  (the live snapshot is transient and never persisted). */
   url?: string
@@ -1085,6 +1104,14 @@ export interface CanvasApi {
   /** An agent card's persisted transcript, oldest first — the initial paint
    *  before the live `onTranscriptItem` feed takes over. */
   loadTranscript(cardId: string): Promise<TranscriptItem[]>
+  /** The models a card can run — the composer's model picker. claude enumerates
+   *  live via the SDK (`query.supportedModels()`); codex returns a maintained
+   *  static list. Empty if the session isn't registered yet. */
+  listModels(cardId: string): Promise<ModelChoice[]>
+  /** Switch a card's model on its live session — claude `query.setModel` (no
+   *  restart), codex applies it to the next turn. Persist the choice on the
+   *  card record separately so it survives a relaunch. */
+  setCardModel(cardId: string, model: string): void
   /** The role skills a card can invoke — the composer's `/` picker. Names are
    *  CLI-agnostic; the renderer prefixes each per the card's CLI. */
   listSkills(): Promise<{ name: string; description: string }[]>

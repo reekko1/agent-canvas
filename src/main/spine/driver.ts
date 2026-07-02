@@ -1,4 +1,4 @@
-import type { CardEvent, TranscriptItem } from '../../shared/types'
+import type { CardEvent, ModelChoice, TranscriptItem } from '../../shared/types'
 
 /** Single-quote a string for the POSIX shell. Used by both drivers' spawn
  *  commands (codex's `$SHELL -lc`) — lives here in the CLI seam because launch
@@ -26,6 +26,9 @@ export interface SessionSpec {
   folder: string
   resume?: string
   initialPrompt?: string
+  /** Selected model id (from the persisted `CardRecord.model`). Absent = the
+   *  CLI's default. claude → `query` `options.model`; codex → `exec -m`. */
+  model?: string
 }
 
 /** Whether `AgentSession.send` delivered a message into the live turn
@@ -53,6 +56,13 @@ export interface AgentSession {
    *  safe — codex persists its transcript incrementally, so a killed turn
    *  resumes with zero redone work). */
   interrupt(): Promise<void>
+  /** Switch the session's model. claude: `query.setModel` — live, no restart.
+   *  codex: store it for the next `exec` turn (turn-batched, so it takes effect
+   *  on the following turn). */
+  setModel(model: string): void
+  /** The models this session can run — claude enumerates live via the SDK,
+   *  codex returns its maintained static list. */
+  supportedModels(): Promise<ModelChoice[]>
   /** End the session for good (the card's ✕ path). Idempotent. */
   kill(): void
 }

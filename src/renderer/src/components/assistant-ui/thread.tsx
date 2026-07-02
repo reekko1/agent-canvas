@@ -22,7 +22,7 @@ import {
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { DirectiveText } from "@/components/assistant-ui/directive-text";
 import { LexicalComposerInput } from "@assistant-ui/react-lexical";
-import { CardComposerTriggers, DirectiveChip } from "@/cards/composerTriggers";
+import { CardComposerTriggers, CardModelSelector, DirectiveChip } from "@/cards/composerTriggers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -228,7 +228,10 @@ const Composer: FC = () => {
 const ComposerAction: FC = () => {
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
-      <ComposerAddAttachment />
+      <div className="flex items-center gap-1">
+        <ComposerAddAttachment />
+        <CardModelSelector />
+      </div>
       <div className="flex items-center gap-1.5">
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>

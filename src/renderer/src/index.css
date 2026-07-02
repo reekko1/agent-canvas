@@ -661,3 +661,31 @@
   pointer-events: none;
   color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
 }
+
+/* ============================================================
+   Self-hosted text shimmer for the conversation "Initializing …"
+   state. tw-shimmer's `@utility shimmer` isn't registered by our
+   Tailwind entry (only its vars leak in), and its relative-color
+   gradient is fragile — this is a plain moving-gradient clip that
+   works in any Chromium. Base = muted-foreground, sweep = foreground.
+   ============================================================ */
+@keyframes canvas-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.canvas-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 42%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 58%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: canvas-shimmer 2.2s linear infinite;
+}

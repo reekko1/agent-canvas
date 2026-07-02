@@ -5,7 +5,7 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from '@assistant-ui/react'
-import type { CardStatus, CliKind, TranscriptItem } from '@shared/types'
+import { CLI_LABEL, type CardStatus, type CliKind, type ModelChoice, type TranscriptItem } from '@shared/types'
 import { Thread } from '@/components/assistant-ui/thread'
 import { CardChatContext, stripDirectives } from './composerTriggers'
 
@@ -103,13 +103,38 @@ export function TranscriptView({
   status,
   folder,
   cli,
+  model,
+  onModelChange,
 }: {
   cardId: string
   status: CardStatus
   folder: string
   cli: CliKind
+  model?: string
+  onModelChange?: (model: string) => void
 }) {
   const [items, setItems] = useState<TranscriptItem[]>([])
+  // The model list doubles as the session-readiness probe: claude only answers
+  // `supportedModels()` once its SDK session has initialized. `null` = the
+  // session is still coming up. Feeds both the init shimmer and the picker.
+  const [models, setModels] = useState<ModelChoice[] | null>(null)
+
+  useEffect(() => {
+    setModels(null)
+    let alive = true
+    const load = (tries: number): void => {
+      void window.canvas.listModels(cardId).then((m) => {
+        if (!alive) return
+        if (m.length) setModels(m)
+        else if (tries > 0) setTimeout(() => load(tries - 1), 800) // session still initializing
+        else setModels([]) // gave up — no session / no models
+      })
+    }
+    load(4)
+    return () => {
+      alive = false
+    }
+  }, [cardId])
 
   useEffect(() => {
     let loaded = false
@@ -147,11 +172,23 @@ export function TranscriptView({
     },
   })
 
+  // A fresh card whose session is still coming up (no history to show yet) gets
+  // a full-surface init shimmer instead of an empty thread — so the whole
+  // conversation UI reads as "starting", not a bare composer that pops a picker.
+  // A card WITH transcript history skips it (its history paints immediately).
+  const initializing = models === null && items.length === 0
+
   return (
-    <CardChatContext.Provider value={{ cli, folder }}>
-      <AssistantRuntimeProvider runtime={runtime}>
-        <Thread />
-      </AssistantRuntimeProvider>
+    <CardChatContext.Provider value={{ cardId, cli, folder, model, onModelChange, models }}>
+      {initializing ? (
+        <div className="flex h-full flex-1 items-center justify-center bg-background">
+          <p className="canvas-shimmer text-sm font-medium">Initializing {CLI_LABEL[cli]}…</p>
+        </div>
+      ) : (
+        <AssistantRuntimeProvider runtime={runtime}>
+          <Thread />
+        </AssistantRuntimeProvider>
+      )}
     </CardChatContext.Provider>
   )
 }

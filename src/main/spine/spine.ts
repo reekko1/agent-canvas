@@ -9,7 +9,7 @@ import type { AgentSession, CliDriver, McpStageOpts, SendOutcome, SessionEvent }
 import { TranscriptStore } from './transcripts'
 import { RemoteServer } from '../remote/remoteServer'
 import { PushService } from '../remote/push'
-import type { CardEvent, CliKind, TranscriptItem } from '../../shared/types'
+import type { CardEvent, CliKind, ModelChoice, TranscriptItem } from '../../shared/types'
 
 // DELIBERATELY ISOLATED from the shipping Swift app: own config dir. The two
 // canvases can run side by side until cutover, when this becomes ~/.agentcanvas.
@@ -194,7 +194,7 @@ export class Spine {
   ensureAgent(
     cardId: string,
     folder: string,
-    opts: { cli?: CliKind; initialPrompt?: string; resume?: string } = {},
+    opts: { cli?: CliKind; initialPrompt?: string; resume?: string; model?: string } = {},
   ): void {
     if (this.sessions.has(cardId)) return
     const cli = opts.cli ?? 'claude'
@@ -203,7 +203,7 @@ export class Spine {
     // record it in the transcript here so both drivers show it uniformly.
     if (opts.initialPrompt) this.recordUserItem(cardId, opts.initialPrompt)
     const session = this.cardDriver(cardId).start(
-      { cardId, folder, resume: opts.resume, initialPrompt: opts.initialPrompt },
+      { cardId, folder, resume: opts.resume, initialPrompt: opts.initialPrompt, model: opts.model },
       {
         onEvent: (ev) => this.handleSessionEvent(cardId, ev),
         onExit: (reason, detail) => this.handleSessionExit(cardId, reason, detail),
@@ -232,6 +232,19 @@ export class Spine {
   /** Stop an agent card's in-flight turn without ending the session. */
   interruptAgent(cardId: string): void {
     void this.sessions.get(cardId)?.interrupt()
+  }
+
+  /** Switch a card's model on its live session (claude: immediate; codex: next
+   *  turn). No-op if the session isn't registered. Persisting the choice on the
+   *  CardRecord is the renderer's job — this only touches the live session. */
+  setAgentModel(cardId: string, model: string): void {
+    this.sessions.get(cardId)?.setModel(model)
+  }
+
+  /** The models a card can run (driver-resolved: claude live, codex static).
+   *  Empty if the card has no registered session yet. */
+  async listModels(cardId: string): Promise<ModelChoice[]> {
+    return (await this.sessions.get(cardId)?.supportedModels()) ?? []
   }
 
   /** End a card's session for good (the ✕ path) and drop its transcript.

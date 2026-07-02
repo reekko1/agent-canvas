@@ -185,7 +185,14 @@ export function CardNode({
           // terminal's scrollback, so there's no reason to keep it mounted).
           !stacked && (
             <div className="flex h-full min-h-0 flex-col">
-              <TranscriptView cardId={id} status={meta.status} folder={folder} cli={data.cli ?? 'claude'} />
+              <TranscriptView
+                cardId={id}
+                status={meta.status}
+                folder={folder}
+                cli={data.cli ?? 'claude'}
+                model={data.model}
+                onModelChange={data.onModelChange}
+              />
             </div>
           )
         )}

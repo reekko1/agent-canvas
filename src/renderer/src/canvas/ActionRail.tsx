@@ -3,10 +3,7 @@ import { Bot, Globe, Smartphone, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDismiss } from '@/hooks/use-dismiss'
-import type { CardKind, CliKind } from '@shared/types'
-
-/** Display label per CLI for the new-agent menu. */
-const CLI_LABEL: Record<CliKind, string> = { claude: 'Claude Code', codex: 'Codex' }
+import { CLI_LABEL, type CardKind, type CliKind } from '@shared/types'
 
 /// The floating left rail: spawn a new agent / terminal / browser into the
 /// active canvas, plus the remote-access entry. Spawn buttons are disabled when

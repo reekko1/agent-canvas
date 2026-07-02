@@ -195,6 +195,15 @@ export function Canvas() {
     [proj.projects, proj.deleteProject, isBrowserCard],
   )
 
+  // Model pick from a card's composer: persist it on the node (survives relaunch,
+  // re-applied on the next session start) AND live-switch the running session.
+  const changeCardModel = useCallback((cardId: string, model: string): void => {
+    setNodes((ns) =>
+      ns.map((n) => (n.id === cardId && n.type === 'card' ? { ...n, data: { ...n.data, model } } : n)),
+    )
+    window.canvas.setCardModel(cardId, model)
+  }, [])
+
   const makeCard = useCallback(
     (
       cardId: string,
@@ -204,6 +213,7 @@ export function Canvas() {
       url?: string,
       role?: AgentRole,
       cli?: CliKind,
+      model?: string,
     ): CanvasNode => ({
       id: cardId,
       type: 'card',
@@ -213,20 +223,22 @@ export function Canvas() {
         name,
         role,
         cli,
+        model,
         url,
         meta: { status: 'idle', statusSince: Date.now() },
         onClose: onCloseCard,
         onPromote: promoteCard,
         onNavigate: navigateCard,
+        onModelChange: (m: string) => changeCardModel(cardId, m),
       },
     }),
-    [onCloseCard, promoteCard, navigateCard],
+    [onCloseCard, promoteCard, navigateCard, changeCardModel],
   )
 
   const restoreItem = useCallback(
     (c: CardRecord): CanvasNode | null => {
       if (!c.folder) return null
-      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url, c.role, c.cli)
+      const node = makeCard(c.id, c.folder, c.kind, c.name, c.url, c.role, c.cli, c.model)
       // Restore a browser's ownership link + reason so request_browser resolves
       // the same browser after a restart instead of spawning an orphaned second one.
       node.data.ownerCardId = c.ownerCardId

@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline'
 import { CANVAS_SKILLS } from '../mastermind/roleSkills'
 import { BASELINE_SUPERVISION, materializeSkill } from './instructions'
 import { CodexEventMapper } from './codexEvents'
+import type { ModelChoice } from '../../shared/types'
 import type {
   AgentSession,
   CliDriver,
@@ -21,6 +22,16 @@ import type {
 /// requires to install it. Ported from the retired codexAdapter.
 const CODEX_MARKET = 'canvas'
 const CODEX_PLUGIN = 'canvas-skills'
+
+/// Codex exposes no runtime model enumeration (`codex exec -m` only *accepts* a
+/// string; there's no list command), so its picker is this maintained list.
+/// ponytail: tracks the installed codex version — refresh when codex ships new
+/// model tiers (`codex` interactive `/model` shows the current set).
+const CODEX_MODELS: ModelChoice[] = [
+  { id: 'gpt-5.5', name: 'gpt-5.5', description: 'Frontier model for complex coding, research, and real-world work.' },
+  { id: 'gpt-5.4', name: 'gpt-5.4', description: 'Strong model for everyday coding.' },
+  { id: 'gpt-5.4-mini', name: 'gpt-5.4-mini', description: 'Small, fast, cost-efficient model for simpler coding tasks.' },
+]
 
 /// Remove every `[mcp_servers.*]` table from an existing config.toml, leaving
 /// foreign tables (the plugin CLI's `[marketplaces]`/`[plugins]`) untouched —
@@ -205,6 +216,7 @@ export class CodexDriver implements CliDriver {
     const shell = process.env.SHELL ?? '/bin/zsh'
 
     let sessionId = spec.resume
+    let model = spec.model // mutable: setModel() applies to the NEXT turn (codex is turn-batched)
     let running = false
     let disposed = false
     let interruptedByUs = false
@@ -218,6 +230,7 @@ export class CodexDriver implements CliDriver {
       // `codex exec` dropped the `--ask-for-approval` flag (0.136.0); the config
       // override is the exec-mode equivalent. ponytail: -c over flag because the flag is gone.
       const args = ['exec', '--json', '--sandbox', 'workspace-write', '-c', 'approval_policy="never"']
+      if (model) args.push('-m', model)
       if (sessionId) args.push('resume', sessionId)
       // The prompt travels over stdin (`-`), never interpolated into the
       // shell command — no quoting concern for model/user-authored text.
@@ -309,6 +322,12 @@ export class CodexDriver implements CliDriver {
         if (!running || !child) return
         interruptedByUs = true
         child.kill('SIGKILL')
+      },
+      setModel(m: string): void {
+        model = m // applies to the next `exec` turn
+      },
+      async supportedModels() {
+        return CODEX_MODELS
       },
       kill(): void {
         disposed = true

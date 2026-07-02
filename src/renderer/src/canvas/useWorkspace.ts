@@ -71,6 +71,7 @@ export function useWorkspace({
               name: n.data.name,
               role: n.data.role,
               cli: n.data.cli,
+              model: n.data.model,
               url: n.data.url,
               ownerCardId: n.data.ownerCardId,
               reason: n.data.reason,

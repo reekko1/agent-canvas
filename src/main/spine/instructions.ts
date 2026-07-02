@@ -36,9 +36,9 @@ export interface CanvasSkill {
   body: string
 }
 
-/** Plugin manifest identity. The name namespaces every skill (`/canvas-skills:…`)
- *  and must stay stable so reattached sessions resolve the same plugin. */
-export const PLUGIN_NAME = 'canvas-skills'
+/** Plugin manifest version. The plugin NAME is the shared `SKILL_NAMESPACE`
+ *  (`@shared/types`) — single-sourced there because the renderer's composer
+ *  builds skill-invocation prefixes from the same string. */
 export const PLUGIN_VERSION = '0.1.0'
 
 /** Write one skill as `<skillsRoot>/<name>/SKILL.md` — the one SKILL.md

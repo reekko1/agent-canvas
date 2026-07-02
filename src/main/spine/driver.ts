@@ -1,11 +1,5 @@
+import { randomUUID } from 'node:crypto'
 import type { CardEvent, ModelChoice, TranscriptItem } from '../../shared/types'
-
-/** Single-quote a string for the POSIX shell. Used by both drivers' spawn
- *  commands (codex's `$SHELL -lc`) — lives here in the CLI seam because launch
- *  strings are the seam's output. */
-export function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
 
 /** Options for staging one agent-facing MCP server (see `stageMcp`). */
 export interface McpStageOpts {
@@ -122,4 +116,65 @@ export interface CliDriver {
    *  synchronously — spawn/auth/resume failures surface via `onExit('error')`
    *  so the spine can react uniformly. */
   start(spec: SessionSpec, cb: SessionCallbacks): AgentSession
+}
+
+// ── Shared SessionEvent vocabulary ──────────────────────────────────────────
+// The load-bearing event shapes every driver must emit identically — the
+// renderer's CardEvent reducer and the transcript key on these exact field
+// combinations (session start clears the plan; a done turn clears the task
+// line and carries the reply). A new driver/mapper composes these instead of
+// reverse-engineering its siblings' literals.
+
+/** Monotonic per-session transcript-item ids (`assistant-1`, `tool-2`, …) —
+ *  construct one per mapper instance so ids never collide within a session. */
+export function itemIdSeq(): (prefix: string) => string {
+  let seq = 0
+  return (prefix) => `${prefix}-${++seq}`
+}
+
+/** Flatten to one line and clip — the house style for details/summaries. */
+export function clip(s: string, n: number): string {
+  const flat = s.replace(/\n/g, ' ').trim()
+  return flat.length > n ? flat.slice(0, n) + '…' : flat
+}
+
+/** The FIRST session-start announcement (later re-inits/resume turns must stay
+ *  silent — the mapper's own `started` latch). Deliberately carries no
+ *  `status`: a card already defaults to idle, and asserting it here would
+ *  clobber the send-time `running` (this arrives async, after `send()`'s
+ *  synchronous flip — the idle-flash race). */
+export function sessionStarted(card: Pick<CardEvent, 'model' | 'permissionMode' | 'sessionId'>): SessionEvent {
+  return {
+    card: { detail: 'Session started', resetSubagents: true, todoChange: { kind: 'clear' }, ...card },
+  }
+}
+
+/** A turn finished cleanly: `done` + clipped summary + cleared task line, the
+ *  full reply captured for the orchestrator, and the turn-hairline item. */
+export function turnDone(id: string, reply: string, durationMs?: number): SessionEvent {
+  const summary = clip(reply, 140)
+  return {
+    card: { status: 'done', detail: summary || 'Finished — waiting for you', clearTask: true, summary, resetSubagents: true },
+    reply: reply || undefined,
+    item: { id, ts: Date.now(), kind: 'turn', text: summary || 'Turn complete', ok: true, durationMs },
+  }
+}
+
+/** A turn that ended abnormally. `stalled` = a limit/silence the mastermind
+ *  can nudge past; `error` = a hard failure. */
+export function turnFailed(id: string, status: 'stalled' | 'error', detail: string, durationMs?: number): SessionEvent {
+  return {
+    card: { status, detail, noteworthy: true },
+    item: { id, ts: Date.now(), kind: 'turn', text: detail, ok: false, durationMs },
+  }
+}
+
+/** A deliberate `interrupt()` closing its turn — an idle card and a plain
+ *  system note, never an error. Each driver latches its own interrupt and
+ *  swallows the CLI's abnormal-end report in favor of this. */
+export function interrupted(): SessionEvent {
+  return {
+    card: { status: 'idle', detail: 'Interrupted' },
+    item: { id: randomUUID(), ts: Date.now(), kind: 'system', text: 'Interrupted' },
+  }
 }

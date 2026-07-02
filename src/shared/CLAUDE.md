@@ -23,7 +23,11 @@ types and pure functions. Types are erased at build; helpers must run anywhere.
     MCP/skill staging, event mapping — see `spine/CLAUDE.md`). Threaded
     through `CardRecord.cli`, `RemoteState.canvases[].cli`, the `spawnAgent`
     command payload, and `CanvasApi.startAgent`/`availableClis()`. Absent =
-    `claude`.
+    `claude`. Beside it: `SKILL_NAMESPACE` + `CLI_SKILL_PREFIX` — the role-skill
+    plugin namespace and each CLI's native skill-invocation prefix, read by BOTH
+    the drivers' `skillRef()` (main) and the composer's `/` picker (renderer),
+    so the two sides can't drift and a new CLI compile-breaks until it declares
+    its syntax.
   - `CardStatus` — the agent/shell lifecycle states (`idle` → `running` →
     `waiting`/`done`/`stalled`/`blocked`/`error`).
   - `CardEvent` + `TodoChange`/`AgentTodo` — one semantic update extracted from a

@@ -1,17 +1,18 @@
-import { randomUUID } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { query, type McpHttpServerConfig, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { CLI_SKILL_PREFIX, SKILL_NAMESPACE } from '../../shared/types'
 import { CANVAS_SKILLS } from '../mastermind/roleSkills'
-import { BASELINE_SUPERVISION, PLUGIN_NAME, PLUGIN_VERSION, materializeSkill } from './instructions'
+import { BASELINE_SUPERVISION, PLUGIN_VERSION, materializeSkill } from './instructions'
 import { ClaudeEventMapper } from './claudeEvents'
-import type {
-  AgentSession,
-  CliDriver,
-  McpStageOpts,
-  SendOutcome,
-  SessionCallbacks,
-  SessionSpec,
+import {
+  interrupted,
+  type AgentSession,
+  type CliDriver,
+  type McpStageOpts,
+  type SendOutcome,
+  type SessionCallbacks,
+  type SessionSpec,
 } from './driver'
 
 // Subscription auth: dropped once at module load (mirrors orchestrator.ts) —
@@ -46,14 +47,14 @@ export class ClaudeDriver implements CliDriver {
    *  `plugins: [{ type: 'local', path }]` entry. The always-on baseline no
    *  longer needs a file — it rides `systemPrompt.append` directly. */
   stageInstructions(): void {
-    const pluginDir = join(this.dir, PLUGIN_NAME)
+    const pluginDir = join(this.dir, SKILL_NAMESPACE)
     rmSync(pluginDir, { recursive: true, force: true })
     mkdirSync(join(pluginDir, '.claude-plugin'), { recursive: true })
     writeFileSync(
       join(pluginDir, '.claude-plugin', 'plugin.json'),
       JSON.stringify(
         {
-          name: PLUGIN_NAME,
+          name: SKILL_NAMESPACE,
           version: PLUGIN_VERSION,
           description: 'Agent Canvas Mastermind role skills, equipped into every supervised agent card.',
         },
@@ -73,7 +74,7 @@ export class ClaudeDriver implements CliDriver {
   }
 
   skillRef(name: string): string {
-    return `/${PLUGIN_NAME}:${name}`
+    return CLI_SKILL_PREFIX.claude + name
   }
 
   start(spec: SessionSpec, cb: SessionCallbacks): AgentSession {
@@ -152,10 +153,7 @@ export class ClaudeDriver implements CliDriver {
           // system note instead of letting the mapper report it as `error`.
           if (m.type === 'result' && interruptedFlag) {
             interruptedFlag = false
-            cb.onEvent({
-              card: { status: 'idle', detail: 'Interrupted' },
-              item: { id: randomUUID(), ts: Date.now(), kind: 'system', text: 'Interrupted' },
-            })
+            cb.onEvent(interrupted())
             continue
           }
           for (const ev of mapper.map(m)) cb.onEvent(ev)

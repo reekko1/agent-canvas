@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { unstable_useMentionAdapter, type Unstable_Mention } from '@assistant-ui/react'
 import type { DirectiveChipProps } from '@assistant-ui/react-lexical'
 import { FileIcon, SparklesIcon } from 'lucide-react'
-import type { CliKind, ModelChoice } from '@shared/types'
+import { CLI_SKILL_PREFIX, type CliKind, type ModelChoice } from '@shared/types'
 import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
 import {
   ModelSelectorContent,
@@ -28,12 +28,6 @@ export const CardChatContext = createContext<{
   models: ModelChoice[] | null
 } | null>(null)
 
-// Skill invocation prefix per CLI — mirrors each driver's skillRef():
-// claude `/canvas-skills:<name>`, codex `$canvas-skills:<name>`.
-// ponytail: the 'canvas-skills' namespace is duplicated from spine/instructions.ts
-// PLUGIN_NAME (main-only); a shared constant if a third CLI ever needs it.
-const skillPrefix = (cli: CliKind): string => (cli === 'codex' ? '$canvas-skills:' : '/canvas-skills:')
-
 /// The composer's `/` (skills) + `@` (repo files) pickers. Both use the default
 /// directive formatter — insertion drops a `:type[label]{name=id}` directive that
 /// DirectiveText renders as a chip; TranscriptView's onNew rewrites each directive
@@ -56,7 +50,7 @@ export function CardComposerTriggers() {
   const skillItems = useMemo<Unstable_Mention[]>(
     () =>
       skills.map((s) => ({
-        id: `${skillPrefix(cli)}${s.name}`, // the clean invocation the CLI receives
+        id: `${CLI_SKILL_PREFIX[cli]}${s.name}`, // the clean invocation the CLI receives (same record the drivers' skillRef() reads)
         type: 'skill',
         label: s.name,
         description: s.description,

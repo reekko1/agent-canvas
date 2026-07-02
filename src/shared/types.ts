@@ -219,6 +219,18 @@ export type CliKind = (typeof CLI_KINDS)[number]
 /// …>`, so adding a CLI compile-breaks here until it's named.
 export const CLI_LABEL: Record<CliKind, string> = { claude: 'Claude Code', codex: 'Codex' }
 
+/// The plugin namespace both drivers stage the role-skill library under, and
+/// each CLI's native skill-invocation prefix (`<prefix><skill-name>`). Shared —
+/// not spine-internal — because the renderer's composer builds invocations too
+/// (`composerTriggers`); a `Record<CliKind, …>`, so a new CLI compile-breaks
+/// here until it declares its syntax, and each driver's `skillRef()` reads its
+/// own entry so the two sides can't drift.
+export const SKILL_NAMESPACE = 'canvas-skills'
+export const CLI_SKILL_PREFIX: Record<CliKind, string> = {
+  claude: `/${SKILL_NAMESPACE}:`,
+  codex: `$${SKILL_NAMESPACE}:`,
+}
+
 /// An agent card's role in the Mastermind org (MASTERMIND.md). `worker` is the
 /// default; `planner` writes the plan, `lead` decomposes the plan into issues and
 /// coordinates. (The autonomous head is NOT a card role — the idea tournament runs

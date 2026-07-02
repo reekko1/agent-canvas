@@ -1,4 +1,4 @@
-import type { SessionEvent } from './driver'
+import { clip, itemIdSeq, sessionStarted, turnDone, turnFailed, type SessionEvent } from './driver'
 
 /// Pure(-ish) mapping from one parsed line of `codex exec --json` JSONL to
 /// zero or more SessionEvents. Schema facts about codex's wire format live
@@ -10,7 +10,7 @@ import type { SessionEvent } from './driver'
 /// (turn.completed carries only usage, not the text) and each command's
 /// started-detail so a later exit code can report it correctly.
 export class CodexEventMapper {
-  private itemSeq = 0
+  private nextItemId = itemIdSeq()
   private lastAgentMessage = ''
   /** Wall-clock start of the current turn — codex reports no duration (nor USD
    *  cost), so we time it ourselves for the turn hairline's `· Ns` (parity with
@@ -20,10 +20,6 @@ export class CodexEventMapper {
    *  — but only the first is a real session start; resumes must stay silent, or
    *  the transcript shows "Session started" (and a plan-clearing reset) per turn. */
   private started = false
-
-  private nextItemId(prefix: string): string {
-    return `${prefix}-${++this.itemSeq}`
-  }
 
   /** Map one parsed JSONL line. `line` is untyped — codex's `--json` schema
    *  isn't part of our type surface, so every field access is guarded. */
@@ -56,19 +52,7 @@ export class CodexEventMapper {
     if (this.started) return []
     this.started = true
     const threadId = typeof line.thread_id === 'string' ? line.thread_id : undefined
-    return [
-      {
-        card: {
-          status: 'idle',
-          detail: 'Session started',
-          model: 'codex',
-          permissionMode: 'unattended',
-          sessionId: threadId,
-          resetSubagents: true,
-          todoChange: { kind: 'clear' },
-        },
-      },
-    ]
+    return [sessionStarted({ model: 'codex', permissionMode: 'unattended', sessionId: threadId })]
   }
 
   private mapItemStarted(line: Record<string, unknown>): SessionEvent[] {
@@ -131,31 +115,13 @@ export class CodexEventMapper {
   }
 
   private mapTurnCompleted(line: Record<string, unknown>): SessionEvent[] {
-    const summary = clip(this.lastAgentMessage, 140)
     const durationMs = this.turnStartTs ? Date.now() - this.turnStartTs : undefined
-    return [
-      {
-        card: { status: 'done', detail: summary || 'Finished — waiting for you', clearTask: true, summary, resetSubagents: true },
-        reply: this.lastAgentMessage || undefined,
-        item: { id: this.nextItemId('turn'), ts: Date.now(), kind: 'turn', text: 'Turn complete', ok: true, durationMs },
-      },
-    ]
+    return [turnDone(this.nextItemId('turn'), this.lastAgentMessage, durationMs)]
   }
 
   private mapTurnFailed(line: Record<string, unknown>): SessionEvent[] {
     const message =
       typeof line.message === 'string' ? line.message : typeof line.error === 'string' ? line.error : 'unknown'
-    const detail = `Turn failed: ${clip(message, 100)}`
-    return [
-      {
-        card: { status: 'error', detail, noteworthy: true },
-        item: { id: this.nextItemId('turn'), ts: Date.now(), kind: 'turn', text: detail, ok: false },
-      },
-    ]
+    return [turnFailed(this.nextItemId('turn'), 'error', `Turn failed: ${clip(message, 100)}`)]
   }
-}
-
-function clip(s: string, n: number): string {
-  const flat = s.replace(/\n/g, ' ').trim()
-  return flat.length > n ? flat.slice(0, n) + '…' : flat
 }

@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { SessionEvent } from './driver'
+import { clip, itemIdSeq, sessionStarted, turnDone, turnFailed, type SessionEvent } from './driver'
 
 /// Pure(-ish) mapping from one Agent SDK stream message to zero or more
 /// SessionEvents. Stateful ONLY in the sense that streaming text and pending
@@ -17,7 +17,7 @@ import type { SessionEvent } from './driver'
 /// (control-plane messages, hook echoes, etc.) and most of it has no bearing
 /// on card status or the transcript.
 export class ClaudeEventMapper {
-  private itemSeq = 0
+  private nextItemId = itemIdSeq()
   /** The transcript item id currently accumulating streamed text, and its
    *  text so far — reset when the block closes. */
   private streamItemId: string | null = null
@@ -36,10 +36,6 @@ export class ClaudeEventMapper {
    *  mode; only the first is a real session start. Later ones must stay silent,
    *  or the transcript shows "Session started" (and an idle reset) per turn. */
   private started = false
-
-  private nextItemId(prefix: string): string {
-    return `${prefix}-${++this.itemSeq}`
-  }
 
   /** Map one SDK message. Returns nothing for messages with no card/
    *  transcript bearing (the large control-plane slice of SDKMessage). */
@@ -70,19 +66,7 @@ export class ClaudeEventMapper {
         if (this.started) return []
         this.started = true
         return [
-          {
-            card: {
-              // No `status` here: a card already defaults to idle, and asserting
-              // it now would clobber the send-time `running` (init arrives async,
-              // after send()'s synchronous running → the idle-flash race).
-              detail: 'Session started',
-              model: shortModel(m.model),
-              permissionMode: m.permissionMode,
-              sessionId: m.session_id,
-              resetSubagents: true,
-              todoChange: { kind: 'clear' },
-            },
-          },
+          sessionStarted({ model: shortModel(m.model), permissionMode: m.permissionMode, sessionId: m.session_id }),
         ]
       }
       case 'task_started':
@@ -188,16 +172,8 @@ export class ClaudeEventMapper {
     this.streamedThisTurn = false
     this.streamItemId = null
     this.streamText = ''
-    const turn = { durationMs: m.duration_ms }
     if (m.subtype === 'success') {
-      const summary = clip(m.result, 140)
-      return [
-        {
-          card: { status: 'done', detail: summary || 'Finished — waiting for you', clearTask: true, summary, resetSubagents: true },
-          reply: m.result,
-          item: { id: this.nextItemId('turn'), ts: Date.now(), kind: 'turn', text: summary, ok: true, ...turn },
-        },
-      ]
+      return [turnDone(this.nextItemId('turn'), m.result, m.duration_ms)]
     }
     // error_max_turns / error_max_budget_usd / error_max_structured_output_retries
     // are limit-hit conditions the mastermind should nudge past — treat as
@@ -205,13 +181,7 @@ export class ClaudeEventMapper {
     // deliberate interrupt(); claudeDriver intercepts that case itself
     // (its own interrupt latch) before this mapper ever sees the result.
     const stalled = m.subtype !== 'error_during_execution'
-    const detail = `Turn ended: ${m.subtype}`
-    return [
-      {
-        card: { status: stalled ? 'stalled' : 'error', detail, noteworthy: true },
-        item: { id: this.nextItemId('turn'), ts: Date.now(), kind: 'turn', text: detail, ok: false, ...turn },
-      },
-    ]
+    return [turnFailed(this.nextItemId('turn'), stalled ? 'stalled' : 'error', `Turn ended: ${m.subtype}`, m.duration_ms)]
   }
 }
 
@@ -263,9 +233,4 @@ function shortModel(id: unknown): string | undefined {
     }
   }
   return words.length ? words.join(' ') : undefined
-}
-
-function clip(s: string, n: number): string {
-  const flat = s.replace(/\n/g, ' ').trim()
-  return flat.length > n ? flat.slice(0, n) + '…' : flat
 }

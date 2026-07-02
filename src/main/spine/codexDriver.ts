@@ -7,21 +7,22 @@ import { createInterface } from 'node:readline'
 import { CANVAS_SKILLS } from '../mastermind/roleSkills'
 import { BASELINE_SUPERVISION, materializeSkill } from './instructions'
 import { CodexEventMapper } from './codexEvents'
-import type { ModelChoice } from '../../shared/types'
-import type {
-  AgentSession,
-  CliDriver,
-  McpStageOpts,
-  SendOutcome,
-  SessionCallbacks,
-  SessionSpec,
+import { CLI_SKILL_PREFIX, SKILL_NAMESPACE, type ModelChoice } from '../../shared/types'
+import {
+  interrupted,
+  type AgentSession,
+  type CliDriver,
+  type McpStageOpts,
+  type SendOutcome,
+  type SessionCallbacks,
+  type SessionSpec,
 } from './driver'
 
 /// The codex plugin + local-marketplace identifiers (see stageInstructions). One plugin
-/// bundles the shipped role skills; the marketplace is a thin local wrapper codex
-/// requires to install it. Ported from the retired codexAdapter.
+/// (named by the shared SKILL_NAMESPACE) bundles the shipped role skills; the marketplace
+/// is a thin local wrapper codex requires to install it. Ported from the retired codexAdapter.
 const CODEX_MARKET = 'canvas'
-const CODEX_PLUGIN = 'canvas-skills'
+const CODEX_PLUGIN = SKILL_NAMESPACE
 
 /// Codex exposes no runtime model enumeration (`codex exec -m` only *accepts* a
 /// string; there's no list command), so its picker is this maintained list.
@@ -206,7 +207,7 @@ export class CodexDriver implements CliDriver {
   /** Codex invokes a plugin skill as `$plugin:skill` — a literal `$` (the
    *  prompt travels over stdin, never shell-expanded). */
   skillRef(name: string): string {
-    return `$${CODEX_PLUGIN}:${name}`
+    return CLI_SKILL_PREFIX.codex + name
   }
 
   start(spec: SessionSpec, cb: SessionCallbacks): AgentSession {
@@ -265,10 +266,7 @@ export class CodexDriver implements CliDriver {
         child = null
         if (interruptedByUs) {
           interruptedByUs = false
-          cb.onEvent({
-            card: { status: 'idle', detail: 'Interrupted' },
-            item: { id: randomUUID(), ts: Date.now(), kind: 'system', text: 'Interrupted' },
-          })
+          cb.onEvent(interrupted())
         } else if (code !== 0 && code !== null) {
           cb.onEvent({
             card: { status: 'error', detail: `codex exited (${code})`, noteworthy: true },
